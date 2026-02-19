@@ -72,7 +72,6 @@ Transcript reports contain:
 | `LOG_LEVEL` | `INFO` | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |
 | `USERS` | _(none)_ | Web UI credentials, comma-separated `user:pass` pairs |
 | `PORT` | `2009` | App port (frontend + backend in single-port mode) |
-| `API_URL` | _(none)_ | Public URL when behind a reverse proxy (e.g. `https://app.example.com`) |
 
 ## Deployment
 
@@ -82,7 +81,6 @@ Deploys via Nixpacks (Coolify, Railway, etc.) or Docker. Single-port mode — on
 # Coolify / Nixpacks: configure these env vars
 PORT=2009
 USERS=admin:secret
-API_URL=https://your-domain.com   # set when behind a reverse proxy
 ```
 
 The `Procfile` runs `reflex run --env prod --single-port`. Only the `PORT` needs to be exposed.
