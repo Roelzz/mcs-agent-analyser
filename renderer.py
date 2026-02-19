@@ -454,7 +454,7 @@ def render_topic_graph(profile: BotProfile) -> str:
         edges = [(s, t, c) for s, t, c in edges if s in keep and t in keep]
         truncated = True
 
-    lines = ["## Topic Connection Graph\n", "```mermaid", "graph TD"]
+    lines = ["## Topic Connection Graph\n", "```mermaid", '%%{init: {"useMaxWidth": false}}%%', "graph TD"]
 
     if truncated:
         lines.append(f"    %% Diagram truncated to {max_nodes} most-connected nodes")
