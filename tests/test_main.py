@@ -2,9 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from models import BotProfile, ConversationTimeline, EventType
+from models import BotProfile, ConversationTimeline, EventType, TimelineEvent
 from parser import _sanitize_yaml, parse_dialog_json, parse_yaml, resolve_topic_name
-from renderer import render_components, render_event_log, render_gantt_chart, render_report, render_topic_graph, render_transcript_report
+from renderer import (
+    _topic_display,
+    render_components,
+    render_event_log,
+    render_gantt_chart,
+    render_mermaid_sequence,
+    render_report,
+    render_topic_graph,
+    render_transcript_report,
+)
 from timeline import build_timeline
 from transcript import parse_transcript_json
 
@@ -430,11 +439,14 @@ def test_transcript_report_renders():
     assert "### Event Log" in report
 
 
-@pytest.mark.parametrize("filename", [
-    "Rex_Bluebot_Dev_Teams.json",
-    "Rex_Bluebot_Prod_Teams.json",
-    "Rex_Bluebot_Stage_Teams.json",
-])
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "Rex_Bluebot_Dev_Teams.json",
+        "Rex_Bluebot_Prod_Teams.json",
+        "Rex_Bluebot_Stage_Teams.json",
+    ],
+)
 def test_transcript_full_pipeline(filename):
     """All transcripts should parse and render without error."""
     path = BASE_DIR / "Transcripts" / filename
@@ -442,3 +454,530 @@ def test_transcript_full_pipeline(filename):
     timeline = build_timeline(activities, {})
     report = render_transcript_report(path.stem, timeline, metadata)
     assert len(report) > 100
+
+
+# --- New EventType / DialogTracingInfo split tests ---
+
+
+def test_new_event_types_exist():
+    """New EventType enum values should be accessible."""
+    assert EventType.ACTION_HTTP_REQUEST == "ActionHttpRequest"
+    assert EventType.ACTION_QA == "ActionQA"
+    assert EventType.ACTION_TRIGGER_EVAL == "ActionTriggerEval"
+    assert EventType.ACTION_BEGIN_DIALOG == "ActionBeginDialog"
+    assert EventType.ACTION_SEND_ACTIVITY == "ActionSendActivity"
+
+
+def test_dialog_tracing_split_into_individual_events():
+    """DialogTracingInfo with 3 actions should produce 3 separate TimelineEvents."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DialogTracingInfo",
+            "from": {"role": "bot", "name": "TestBot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 1},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "actions": [
+                    {"topicId": "bot.topic.Main", "actionType": "HttpRequestAction", "exception": ""},
+                    {"topicId": "bot.topic.Main", "actionType": "BeginDialog", "exception": ""},
+                    {"topicId": "bot.topic.Main", "actionType": "SendActivity", "exception": ""},
+                ]
+            },
+        }
+    ]
+    timeline = build_timeline(activities, {"bot.topic.Main": "Main Topic"})
+
+    # Should produce 3 separate events, not 1 coalesced one
+    tracing_events = [
+        e
+        for e in timeline.events
+        if e.event_type
+        in (
+            EventType.ACTION_HTTP_REQUEST,
+            EventType.ACTION_BEGIN_DIALOG,
+            EventType.ACTION_SEND_ACTIVITY,
+            EventType.DIALOG_TRACING,
+        )
+    ]
+    assert len(tracing_events) == 3
+
+    types = [e.event_type for e in tracing_events]
+    assert EventType.ACTION_HTTP_REQUEST in types
+    assert EventType.ACTION_BEGIN_DIALOG in types
+    assert EventType.ACTION_SEND_ACTIVITY in types
+
+
+def test_dialog_tracing_summaries():
+    """Split actions should have action-specific summary text."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DialogTracingInfo",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 1},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "actions": [
+                    {"topicId": "bot.topic.Auth", "actionType": "HttpRequestAction", "exception": ""},
+                    {"topicId": "bot.topic.Auth", "actionType": "BeginDialog", "exception": ""},
+                    {"topicId": "bot.topic.Auth", "actionType": "ConditionGroup", "exception": ""},
+                ]
+            },
+        }
+    ]
+    timeline = build_timeline(activities, {"bot.topic.Auth": "Auth Flow"})
+
+    http_events = [e for e in timeline.events if e.event_type == EventType.ACTION_HTTP_REQUEST]
+    assert len(http_events) == 1
+    assert "HTTP call in Auth Flow" in http_events[0].summary
+
+    begin_events = [e for e in timeline.events if e.event_type == EventType.ACTION_BEGIN_DIALOG]
+    assert len(begin_events) == 1
+    assert "Call" in begin_events[0].summary and "Auth Flow" in begin_events[0].summary
+
+    eval_events = [e for e in timeline.events if e.event_type == EventType.ACTION_TRIGGER_EVAL]
+    assert len(eval_events) == 1
+    assert "Evaluate" in eval_events[0].summary
+
+
+def test_dialog_tracing_unmapped_falls_back():
+    """Unmapped action types should fall back to DIALOG_TRACING."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DialogTracingInfo",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 1},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "actions": [
+                    {"topicId": "bot.topic.X", "actionType": "ParseValue", "exception": ""},
+                ]
+            },
+        }
+    ]
+    timeline = build_timeline(activities, {})
+    fallback = [e for e in timeline.events if e.event_type == EventType.DIALOG_TRACING]
+    assert len(fallback) == 1
+    assert "ParseValue" in fallback[0].summary
+
+
+def test_sequence_diagram_new_participants():
+    """Sequence diagram should include Connectors/Evaluator participants when relevant events exist."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary='User: "test"', timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(
+                event_type=EventType.ACTION_HTTP_REQUEST,
+                summary="HTTP call in Main",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ACTION_TRIGGER_EVAL,
+                summary="Evaluate: Main",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: Hello", timestamp="2024-01-01T00:00:03Z"),
+        ],
+    )
+    output = render_mermaid_sequence(timeline)
+
+    assert "Connectors" in output
+    assert "Evaluator" in output
+    assert "AI->>Conn" in output
+    assert "Note over Eval" in output
+
+
+def test_sequence_diagram_skips_send_activity():
+    """ACTION_SEND_ACTIVITY should not produce any sequence diagram line."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary='User: "test"', timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(
+                event_type=EventType.ACTION_SEND_ACTIVITY,
+                summary="Send response in Main",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: Hi", timestamp="2024-01-01T00:00:02Z"),
+        ],
+    )
+    output = render_mermaid_sequence(timeline)
+
+    assert "Send response" not in output
+    assert "AI->>User" in output
+
+
+def test_gantt_handles_new_event_types():
+    """Gantt chart should render without crash for all new event types."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary='User: "test"', timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(
+                event_type=EventType.ACTION_HTTP_REQUEST,
+                summary="HTTP call in Main",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ACTION_QA,
+                summary="QA in Main",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ACTION_TRIGGER_EVAL,
+                summary="Evaluate: Main",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:03Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ACTION_BEGIN_DIALOG,
+                summary="Call → Sub",
+                topic_name="Sub",
+                timestamp="2024-01-01T00:00:04Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ACTION_SEND_ACTIVITY,
+                summary="Send response in Main",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:05Z",
+            ),
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: done", timestamp="2024-01-01T00:00:06Z"),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+
+    assert "gantt" in output
+    assert "Connectors" in output
+    assert "QA" in output
+    assert "Evaluator" in output
+
+
+def test_sequence_diagram_begin_dialog_auto_registers_participant():
+    """ACTION_BEGIN_DIALOG should auto-register the topic as a participant."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary='User: "test"', timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(
+                event_type=EventType.ACTION_BEGIN_DIALOG,
+                summary="Call → SubTopic",
+                topic_name="SubTopic",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    output = render_mermaid_sequence(timeline)
+    assert "AI->>SubTopic" in output
+
+
+# --- Topic display prefix tests ---
+
+
+def test_topic_display_helper():
+    """Topics get 'Topic - ' prefix, system actor names stay unchanged."""
+    assert _topic_display("Fallback") == "Topic - Fallback"
+    assert _topic_display("GenAIAnsGeneration") == "Topic - GenAIAnsGeneration"
+    # System actor IDs should return their ACTOR_NAMES value
+    assert _topic_display("User") == "User"
+    assert _topic_display("AI") == "Orchestrator"
+    assert _topic_display("KS") == "Knowledge Search"
+    assert _topic_display("Eval") == "Evaluator"
+
+
+def test_sequence_diagram_topics_prefixed():
+    """Topics show 'Topic - X' in sequence diagram, system actors don't."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "test"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Step triggered",
+                topic_name="Fallback",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ACTION_BEGIN_DIALOG,
+                summary="Call → GenAIAnsGeneration",
+                topic_name="GenAIAnsGeneration",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: Hello",
+                timestamp="2024-01-01T00:00:03Z",
+            ),
+        ],
+    )
+    output = render_mermaid_sequence(timeline)
+
+    # Topics should have prefix
+    assert "Topic - Fallback" in output
+    assert "Topic - GenAIAnsGeneration" in output
+    # System actors should NOT have prefix
+    assert "Topic - Orchestrator" not in output
+    assert "Topic - User" not in output
+
+
+def test_gantt_collapses_idle_gaps():
+    """Large idle gaps should be collapsed with an Idle marker."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.ACTION_SEND_ACTIVITY,
+                summary="Send response",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "hello"',
+                timestamp="2024-01-01T00:02:00Z",  # 120s gap
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: Hi there",
+                timestamp="2024-01-01T00:02:01Z",
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+
+    # Should have an Idle section with the original duration
+    assert "section Idle" in output
+    assert "Idle 2m 0.0s" in output
+
+    # Event bars (lines with :eN) should not have multi-minute durations
+    for line in output.split("\n"):
+        if ":e" in line and ":idle" not in line:
+            assert "2m" not in line, f"Event bar has un-collapsed duration: {line}"
+
+    # Total axis range should be small (< 5000ms)
+    end_positions = []
+    for line in output.split("\n"):
+        parts = line.strip().rsplit(",", 1)
+        if len(parts) == 2:
+            try:
+                end_positions.append(int(parts[-1].strip()))
+            except ValueError:
+                pass
+    assert end_positions, "No positions found in gantt output"
+    assert max(end_positions) < 5000, f"Axis range too large: {max(end_positions)}"
+
+
+def test_gantt_no_collapse_within_threshold():
+    """Gaps under 5 seconds should not be collapsed."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "test"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Step triggered",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:02Z",  # 2s gap
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: done",
+                timestamp="2024-01-01T00:00:04Z",  # 2s gap
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+
+    # No idle section should appear
+    assert "section Idle" not in output
+    assert ":idle" not in output
+
+    # Durations should reflect actual gaps
+    assert "2.0s" in output
+
+
+def test_gantt_topics_prefixed():
+    """Gantt sections show 'Topic - X' for topics, plain names for system actors."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "test"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Step triggered",
+                topic_name="Fallback",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ACTION_BEGIN_DIALOG,
+                summary="Call → Sub",
+                topic_name="SubTopic",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: done",
+                timestamp="2024-01-01T00:00:03Z",
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+
+    # Topic sections should have prefix
+    assert "section Topic - Fallback" in output
+    assert "section Topic - SubTopic" in output
+    # System actor sections should NOT have prefix
+    assert "section User" in output
+    assert "section Agent" in output
+    assert "Topic - User" not in output
+    assert "Topic - Agent" not in output
+
+
+def test_gantt_semantic_color_tags():
+    """Each event category should get the correct Mermaid tag for semantic coloring."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "test"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                summary="Plan received",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ACTION_HTTP_REQUEST,
+                summary="HTTP call in Main",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: Hello",
+                timestamp="2024-01-01T00:00:03Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ERROR,
+                summary="Something broke",
+                timestamp="2024-01-01T00:00:04Z",
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+
+    # User = active
+    assert ":active, e0," in output
+    # Orchestrator = default (no tag)
+    assert ":e1," in output
+    # HTTP = active, crit (tool call)
+    assert ":active, crit, e2," in output
+    # Bot/Agent = done
+    assert ":done, e3," in output
+    # Error = crit
+    assert ":crit, e4," in output
+    # Theme init present
+    assert "%%{init:" in output
+    assert "taskBkgColor" in output
+
+
+def test_gantt_has_legend():
+    """Gantt output should include a color legend table."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "test"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: Hi",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+
+    assert "| Color | Category |" in output
+    assert "| Blue | Orchestrator |" in output
+    assert "| Green | User |" in output
+    assert "| Purple | Agent |" in output
+    assert "| Orange | Tool Calls |" in output
+    assert "| Red | Errors |" in output
+    assert "| Gray | Idle |" in output
+
+
+def test_gantt_idle_gap_tagged():
+    """Idle gap markers should be tagged with done, crit for gray color."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.ACTION_SEND_ACTIVITY,
+                summary="Send response",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "hello"',
+                timestamp="2024-01-01T00:02:00Z",  # 120s gap
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: Hi there",
+                timestamp="2024-01-01T00:02:01Z",
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+
+    assert ":done, crit, idle" in output

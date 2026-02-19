@@ -2,6 +2,21 @@ from datetime import datetime, timezone
 
 from models import BotProfile, ConversationTimeline, EventType, TimelineEvent
 
+IDLE_THRESHOLD_MS = 5000  # gaps > 5s are collapsed
+IDLE_VISUAL_MS = 200  # visual width of collapsed gap
+
+ACTOR_NAMES: dict[str, str] = {
+    "User": "User",
+    "AI": "Orchestrator",
+    "Bot": "Agent",
+    "KS": "Knowledge Search",
+    "Conn": "Connectors",
+    "QA": "QA Engine",
+    "Eval": "Evaluator",
+    "Err": "Errors",
+    "Sys": "System",
+}
+
 
 def _format_duration(ms: float) -> str:
     """Format milliseconds to human-readable duration."""
@@ -24,13 +39,30 @@ def _pct(part: float, total: float) -> str:
 
 def _sanitize_mermaid(text: str) -> str:
     """Sanitize text for Mermaid diagram labels."""
-    # Remove or escape characters that break Mermaid syntax
-    text = text.replace('"', "'")
+    # Replace unicode symbols with ASCII-safe equivalents
+    text = text.replace("→", "to")
+    text = text.replace("—", "-")
+    text = text.replace("✓", "OK")
+    text = text.replace("✗", "FAIL")
+    text = text.replace("⚠", "WARN")
+    # Remove characters that are Mermaid syntax tokens
+    text = text.replace('"', "")
+    text = text.replace("'", "")
+    text = text.replace("%", "pct")
     text = text.replace("\n", " ")
     text = text.replace("\r", "")
     text = text.replace("#", "")
     text = text.replace(";", ",")
     text = text.replace(":", " -")
+    text = text.replace("[", "")
+    text = text.replace("]", "")
+    text = text.replace("(", "")
+    text = text.replace(")", "")
+    text = text.replace("{", "")
+    text = text.replace("}", "")
+    text = text.replace("|", "")
+    text = text.replace("<", "")
+    text = text.replace(">", "")
     return text[:80]
 
 
@@ -39,6 +71,14 @@ def _make_participant_id(name: str) -> str:
     # Remove spaces and special chars
     clean = "".join(c for c in name if c.isalnum() or c == "_")
     return clean or "Unknown"
+
+
+def _topic_display(name: str) -> str:
+    """Prefix topic names with 'Topic - ' to distinguish them from system actors."""
+    pid = _make_participant_id(name)
+    if pid in ACTOR_NAMES:
+        return ACTOR_NAMES[pid]
+    return f"Topic - {name}"
 
 
 def render_bot_profile(profile: BotProfile) -> str:
@@ -188,18 +228,41 @@ def render_mermaid_sequence(timeline: ConversationTimeline) -> str:
 
     # Collect unique participants from phases and events
     participants: dict[str, str] = {}  # id -> display name
-    participants["User"] = "User"
-    participants["AI"] = "AI Recognizer"
+    participants["User"] = ACTOR_NAMES["User"]
+    participants["AI"] = ACTOR_NAMES["AI"]
 
     for phase in timeline.phases:
         if phase.label in ks_topics:
             continue  # KnowledgeSource phases use KS participant
         pid = _make_participant_id(phase.label)
         if pid not in participants:
-            participants[pid] = phase.label
+            participants[pid] = _topic_display(phase.label)
 
     if has_ks:
-        participants["KS"] = "Knowledge Search"
+        participants["KS"] = ACTOR_NAMES["KS"]
+
+    # Conditional participants for new action event types
+    if any(e.event_type == EventType.ACTION_HTTP_REQUEST for e in timeline.events):
+        participants["Conn"] = ACTOR_NAMES["Conn"]
+    if any(e.event_type == EventType.ACTION_QA for e in timeline.events):
+        participants["QA"] = ACTOR_NAMES["QA"]
+    if any(e.event_type == EventType.ACTION_TRIGGER_EVAL for e in timeline.events):
+        participants["Eval"] = ACTOR_NAMES["Eval"]
+
+    # Pre-scan events for topic participants not yet registered
+    for event in timeline.events:
+        if event.event_type == EventType.STEP_TRIGGERED:
+            topic = event.topic_name or "Unknown"
+            if topic in ks_topics or "KnowledgeSource" in event.summary:
+                continue
+            pid = _make_participant_id(topic)
+            if pid not in participants:
+                participants[pid] = _topic_display(topic)
+        elif event.event_type == EventType.ACTION_BEGIN_DIALOG:
+            topic = event.topic_name or "Unknown"
+            pid = _make_participant_id(topic)
+            if pid not in participants:
+                participants[pid] = _topic_display(topic)
 
     # Declare participants
     for pid, display in participants.items():
@@ -222,7 +285,7 @@ def render_mermaid_sequence(timeline: ConversationTimeline) -> str:
             topic = event.topic_name or "Unknown"
             pid = _make_participant_id(topic)
             if pid not in participants:
-                participants[pid] = topic
+                participants[pid] = _topic_display(topic)
                 # We can't add participant mid-diagram in all renderers, but it works in most
             if "KnowledgeSource" in event.summary:
                 pid = "KS"
@@ -241,8 +304,8 @@ def render_mermaid_sequence(timeline: ConversationTimeline) -> str:
                 if phase.label == topic and phase.duration_ms > 0:
                     pct = _pct(phase.duration_ms, timeline.total_elapsed_ms)
                     dur = _format_duration(phase.duration_ms)
-                    state_icon = "✓" if phase.state == "completed" else "✗"
-                    lines.append(f"    Note over {pid}: {state_icon} {dur} ({pct})")
+                    state_icon = "OK" if phase.state == "completed" else "FAIL"
+                    lines.append(f"    Note over {pid}: {state_icon} {dur} ({pct.replace('%', 'pct')})")
                     break
             state_arrow = "-->>" if event.state == "failed" else "->>"
             lines.append(f"    {pid}{state_arrow}AI: {event.state or 'done'}")
@@ -251,8 +314,46 @@ def render_mermaid_sequence(timeline: ConversationTimeline) -> str:
             msg = _sanitize_mermaid(event.summary.replace("Bot: ", ""))
             lines.append(f"    AI->>User: {msg}")
 
+        elif event.event_type == EventType.ACTION_HTTP_REQUEST:
+            lines.append(f"    AI->>Conn: {_sanitize_mermaid(event.summary)}")
+
+        elif event.event_type == EventType.ACTION_QA:
+            lines.append(f"    AI->>QA: {_sanitize_mermaid(event.summary)}")
+
+        elif event.event_type == EventType.ACTION_TRIGGER_EVAL:
+            lines.append(f"    Note over Eval: {_sanitize_mermaid(event.summary)}")
+
+        elif event.event_type == EventType.ACTION_BEGIN_DIALOG:
+            topic = event.topic_name or "Unknown"
+            pid = _make_participant_id(topic)
+            if pid not in participants:
+                participants[pid] = _topic_display(topic)
+            lines.append(f"    AI->>{pid}: {_sanitize_mermaid(event.summary)}")
+
+        elif event.event_type == EventType.ACTION_SEND_ACTIVITY:
+            pass  # BOT_MESSAGE already covers responses
+
+        elif event.event_type == EventType.VARIABLE_ASSIGNMENT:
+            lines.append(f"    Note right of AI: {_sanitize_mermaid(event.summary)}")
+
+        elif event.event_type == EventType.DIALOG_REDIRECT:
+            lines.append(f"    AI->>AI: {_sanitize_mermaid(event.summary)}")
+
+        elif event.event_type == EventType.PLAN_FINISHED:
+            lines.append(f"    Note over AI: {_sanitize_mermaid(event.summary)}")
+
+        elif event.event_type == EventType.DIALOG_TRACING:
+            lines.append(f"    Note over AI: {_sanitize_mermaid(event.summary)}")
+
         elif event.event_type == EventType.ERROR:
-            lines.append(f"    Note over AI: ⚠ {_sanitize_mermaid(event.summary)}")
+            lines.append(f"    Note over AI: [!] {_sanitize_mermaid(event.summary)}")
+
+    # Deduplicate consecutive identical sequence lines
+    deduped: list[str] = []
+    for line in lines:
+        if not deduped or line != deduped[-1]:
+            deduped.append(line)
+    lines = deduped
 
     lines.append("```")
     lines.append("")
@@ -420,7 +521,7 @@ def _gantt_label(event: TimelineEvent) -> str:
     if event.event_type == EventType.USER_MESSAGE:
         return "User message"
     if event.event_type == EventType.BOT_MESSAGE:
-        return "Bot response"
+        return "Agent response"
     if event.event_type == EventType.PLAN_RECEIVED:
         return "Plan received"
     if event.event_type == EventType.PLAN_FINISHED:
@@ -433,6 +534,16 @@ def _gantt_label(event: TimelineEvent) -> str:
         return "Knowledge search"
     if event.event_type == EventType.ERROR:
         return f"Error: {event.summary[:40]}"
+    if event.event_type == EventType.ACTION_HTTP_REQUEST:
+        return f"HTTP: {event.topic_name or 'unknown'}"
+    if event.event_type == EventType.ACTION_QA:
+        return f"QA: {event.topic_name or 'unknown'}"
+    if event.event_type == EventType.ACTION_TRIGGER_EVAL:
+        return f"Eval: {event.topic_name or 'unknown'}"
+    if event.event_type == EventType.ACTION_BEGIN_DIALOG:
+        return f"Begin: {event.topic_name or 'unknown'}"
+    if event.event_type == EventType.ACTION_SEND_ACTIVITY:
+        return f"Send: {event.topic_name or 'unknown'}"
     if event.event_type == EventType.DIALOG_TRACING:
         return "Dialog trace"
     return event.summary[:40] or "Event"
@@ -441,18 +552,46 @@ def _gantt_label(event: TimelineEvent) -> str:
 def _gantt_section(event: TimelineEvent) -> str:
     """Determine Gantt section for an event."""
     if event.event_type == EventType.USER_MESSAGE:
-        return "User"
+        return ACTOR_NAMES["User"]
     if event.event_type == EventType.BOT_MESSAGE:
-        return "Bot"
+        return ACTOR_NAMES["Bot"]
     if event.event_type in (EventType.PLAN_RECEIVED, EventType.PLAN_RECEIVED_DEBUG, EventType.PLAN_FINISHED):
-        return "Orchestrator"
+        return ACTOR_NAMES["AI"]
     if event.event_type == EventType.KNOWLEDGE_SEARCH:
-        return "Knowledge"
+        return ACTOR_NAMES["KS"]
     if event.event_type == EventType.ERROR:
-        return "Errors"
+        return ACTOR_NAMES["Err"]
+    if event.event_type == EventType.ACTION_HTTP_REQUEST:
+        return ACTOR_NAMES["Conn"]
+    if event.event_type == EventType.ACTION_QA:
+        return ACTOR_NAMES["QA"]
+    if event.event_type == EventType.ACTION_TRIGGER_EVAL:
+        return ACTOR_NAMES["Eval"]
+    if event.event_type == EventType.ACTION_BEGIN_DIALOG:
+        return f"Topic - {event.topic_name}" if event.topic_name else ACTOR_NAMES["Sys"]
+    if event.event_type == EventType.ACTION_SEND_ACTIVITY:
+        return ACTOR_NAMES["Bot"]
     if event.topic_name:
-        return event.topic_name
-    return "System"
+        return f"Topic - {event.topic_name}"
+    return ACTOR_NAMES["Sys"]
+
+
+_GANTT_TAG_MAP: dict[EventType, str] = {
+    EventType.USER_MESSAGE: "active, ",
+    EventType.BOT_MESSAGE: "done, ",
+    EventType.ACTION_SEND_ACTIVITY: "done, ",
+    EventType.ACTION_HTTP_REQUEST: "active, crit, ",
+    EventType.ACTION_QA: "active, crit, ",
+    EventType.ACTION_TRIGGER_EVAL: "active, crit, ",
+    EventType.KNOWLEDGE_SEARCH: "active, crit, ",
+    EventType.ERROR: "crit, ",
+}
+
+
+def _gantt_tag(event: TimelineEvent) -> str:
+    if event.state == "failed" or event.event_type == EventType.ERROR:
+        return "crit, "
+    return _GANTT_TAG_MAP.get(event.event_type, "")
 
 
 def render_gantt_chart(timeline: ConversationTimeline) -> str:
@@ -472,39 +611,99 @@ def render_gantt_chart(timeline: ConversationTimeline) -> str:
 
     timed.sort(key=lambda x: x[0])
 
+    # Deduplicate: skip consecutive events with same label and timestamp
+    deduped: list[tuple[int, TimelineEvent]] = []
+    prev_key = ("", 0)
+    for epoch_ms, event in timed:
+        key = (_gantt_label(event), epoch_ms)
+        if key != prev_key:
+            deduped.append((epoch_ms, event))
+            prev_key = key
+    timed = deduped
+
+    if not timed:
+        return ""
+
+    # Normalize to elapsed time so axis starts at 00:00
+    epoch_offset = timed[0][0]
+
     lines = [
         "### Execution Gantt\n",
+        "| Color | Category |",
+        "| --- | --- |",
+        "| Blue | Orchestrator |",
+        "| Green | User |",
+        "| Purple | Agent |",
+        "| Orange | Tool Calls |",
+        "| Red | Errors |",
+        "| Gray | Idle |\n",
         "```mermaid",
+        "%%{init: {'theme':'base','themeVariables':{"
+        "'taskBkgColor':'#4a90d9','taskBorderColor':'#357abd','taskTextColor':'#fff',"
+        "'activeTaskBkgColor':'#2ecc71','activeTaskBorderColor':'#27ae60',"
+        "'doneTaskBkgColor':'#9b59b6','doneTaskBorderColor':'#8e44ad',"
+        "'critBkgColor':'#e74c3c','critBorderColor':'#c0392b',"
+        "'activeCritBkgColor':'#f39c12','activeCritBorderColor':'#e67e22',"
+        "'doneCritBkgColor':'#95a5a6','doneCritBorderColor':'#7f8c8d'}}}%%",
         "gantt",
         "    dateFormat x",
         "    axisFormat %M:%S",
-        f"    title {_sanitize_mermaid(timeline.bot_name)} — Execution Timeline",
+        f"    title {_sanitize_mermaid(timeline.bot_name)} - Execution Timeline",
     ]
 
     current_section = ""
     min_duration = 50  # ms minimum display width
 
-    for i, (epoch_ms, event) in enumerate(timed):
-        # Determine end time: next event's timestamp or +min_duration
-        if i + 1 < len(timed):
-            end_ms = timed[i + 1][0]
-            if end_ms - epoch_ms < min_duration:
-                end_ms = epoch_ms + min_duration
+    # Collapse idle gaps: compute cumulative adjustment per event
+    idle_adjustments: list[int] = [0]
+    idle_gaps: list[tuple[int, int]] = []  # (index, original_gap_ms)
+    for i in range(1, len(timed)):
+        gap = timed[i][0] - timed[i - 1][0]
+        prev_adj = idle_adjustments[-1]
+        if gap > IDLE_THRESHOLD_MS:
+            idle_adjustments.append(prev_adj + gap - min_duration - IDLE_VISUAL_MS)
+            idle_gaps.append((i, gap))
         else:
-            end_ms = epoch_ms + min_duration
+            idle_adjustments.append(prev_adj)
+    idle_gap_set = {idx for idx, _ in idle_gaps}
+    precedes_idle = {idx - 1 for idx, _ in idle_gaps}
 
-        duration_ms = end_ms - epoch_ms
+    for i, (epoch_ms, event) in enumerate(timed):
+        start_rel = epoch_ms - epoch_offset - idle_adjustments[i]
+
+        # Cap events that precede an idle gap to min_duration
+        if i in precedes_idle:
+            end_rel = start_rel + min_duration
+        elif i + 1 < len(timed):
+            next_start = timed[i + 1][0] - epoch_offset - idle_adjustments[i + 1]
+            end_rel = max(next_start, start_rel + min_duration)
+        else:
+            end_rel = start_rel + min_duration
+
+        duration_ms = end_rel - start_rel
         duration_str = _format_duration(duration_ms)
 
-        section = _gantt_section(event)
+        # Insert idle marker before events that follow a collapsed gap
+        if i in idle_gap_set:
+            for gap_idx, gap_ms in idle_gaps:
+                if gap_idx == i:
+                    idle_start = start_rel - IDLE_VISUAL_MS
+                    idle_label = f"Idle {_format_duration(gap_ms)}"
+                    if current_section != "Idle":
+                        lines.append("    section Idle")
+                        current_section = "Idle"
+                    lines.append(f"    {idle_label} :done, crit, idle{i}, {idle_start}, {start_rel}")
+                    break
+
+        section = _sanitize_mermaid(_gantt_section(event))
         if section != current_section:
             lines.append(f"    section {section}")
             current_section = section
 
         label = _sanitize_mermaid(_gantt_label(event))
         label_with_duration = f"{label} ({duration_str})"
-        crit = "crit, " if event.state == "failed" or event.event_type == EventType.ERROR else ""
-        lines.append(f"    {label_with_duration} :{crit}e{i}, {epoch_ms}, {end_ms}")
+        tag = _gantt_tag(event)
+        lines.append(f"    {label_with_duration} :{tag}e{i}, {start_rel}, {end_rel}")
 
     lines.append("```")
     lines.append("")
