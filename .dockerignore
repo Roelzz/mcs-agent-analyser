@@ -1,0 +1,13 @@
+.venv/
+.web/
+.env
+.git/
+.claude/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+botContent*/
+Transcripts/
+samples/
+.DS_Store
