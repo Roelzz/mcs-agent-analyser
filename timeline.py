@@ -283,6 +283,23 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                 )
 
             elif value_type == "DialogTracingInfo":
+                ACTION_TYPE_MAP = {
+                    "HttpRequestAction": EventType.ACTION_HTTP_REQUEST,
+                    "InvokeFlowAction": EventType.ACTION_HTTP_REQUEST,
+                    "BeginDialog": EventType.ACTION_BEGIN_DIALOG,
+                    "SendActivity": EventType.ACTION_SEND_ACTIVITY,
+                    "ConditionGroup": EventType.ACTION_TRIGGER_EVAL,
+                    "ConditionItem": EventType.ACTION_TRIGGER_EVAL,
+                }
+
+                SUMMARY_TEMPLATES = {
+                    EventType.ACTION_HTTP_REQUEST: "HTTP call in {topic}",
+                    EventType.ACTION_QA: "QA in {topic}",
+                    EventType.ACTION_TRIGGER_EVAL: "Evaluate: {topic}",
+                    EventType.ACTION_BEGIN_DIALOG: "Call to {topic}",
+                    EventType.ACTION_SEND_ACTIVITY: "Send response in {topic}",
+                }
+
                 actions = value.get("actions", [])
                 for action in actions:
                     topic_id = action.get("topicId", "")
@@ -295,29 +312,22 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                     if exception:
                         errors.append(f"{topic}.{action_type}: {exception}")
 
-                action_types = [a.get("actionType", "") for a in actions]
-                topics_involved = set()
-                for a in actions:
-                    tid = a.get("topicId", "")
-                    if tid:
-                        from parser import resolve_topic_name
+                    event_type = ACTION_TYPE_MAP.get(action_type, EventType.DIALOG_TRACING)
+                    template = SUMMARY_TEMPLATES.get(event_type)
+                    if template:
+                        summary = template.format(topic=topic)
+                    else:
+                        summary = f"{action_type} in {topic}"
 
-                        topics_involved.add(resolve_topic_name(tid, schema_lookup))
-
-                summary = f"Actions: {', '.join(action_types[:4])}"
-                if len(action_types) > 4:
-                    summary += f" (+{len(action_types) - 4} more)"
-                if topics_involved:
-                    summary += f" in {', '.join(sorted(topics_involved))}"
-
-                events.append(
-                    TimelineEvent(
-                        timestamp=timestamp,
-                        position=position,
-                        event_type=EventType.DIALOG_TRACING,
-                        summary=summary,
+                    events.append(
+                        TimelineEvent(
+                            timestamp=timestamp,
+                            position=position,
+                            event_type=event_type,
+                            topic_name=topic,
+                            summary=summary,
+                        )
                     )
-                )
 
             elif value_type == "UniversalSearchToolTraceData":
                 sources = value.get("knowledgeSources", [])

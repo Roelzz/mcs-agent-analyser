@@ -75,6 +75,11 @@ class EventType(str, Enum):
     KNOWLEDGE_SEARCH = "KnowledgeSearch"
     VARIABLE_ASSIGNMENT = "VariableAssignment"
     DIALOG_REDIRECT = "DialogRedirect"
+    ACTION_HTTP_REQUEST = "ActionHttpRequest"
+    ACTION_QA = "ActionQA"
+    ACTION_TRIGGER_EVAL = "ActionTriggerEval"
+    ACTION_BEGIN_DIALOG = "ActionBeginDialog"
+    ACTION_SEND_ACTIVITY = "ActionSendActivity"
     ERROR = "Error"
     OTHER = "Other"
 
