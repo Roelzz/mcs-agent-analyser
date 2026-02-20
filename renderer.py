@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from models import BotProfile, ConversationTimeline, EventType, TimelineEvent
+from models import BotProfile, ComponentSummary, ConversationTimeline, EventType, TimelineEvent
 
 IDLE_THRESHOLD_MS = 5000  # gaps > 5s are collapsed
 IDLE_VISUAL_MS = 200  # visual width of collapsed gap
@@ -129,15 +129,125 @@ def render_bot_metadata(profile: BotProfile) -> str:
     return "\n".join(lines)
 
 
-def render_components(profile: BotProfile) -> str:
-    """Render components section grouped by kind."""
-    # Group by kind
-    by_kind: dict[str, list] = {}
-    for comp in profile.components:
-        by_kind.setdefault(comp.kind, []).append(comp)
+_SYSTEM_TRIGGERS: set[str] = {
+    "OnSystemRedirect",
+    "OnError",
+    "OnEscalate",
+    "OnSignIn",
+    "OnUnknownIntent",
+    "OnConversationStart",
+    "OnSelectIntent",
+    "OnInactivity",
+}
 
-    total = len(profile.components)
-    active = sum(1 for c in profile.components if c.state == "Active")
+_AUTOMATION_TRIGGERS: set[str] = {
+    "OnRedirect",
+    "OnActivity",
+}
+
+_CATEGORY_ORDER: list[str] = [
+    "user_topics",
+    "orchestrator_topics",
+    "system_topics",
+    "automation_topics",
+    "knowledge",
+    "skills",
+    "custom_entities",
+    "variables",
+    "settings",
+]
+
+_CATEGORY_DISPLAY: dict[str, str] = {
+    "user_topics": "User Topics",
+    "orchestrator_topics": "Orchestrator Topics",
+    "system_topics": "System Topics",
+    "automation_topics": "Automation Topics",
+    "knowledge": "Knowledge",
+    "skills": "Skills & Connectors",
+    "custom_entities": "Custom Entities",
+    "variables": "Variables",
+    "settings": "Settings",
+}
+
+_CATEGORY_COLUMNS: dict[str, list[str]] = {
+    "user_topics": ["Name", "Schema", "State", "Description"],
+    "orchestrator_topics": ["Name", "Schema", "State", "Dialog Kind", "Action Kind"],
+    "system_topics": ["Name", "Schema", "State", "Trigger"],
+    "automation_topics": ["Name", "Schema", "State", "Trigger"],
+    "knowledge": ["Name", "Type", "State", "Description"],
+    "skills": ["Name", "Schema", "State", "Description"],
+    "custom_entities": ["Name", "Schema", "State"],
+    "variables": ["Name", "Schema", "State"],
+    "settings": ["Name", "Schema", "State"],
+}
+
+
+def _classify_component(comp: ComponentSummary) -> str | None:
+    """Classify a component into a category key, or None to exclude."""
+    if comp.kind == "GptComponent":
+        return None
+    if comp.kind == "DialogComponent":
+        if comp.dialog_kind in ("TaskDialog", "AgentDialog"):
+            return "orchestrator_topics"
+        trigger = comp.trigger_kind or ""
+        if trigger in _SYSTEM_TRIGGERS:
+            return "system_topics"
+        if trigger in _AUTOMATION_TRIGGERS:
+            return "automation_topics"
+        return "user_topics"
+    if comp.kind in ("FileAttachmentComponent", "KnowledgeSourceComponent"):
+        return "knowledge"
+    if comp.kind == "SkillComponent":
+        return "skills"
+    if comp.kind == "CustomEntityComponent":
+        return "custom_entities"
+    if comp.kind == "GlobalVariableComponent":
+        return "variables"
+    if comp.kind == "BotSettingsComponent":
+        return "settings"
+    return "settings"
+
+
+def _render_component_row(comp: ComponentSummary, category: str) -> str:
+    """Render a single component row matching the category's columns."""
+    if category == "user_topics":
+        desc = (comp.description or "—").replace("|", "\\|")
+        if len(desc) > 100:
+            desc = desc[:100] + "..."
+        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {desc} |"
+    if category == "orchestrator_topics":
+        dialog = comp.dialog_kind or "—"
+        action = comp.action_kind or "—"
+        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {dialog} | {action} |"
+    if category in ("system_topics", "automation_topics"):
+        trigger = comp.trigger_kind or "—"
+        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {trigger} |"
+    if category == "knowledge":
+        kind_type = "File" if comp.kind == "FileAttachmentComponent" else "Source"
+        desc = (comp.description or "—").replace("|", "\\|")
+        if len(desc) > 100:
+            desc = desc[:100] + "..."
+        return f"| {comp.display_name} | {kind_type} | {comp.state} | {desc} |"
+    if category == "skills":
+        desc = (comp.description or "—").replace("|", "\\|")
+        if len(desc) > 100:
+            desc = desc[:100] + "..."
+        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {desc} |"
+    # custom_entities, variables, settings
+    return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} |"
+
+
+def render_components(profile: BotProfile) -> str:
+    """Render components section with smart categorization."""
+    # Classify into categories (exclude GptComponent)
+    by_category: dict[str, list[ComponentSummary]] = {}
+    for comp in profile.components:
+        cat = _classify_component(comp)
+        if cat is not None:
+            by_category.setdefault(cat, []).append(comp)
+
+    total = sum(len(comps) for comps in by_category.values())
+    active = sum(1 for comps in by_category.values() for c in comps if c.state == "Active")
     inactive = total - active
 
     lines = [
@@ -146,21 +256,28 @@ def render_components(profile: BotProfile) -> str:
         "| Kind | Count | Active | Inactive |",
         "| --- | --- | --- | --- |",
     ]
-    for kind, comps in sorted(by_kind.items()):
-        kind_active = sum(1 for c in comps if c.state == "Active")
-        kind_inactive = len(comps) - kind_active
-        lines.append(f"| {kind} | {len(comps)} | {kind_active} | {kind_inactive} |")
+    for cat in _CATEGORY_ORDER:
+        comps = by_category.get(cat)
+        if not comps:
+            continue
+        display = _CATEGORY_DISPLAY[cat]
+        cat_active = sum(1 for c in comps if c.state == "Active")
+        cat_inactive = len(comps) - cat_active
+        lines.append(f"| {display} | {len(comps)} | {cat_active} | {cat_inactive} |")
     lines.append("")
 
-    # Detail tables per kind
-    for kind, comps in sorted(by_kind.items()):
-        lines.append(f"### {kind} ({len(comps)})\n")
-        lines.append("| Name | Schema | State | Trigger | Dialog Kind |")
-        lines.append("| --- | --- | --- | --- | --- |")
+    # Detail tables per category
+    for cat in _CATEGORY_ORDER:
+        comps = by_category.get(cat)
+        if not comps:
+            continue
+        display = _CATEGORY_DISPLAY[cat]
+        columns = _CATEGORY_COLUMNS[cat]
+        lines.append(f"### {display} ({len(comps)})\n")
+        lines.append("| " + " | ".join(columns) + " |")
+        lines.append("| " + " | ".join("---" for _ in columns) + " |")
         for comp in comps:
-            trigger = comp.trigger_kind or "—"
-            dialog = comp.dialog_kind or "—"
-            lines.append(f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {trigger} | {dialog} |")
+            lines.append(_render_component_row(comp, cat))
         lines.append("")
 
     return "\n".join(lines)
