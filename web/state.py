@@ -20,6 +20,9 @@ from transcript import parse_transcript_json  # noqa: E402
 
 from web.mermaid import split_markdown_mermaid  # noqa: E402
 
+from linter import run_lint as _run_lint  # noqa: E402
+from models import BotProfile  # noqa: E402
+
 load_dotenv()
 
 
@@ -61,6 +64,12 @@ class State(rx.State):
     report_markdown: str = ""
     report_title: str = ""
 
+    # Lint
+    bot_profile_json: str = ""
+    lint_report_markdown: str = ""
+    is_linting: bool = False
+    lint_error: str = ""
+
     # Explicit setters (auto-setters deprecated in 0.8.9)
     @rx.event
     def set_username(self, value: str):
@@ -90,6 +99,21 @@ class State(rx.State):
         segments = split_markdown_mermaid(self.report_markdown)
         return [{"type": t, "content": c} for t, c in segments]
 
+    @rx.var
+    def can_lint(self) -> bool:
+        return bool(self.bot_profile_json) and bool(self.report_markdown)
+
+    @rx.var
+    def has_lint_report(self) -> bool:
+        return bool(self.lint_report_markdown)
+
+    @rx.var
+    def lint_report_segments(self) -> list[dict[str, str]]:
+        if not self.lint_report_markdown:
+            return []
+        segments = split_markdown_mermaid(self.lint_report_markdown)
+        return [{"type": t, "content": c} for t, c in segments]
+
     # --- Auth handlers ---
 
     def login(self):
@@ -112,6 +136,10 @@ class State(rx.State):
         self.report_title = ""
         self.upload_error = ""
         self.is_processing = False
+        self.bot_profile_json = ""
+        self.lint_report_markdown = ""
+        self.is_linting = False
+        self.lint_error = ""
         return rx.redirect("/")
 
     def check_auth(self):
@@ -183,6 +211,7 @@ class State(rx.State):
             timeline = build_timeline(activities, schema_lookup)
             self.report_markdown = render_report(profile, timeline)
             self.report_title = profile.display_name
+            self.bot_profile_json = profile.model_dump_json()
 
     async def _process_bot_files(self, files: list[rx.UploadFile]):
         if len(files) != 2:
@@ -214,6 +243,7 @@ class State(rx.State):
             timeline = build_timeline(activities, schema_lookup)
             self.report_markdown = render_report(profile, timeline)
             self.report_title = profile.display_name
+            self.bot_profile_json = profile.model_dump_json()
 
     async def _process_transcript(self, files: list[rx.UploadFile]):
         if len(files) != 1:
@@ -232,6 +262,7 @@ class State(rx.State):
             title = json_path.stem
             self.report_markdown = render_transcript_report(title, timeline, metadata)
             self.report_title = title
+            self.bot_profile_json = ""
 
     # --- Report handlers ---
 
@@ -243,3 +274,44 @@ class State(rx.State):
         self.report_markdown = ""
         self.report_title = ""
         self.upload_error = ""
+        self.bot_profile_json = ""
+        self.lint_report_markdown = ""
+        self.is_linting = False
+        self.lint_error = ""
+
+    # --- Lint handlers ---
+
+    async def run_lint(self):
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if not api_key:
+            self.lint_error = "OPENAI_API_KEY not set. Add it to your .env file."
+            return
+
+        if not self.bot_profile_json:
+            self.lint_error = "No bot profile available for linting."
+            return
+
+        self.is_linting = True
+        self.lint_error = ""
+        self.lint_report_markdown = ""
+        yield
+
+        try:
+            profile = BotProfile.model_validate_json(self.bot_profile_json)
+            report, model_used = await _run_lint(profile, api_key)
+            self.lint_report_markdown = report
+            logger.info(f"Lint complete using {model_used}")
+        except Exception as e:
+            logger.error(f"Lint failed: {e}")
+            self.lint_error = f"Lint failed: {e}"
+        finally:
+            self.is_linting = False
+
+    def download_lint_report(self):
+        title = self.report_title if self.report_title else "report"
+        filename = f"{title}_lint.md"
+        return rx.download(data=self.lint_report_markdown, filename=filename)
+
+    def clear_lint(self):
+        self.lint_report_markdown = ""
+        self.lint_error = ""

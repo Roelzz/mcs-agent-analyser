@@ -159,6 +159,21 @@ def report_viewer() -> rx.Component:
                 size="2",
                 on_click=State.download_report,
             ),
+            rx.cond(
+                State.can_lint,
+                rx.button(
+                    rx.cond(
+                        State.is_linting,
+                        rx.hstack(rx.spinner(size="1"), rx.text("Linting..."), align="center", spacing="2"),
+                        rx.fragment(rx.icon("scan-search", size=16), rx.text("Instruction Lint")),
+                    ),
+                    variant="outline",
+                    color_scheme="amber",
+                    size="2",
+                    on_click=State.run_lint,
+                    disabled=State.is_linting,
+                ),
+            ),
             rx.button(
                 rx.icon("plus", size=16),
                 "New Upload",
@@ -170,15 +185,54 @@ def report_viewer() -> rx.Component:
             align="center",
             padding_bottom="16px",
         ),
+        rx.cond(
+            State.lint_error != "",
+            rx.callout(
+                State.lint_error,
+                icon="triangle_alert",
+                color_scheme="red",
+                width="100%",
+                margin_bottom="16px",
+            ),
+        ),
         rx.separator(),
         rx.box(
             rx.foreach(State.report_segments, render_segment),
             padding_top="16px",
+        ),
+        rx.cond(
+            State.has_lint_report,
+            rx.box(
+                rx.separator(margin_top="24px"),
+                rx.hstack(
+                    rx.heading("Instruction Lint Report", size="4"),
+                    rx.spacer(),
+                    rx.button(
+                        rx.icon("download", size=16),
+                        "Download Lint .md",
+                        variant="outline",
+                        size="2",
+                        on_click=State.download_lint_report,
+                    ),
+                    rx.button(
+                        rx.icon("x", size=16),
+                        "Dismiss",
+                        variant="ghost",
+                        size="2",
+                        on_click=State.clear_lint,
+                    ),
+                    width="100%",
+                    align="center",
+                    padding_top="16px",
+                    padding_bottom="16px",
+                ),
+                rx.box(
+                    rx.foreach(State.lint_report_segments, render_segment),
+                ),
+            ),
         ),
         max_width="1200px",
         width="100%",
         padding="24px",
         margin="0 auto",
     )
-
-
