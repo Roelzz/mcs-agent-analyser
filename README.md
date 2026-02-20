@@ -82,20 +82,34 @@ Transcript reports contain:
 
 ## Deployment
 
-Deploys via Nixpacks (Coolify, Railway, etc.) or Docker. Single-port mode — one exposed port serves everything.
+Single-port mode — one exposed port serves everything.
+
+### Nixpacks (Coolify / Railway)
+
+Configure these env vars in your platform:
 
 ```bash
-# Coolify / Nixpacks: configure these env vars
 REFLEX_ENV=prod
 PORT=2009
 USERS=admin:secret
+OPENAI_API_KEY=sk-...        # optional, enables Instruction Lint
 ```
 
 The `Procfile` runs `reflex run --env prod --single-port`. Set `REFLEX_ENV=prod` so `rxconfig.py` uses the single `PORT` for both frontend and backend.
 
+### Docker
+
+```bash
+docker build -t agent-analyser .
+docker run -p 2009:2009 --env-file .env agent-analyser
+```
+
+Make sure `.env` contains at least `REFLEX_ENV=prod` and `PORT=2009`.
+
 ## Development
 
 ```bash
+cp .env.example .env          # edit credentials
 uv sync
 uv run pytest              # 83 tests
 uv run ruff check .
