@@ -12,7 +12,7 @@ uv sync
 uv run reflex run
 ```
 
-Open http://localhost:2009, sign in, upload a `.zip` bot export or individual files.
+Open http://localhost:3000, sign in, upload a `.zip` bot export or individual files.
 
 ### CLI
 
@@ -44,6 +44,9 @@ uv run python main.py path/to/botContent_folder -o custom_report.md
 - Mermaid sequence diagram of the conversation flow
 - Mermaid Gantt chart of execution timing
 
+**Web UI:**
+- **Instruction Lint** — AI-powered audit of bot instructions, guardrails, topic architecture, and component health (requires OpenAI API key)
+
 **From transcript `.json` files:**
 - Session metadata (outcome, outcome reason, turn count, implied success, duration)
 - Variable assignments and dialog redirects
@@ -55,7 +58,7 @@ Each generated report contains:
 
 1. **AI Configuration** - GPT model, knowledge sources, web browsing, code interpreter, system instructions (collapsible)
 2. **Bot Profile** - Schema name, bot ID, channels, recognizer, AI settings
-3. **Components** - Summary counts (active/inactive by kind) + detail tables per kind
+3. **Components** - Smart categorization (User/Orchestrator/System/Automation Topics, Knowledge, Skills, Entities, Variables, Settings) with tailored columns per category
 4. **Topic Connection Graph** - Mermaid flowchart of topic-to-topic calls with conditions
 5. **Conversation Trace** - Sequence diagram, Gantt chart, phase breakdown, event log, errors
 
@@ -69,9 +72,13 @@ Transcript reports contain:
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `REFLEX_ENV` | `dev` | `dev` = separate ports, `prod` = single-port mode |
+| `FRONTEND_PORT` | `3000` | Frontend port (dev mode only) |
+| `BACKEND_PORT` | `8000` | Backend port (dev mode only) |
+| `PORT` | `2009` | Single port for prod mode (`--single-port`) |
 | `LOG_LEVEL` | `INFO` | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |
 | `USERS` | _(none)_ | Web UI credentials, comma-separated `user:pass` pairs |
-| `PORT` | `2009` | App port (frontend + backend in single-port mode) |
+| `OPENAI_API_KEY` | _(none)_ | OpenAI API key for Instruction Lint feature (optional) |
 
 ## Deployment
 
@@ -79,20 +86,21 @@ Deploys via Nixpacks (Coolify, Railway, etc.) or Docker. Single-port mode — on
 
 ```bash
 # Coolify / Nixpacks: configure these env vars
+REFLEX_ENV=prod
 PORT=2009
 USERS=admin:secret
 ```
 
-The `Procfile` runs `reflex run --env prod --single-port`. Only the `PORT` needs to be exposed.
+The `Procfile` runs `reflex run --env prod --single-port`. Set `REFLEX_ENV=prod` so `rxconfig.py` uses the single `PORT` for both frontend and backend.
 
 ## Development
 
 ```bash
 uv sync
-uv run pytest              # 77 tests
+uv run pytest              # 83 tests
 uv run ruff check .
 uv run ruff format .
-uv run reflex run          # dev server on :2009
+uv run reflex run          # dev server — frontend :3000, backend :8000
 ```
 
 ## Project Structure
@@ -110,9 +118,11 @@ web/
   state.py         Reflex state (auth, file upload, report generation)
   components.py    UI components (navbar, upload form, report viewer)
   mermaid.py       Mermaid diagram rendering (CDN loader, MutationObserver, segment splitter)
+linter.py          Instruction lint logic (OpenAI API, model resolution, audit prompt)
 tests/
   test_main.py     Core module tests
   test_web.py      Web frontend tests (auth, mermaid splitting)
+  test_linter.py   Instruction linter tests
 samples/
   report.md              Sample bot export report
   transcript_report.md   Sample transcript report
