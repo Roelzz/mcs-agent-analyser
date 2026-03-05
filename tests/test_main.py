@@ -745,7 +745,7 @@ def test_sequence_diagram_topics_prefixed():
 
 
 def test_gantt_collapses_idle_gaps():
-    """Large idle gaps should be collapsed with an Idle marker."""
+    """Large idle gaps should appear as actual-duration Idle markers."""
     timeline = ConversationTimeline(
         bot_name="TestBot",
         conversation_id="conv-1",
@@ -775,12 +775,26 @@ def test_gantt_collapses_idle_gaps():
     assert "section Idle" in output
     assert "Idle 2m 0.0s" in output
 
-    # Event bars (lines with :eN) should not have multi-minute durations
+    # Event bars (lines with :eN) should not span the idle gap themselves
     for line in output.split("\n"):
         if ":e" in line and ":idle" not in line:
-            assert "2m" not in line, f"Event bar has un-collapsed duration: {line}"
+            assert "2m" not in line, f"Event bar has unexpected 2m duration: {line}"
 
-    # Total axis range should be small (< 5000ms)
+    # Idle marker should span the actual gap (~120s = 120000ms)
+    idle_positions = []
+    for line in output.split("\n"):
+        if "crit, idle" in line:
+            parts = line.strip().rsplit(",", 2)
+            if len(parts) == 3:
+                try:
+                    idle_positions.append((int(parts[1].strip()), int(parts[2].strip())))
+                except ValueError:
+                    pass
+    assert idle_positions, "No idle marker found in gantt output"
+    idle_start, idle_end = idle_positions[0]
+    assert idle_end - idle_start >= 119000, f"Idle marker too short: {idle_end - idle_start}ms"
+
+    # Total axis range should reflect actual time (~121s)
     end_positions = []
     for line in output.split("\n"):
         parts = line.strip().rsplit(",", 1)
@@ -790,7 +804,7 @@ def test_gantt_collapses_idle_gaps():
             except ValueError:
                 pass
     assert end_positions, "No positions found in gantt output"
-    assert max(end_positions) < 5000, f"Axis range too large: {max(end_positions)}"
+    assert max(end_positions) > 100000, f"Axis range too small: {max(end_positions)}"
 
 
 def test_gantt_no_collapse_within_threshold():

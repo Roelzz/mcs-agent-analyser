@@ -2,8 +2,7 @@ from datetime import datetime, timezone
 
 from models import BotProfile, ComponentSummary, ConversationTimeline, EventType, TimelineEvent
 
-IDLE_THRESHOLD_MS = 5000  # gaps > 5s are collapsed
-IDLE_VISUAL_MS = 200  # visual width of collapsed gap
+IDLE_THRESHOLD_MS = 5000  # gaps > 5s are shown as idle markers
 
 ACTOR_NAMES: dict[str, str] = {
     "User": "User",
@@ -771,28 +770,23 @@ def render_gantt_chart(timeline: ConversationTimeline) -> str:
     current_section = ""
     min_duration = 50  # ms minimum display width
 
-    # Collapse idle gaps: compute cumulative adjustment per event
-    idle_adjustments: list[int] = [0]
+    # Detect idle gaps (no adjustments — events use actual elapsed time)
     idle_gaps: list[tuple[int, int]] = []  # (index, original_gap_ms)
     for i in range(1, len(timed)):
         gap = timed[i][0] - timed[i - 1][0]
-        prev_adj = idle_adjustments[-1]
         if gap > IDLE_THRESHOLD_MS:
-            idle_adjustments.append(prev_adj + gap - min_duration - IDLE_VISUAL_MS)
             idle_gaps.append((i, gap))
-        else:
-            idle_adjustments.append(prev_adj)
     idle_gap_set = {idx for idx, _ in idle_gaps}
     precedes_idle = {idx - 1 for idx, _ in idle_gaps}
 
     for i, (epoch_ms, event) in enumerate(timed):
-        start_rel = epoch_ms - epoch_offset - idle_adjustments[i]
+        start_rel = epoch_ms - epoch_offset  # actual elapsed time, no adjustment
 
         # Cap events that precede an idle gap to min_duration
         if i in precedes_idle:
             end_rel = start_rel + min_duration
         elif i + 1 < len(timed):
-            next_start = timed[i + 1][0] - epoch_offset - idle_adjustments[i + 1]
+            next_start = timed[i + 1][0] - epoch_offset
             end_rel = max(next_start, start_rel + min_duration)
         else:
             end_rel = start_rel + min_duration
@@ -800,16 +794,18 @@ def render_gantt_chart(timeline: ConversationTimeline) -> str:
         duration_ms = end_rel - start_rel
         duration_str = _format_duration(duration_ms)
 
-        # Insert idle marker before events that follow a collapsed gap
+        # Insert idle marker before events that follow a gap
         if i in idle_gap_set:
             for gap_idx, gap_ms in idle_gaps:
                 if gap_idx == i:
-                    idle_start = start_rel - IDLE_VISUAL_MS
+                    prev_start = timed[i - 1][0] - epoch_offset
+                    idle_start = prev_start + min_duration
+                    idle_end = start_rel  # actual gap duration
                     idle_label = f"Idle {_format_duration(gap_ms)}"
                     if current_section != "Idle":
                         lines.append("    section Idle")
                         current_section = "Idle"
-                    lines.append(f"    {idle_label} :done, crit, idle{i}, {idle_start}, {start_rel}")
+                    lines.append(f"    {idle_label} :done, crit, idle{i}, {idle_start}, {idle_end}")
                     break
 
         section = _sanitize_mermaid(_gantt_section(event))
