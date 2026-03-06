@@ -1259,8 +1259,8 @@ def test_custom_search_step_tracking():
     assert cs.error == "aiModelActionBadRequest"
 
 
-def test_knowledge_search_sources_all_shown():
-    """Sources list with more than 5 items should all be shown — no truncation."""
+def test_knowledge_search_sources_compact_in_table():
+    """Sources list with more than 3 items should be truncated in table with '+N more'."""
     timeline = ConversationTimeline(
         bot_name="TestBot",
         conversation_id="conv-1",
@@ -1273,8 +1273,8 @@ def test_knowledge_search_sources_all_shown():
         ],
     )
     output = render_knowledge_search_section(timeline)
-    assert "Src8" in output
-    assert "+3 more" not in output
+    assert "Src1, Src2, Src3" in output
+    assert "(+5 more)" in output
 
 
 def test_search_results_captured():
@@ -1469,6 +1469,122 @@ def test_grounding_details_shows_all_results():
     # Snippet must not be truncated and must not have trailing ellipsis
     assert long_snippet in output
     assert long_snippet + "..." not in output
+
+
+def test_knowledge_search_grouped_by_user_message():
+    """Searches with triggering_user_message are grouped under user utterance headers."""
+    timeline = ConversationTimeline(
+        knowledge_searches=[
+            KnowledgeSearchInfo(
+                search_query="refund policy details",
+                search_keywords="refund, policy",
+                knowledge_sources=["FAQ"],
+                execution_time="0:00:01.5000000",
+                triggering_user_message="What are the refund policies?",
+            ),
+            KnowledgeSearchInfo(
+                search_query="return window 30 days",
+                search_keywords="return, 30 days",
+                knowledge_sources=["FAQ"],
+                execution_time="0:00:02.0000000",
+                triggering_user_message="Can I return items after 30 days?",
+            ),
+        ]
+    )
+    output = render_knowledge_search_section(timeline)
+
+    assert "across 2 user turns" in output
+    assert '### 💬 "What are the refund policies?"' in output
+    assert '### 💬 "Can I return items after 30 days?"' in output
+    assert "refund policy details" in output
+    assert "return window 30 days" in output
+    assert "---" in output
+
+
+def test_knowledge_search_grouped_system_initiated():
+    """Searches without triggering_user_message go under System-initiated."""
+    timeline = ConversationTimeline(
+        knowledge_searches=[
+            KnowledgeSearchInfo(
+                search_query="greeting check",
+                knowledge_sources=["FAQ"],
+                triggering_user_message="Hello there",
+            ),
+            KnowledgeSearchInfo(
+                search_query="auto search",
+                knowledge_sources=["FAQ"],
+                triggering_user_message=None,
+            ),
+        ]
+    )
+    output = render_knowledge_search_section(timeline)
+
+    assert '### 💬 "Hello there"' in output
+    assert "### 🔧 System-initiated" in output
+
+
+def test_knowledge_search_single_group_no_turns_label():
+    """Single user turn → no 'across N turns' in header."""
+    timeline = ConversationTimeline(
+        knowledge_searches=[
+            KnowledgeSearchInfo(
+                search_query="test",
+                knowledge_sources=["FAQ"],
+                triggering_user_message="What is this?",
+            ),
+        ]
+    )
+    output = render_knowledge_search_section(timeline)
+
+    assert "**1 search**" in output
+    assert "across" not in output
+
+
+def test_knowledge_search_timeline_tracks_user_message():
+    """build_timeline sets triggering_user_message from the latest user message."""
+    activities = [
+        {
+            "type": "message",
+            "from": {"role": "user"},
+            "text": "How do I reset my password?",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 1},
+            "conversation": {"id": "conv-1"},
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepBindUpdate",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "channelData": {"webchat:internal:position": 2},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "taskDialogId": "P:UniversalSearchTool",
+                "arguments": {"search_query": "password reset"},
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "UniversalSearchToolTraceData",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:02Z",
+            "channelData": {"webchat:internal:position": 3},
+            "conversation": {"id": "conv-1"},
+            "value": {"knowledgeSources": ["topic.Help_ABC"]},
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:03Z",
+            "channelData": {"webchat:internal:position": 4},
+            "conversation": {"id": "conv-1"},
+            "value": {"taskDialogId": "P:UniversalSearchTool", "stepId": "s1", "state": "completed"},
+        },
+    ]
+    timeline = build_timeline(activities, {})
+    assert len(timeline.knowledge_searches) == 1
+    assert timeline.knowledge_searches[0].triggering_user_message == "How do I reset my password?"
 
 
 def test_knowledge_table_merged_status():

@@ -125,6 +125,7 @@ class KnowledgeSearchInfo(BaseModel):
     search_results: list[SearchResult] = Field(default_factory=list)
     output_knowledge_sources: list[str] = Field(default_factory=list)
     search_errors: list[str] = Field(default_factory=list)
+    triggering_user_message: str | None = None
 
 
 class CustomSearchStep(BaseModel):

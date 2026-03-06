@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from models import BotProfile, ComponentSummary, ConversationTimeline, EventType, TimelineEvent
+from models import BotProfile, ComponentSummary, ConversationTimeline, EventType, KnowledgeSearchInfo, TimelineEvent
 
 IDLE_THRESHOLD_MS = 5000  # gaps > 5s are shown as idle markers
 
@@ -871,11 +871,96 @@ def _source_efficiency(ks: "KnowledgeSearchInfo") -> str | None:
     return line
 
 
+def _truncate_user_message(msg: str, maxlen: int = 120) -> str:
+    """Truncate a user message for display as a group header."""
+    clean = msg.replace("\n", " ").replace("\r", "").strip()
+    if len(clean) > maxlen:
+        return clean[:maxlen] + "…"
+    return clean
+
+
+def _compact_sources(src_list: list[str], max_shown: int = 3) -> str:
+    """Compact a sources list for table display: show first N, then '+X more'."""
+    if not src_list:
+        return "—"
+    if len(src_list) <= max_shown:
+        return ", ".join(src_list)
+    shown = ", ".join(src_list[:max_shown])
+    return f"{shown} (+{len(src_list) - max_shown} more)"
+
+
+def _render_ks_table(searches: list[tuple[int, "KnowledgeSearchInfo"]]) -> list[str]:
+    """Render a numbered search table for a group of KnowledgeSearchInfo items."""
+    lines = [
+        "| # | Search Query | Keywords | Sources | Duration | Grounding |",
+        "| :-- | :-- | :-- | :-- | --: | :-- |",
+    ]
+    for idx, ks in searches:
+        query = (ks.search_query or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
+        query = query[:60] + "…" if len(query) > 60 else query
+        keywords = (ks.search_keywords or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
+        keywords = keywords[:40] + "…" if len(keywords) > 40 else keywords
+        sources = _compact_sources(ks.knowledge_sources)
+        dur_ms = _parse_execution_time_ms(ks.execution_time)
+        dur = _format_duration(dur_ms) if dur_ms is not None else (ks.execution_time or "—")
+        badge, label = _grounding_score(ks)
+        lines.append(f"| {idx} | {query} | {keywords} | {sources} | {dur} | {badge} {label} |")
+    lines.append("")
+    return lines
+
+
+def _render_ks_details(searches: list[tuple[int, "KnowledgeSearchInfo"]]) -> list[str]:
+    """Render thought and grounding details for a group of searches."""
+    lines: list[str] = []
+    for idx, ks in searches:
+        if ks.thought:
+            lines.append(f"**#{idx} Why searched:** *{ks.thought}*\n")
+
+    for idx, ks in searches:
+        has_detail = ks.search_results or ks.search_errors or ks.output_knowledge_sources
+        if not has_detail:
+            continue
+        lines.append(f"\n#### Search #{idx} — Grounding Details\n")
+
+        if ks.output_knowledge_sources:
+            out_src = ", ".join(ks.output_knowledge_sources)
+            lines.append(f"**Sources used for grounding:** {out_src}\n")
+        eff = _source_efficiency(ks)
+        if eff:
+            lines.append(f"{eff}\n")
+
+        for err in ks.search_errors:
+            lines.append(f"> ⚠ Search error: `{err}`\n")
+
+        result_count = len(ks.search_results)
+        if result_count == 0:
+            lines.append("> ⚠ **No results returned** — response may not be grounded.\n")
+        else:
+            lines.append(f"**{result_count} result{'s' if result_count != 1 else ''} retrieved:**\n")
+            for j, r in enumerate(ks.search_results, 1):
+                title = r.name or r.url or f"Result {j}"
+                title = title.replace("|", "\\|").replace("\n", " ")[:80]
+                snippet = (r.text or "").replace("\n", " ").replace("|", "\\|")
+                snippet_len = len(r.text or "")
+                if snippet_len >= 200:
+                    ke_icon = "🟢"
+                elif snippet_len >= 50:
+                    ke_icon = "🟡"
+                else:
+                    ke_icon = "🔴"
+                if r.url:
+                    lines.append(f"{ke_icon} {j}. [{title}]({r.url})" + (f" — {snippet}" if snippet else "") + "\n")
+                else:
+                    lines.append(f"{ke_icon} {j}. **{title}**" + (f" — {snippet}" if snippet else "") + "\n")
+        lines.append("")
+    return lines
+
+
 def render_knowledge_search_section(
     timeline: ConversationTimeline,
     profile: BotProfile | None = None,
 ) -> str:
-    """Render Knowledge Search section as Markdown."""
+    """Render Knowledge Search section as Markdown, grouped by triggering user message."""
     searches = timeline.knowledge_searches
     custom = getattr(timeline, "custom_search_steps", [])
     gk = (
@@ -883,75 +968,42 @@ def render_knowledge_search_section(
         if (profile and profile.ai_settings and profile.ai_settings.use_model_knowledge)
         else "✗ Off"
     )
-    count = len(searches)
+    total = len(searches)
 
-    lines = [f"## Knowledge Search\n"]
-    lines.append(f"**{count} search{'es' if count != 1 else ''}** | General Knowledge: {gk}\n")
+    lines: list[str] = ["## Knowledge Search\n"]
 
     if not searches and not custom:
+        lines.append(f"**0 searches** | General Knowledge: {gk}\n")
         lines.append("No knowledge searches recorded.\n")
         return "\n".join(lines)
 
-    if searches:
-        lines += [
-            "| # | Search Query | Keywords | Sources | Duration | Grounding |",
-            "| --- | --- | --- | --- | --- | --- |",
-        ]
-        for i, ks in enumerate(searches, 1):
-            query = (ks.search_query or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
-            keywords = (ks.search_keywords or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
-            keywords = keywords[:80] + "…" if len(keywords) > 80 else keywords
-            src_list = ks.knowledge_sources
-            sources = ", ".join(src_list) if src_list else "—"
-            dur_ms = _parse_execution_time_ms(ks.execution_time)
-            dur = _format_duration(dur_ms) if dur_ms is not None else (ks.execution_time or "—")
-            badge, label = _grounding_score(ks)
-            lines.append(f"| {i} | {query} | {keywords} | {sources} | {dur} | {badge} {label} |")
+    # Group searches by triggering_user_message (preserve order)
+    from collections import OrderedDict
+    groups: OrderedDict[str | None, list[tuple[int, "KnowledgeSearchInfo"]]] = OrderedDict()
+    for i, ks in enumerate(searches, 1):
+        key = ks.triggering_user_message
+        groups.setdefault(key, []).append((i, ks))
 
-        lines.append("")
+    user_turns = sum(1 for k in groups if k is not None)
+    total_turns = len(groups)
 
-        for i, ks in enumerate(searches, 1):
-            if ks.thought:
-                lines.append(f"**#{i} Why searched:** *{ks.thought}*\n")
+    if total_turns <= 1:
+        lines.append(f"**{total} search{'es' if total != 1 else ''}** | General Knowledge: {gk}\n")
+    else:
+        lines.append(f"**{total} search{'es' if total != 1 else ''} across {total_turns} user turn{'s' if total_turns != 1 else ''}** | General Knowledge: {gk}\n")
 
-        # Grounding details per search
-        for i, ks in enumerate(searches, 1):
-            has_detail = ks.search_results or ks.search_errors or ks.output_knowledge_sources
-            if not has_detail:
-                continue
-            lines.append(f"\n#### Search #{i} — Grounding Details\n")
+    # Render each group
+    for msg_key, group_searches in groups.items():
+        if total_turns > 1:
+            lines.append("---\n")
+        if msg_key is not None:
+            header = _truncate_user_message(msg_key)
+            lines.append(f'### 💬 "{header}"\n')
+        elif total_turns > 1:
+            lines.append("### 🔧 System-initiated\n")
 
-            if ks.output_knowledge_sources:
-                out_src = ", ".join(ks.output_knowledge_sources)
-                lines.append(f"**Sources used for grounding:** {out_src}\n")
-            eff = _source_efficiency(ks)
-            if eff:
-                lines.append(f"{eff}\n")
-
-            for err in ks.search_errors:
-                lines.append(f"> ⚠ Search error: `{err}`\n")
-
-            count = len(ks.search_results)
-            if count == 0:
-                lines.append("> ⚠ **No results returned** — response may not be grounded.\n")
-            else:
-                lines.append(f"**{count} result{'s' if count != 1 else ''} retrieved:**\n")
-                for j, r in enumerate(ks.search_results, 1):
-                    title = r.name or r.url or f"Result {j}"
-                    title = title.replace("|", "\\|").replace("\n", " ")[:80]
-                    snippet = (r.text or "").replace("\n", " ").replace("|", "\\|")
-                    snippet_len = len(r.text or "")
-                    if snippet_len >= 200:
-                        ke_icon = "🟢"
-                    elif snippet_len >= 50:
-                        ke_icon = "🟡"
-                    else:
-                        ke_icon = "🔴"
-                    if r.url:
-                        lines.append(f"{ke_icon} {j}. [{title}]({r.url})" + (f" — {snippet}" if snippet else "") + "\n")
-                    else:
-                        lines.append(f"{ke_icon} {j}. **{title}**" + (f" — {snippet}" if snippet else "") + "\n")
-            lines.append("")
+        lines.extend(_render_ks_table(group_searches))
+        lines.extend(_render_ks_details(group_searches))
 
     if custom:
         lines.append("\n### Custom Search Topics\n")

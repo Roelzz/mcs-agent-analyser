@@ -106,6 +106,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
     bot_name = ""
     conversation_id = ""
     user_query = ""
+    latest_user_text: str | None = None
     first_timestamp: str | None = None
     last_timestamp: str | None = None
 
@@ -144,6 +145,8 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         # User message
         if act_type == "message" and role == "user":
             text = activity.get("text", "")
+            if text:
+                latest_user_text = text
             if not user_query and text:
                 user_query = text
             events.append(
@@ -437,6 +440,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                     knowledge_sources=deduped,
                     thought=pending_ks_thought,
                     output_knowledge_sources=output_deduped,
+                    triggering_user_message=latest_user_text,
                     **(pending_ks_query or {}),
                 )
                 pending_ks_query = None
