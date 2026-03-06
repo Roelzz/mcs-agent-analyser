@@ -23,6 +23,12 @@ class ComponentSummary(BaseModel):
     dialog_kind: str | None = None
     action_kind: str | None = None
     description: str | None = None
+    model_description: str | None = None
+    trigger_queries: list[str] = Field(default_factory=list)
+    action_summary: dict[str, int] = Field(default_factory=dict)
+    has_external_calls: bool = False
+    source_kind: str | None = None
+    source_site: str | None = None
 
 
 class GptInfo(BaseModel):
@@ -33,6 +39,7 @@ class GptInfo(BaseModel):
     knowledge_sources_kind: str | None = None
     web_browsing: bool = False
     code_interpreter: bool = False
+    conversation_starters: list[dict] = Field(default_factory=list)
 
 
 class TopicConnection(BaseModel):
@@ -95,6 +102,7 @@ class TimelineEvent(BaseModel):
     step_id: str | None = None
     plan_identifier: str | None = None
     raw_type: str | None = None
+    thought: str | None = None
 
 
 class ExecutionPhase(BaseModel):

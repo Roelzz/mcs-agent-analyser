@@ -18,6 +18,37 @@ def _sanitize_yaml(text: str) -> str:
     return text
 
 
+_EXTERNAL_ACTION_KINDS = {"InvokeConnectorAction", "InvokeFlowAction", "InvokeAIBuilderModelAction", "HttpRequestAction"}
+
+
+def _count_action_kinds(actions: list) -> dict[str, int]:
+    """Recursively walk action trees and count action kinds."""
+    counts: dict[str, int] = {}
+    if not actions:
+        return counts
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        kind = action.get("kind", "")
+        if kind:
+            counts[kind] = counts.get(kind, 0) + 1
+        # Recurse into nested action lists
+        for key in ("actions", "elseActions"):
+            nested = action.get(key)
+            if isinstance(nested, list):
+                for k, v in _count_action_kinds(nested).items():
+                    counts[k] = counts.get(k, 0) + v
+        # Recurse into conditions
+        for cond in action.get("conditions", []) or []:
+            if isinstance(cond, dict):
+                for key in ("actions", "elseActions"):
+                    nested = cond.get(key)
+                    if isinstance(nested, list):
+                        for k, v in _count_action_kinds(nested).items():
+                            counts[k] = counts.get(k, 0) + v
+    return counts
+
+
 def _extract_gpt_info(comp: dict) -> GptInfo:
     """Extract GPT configuration from a GptComponent."""
     metadata = comp.get("metadata", {}) or {}
@@ -34,6 +65,7 @@ def _extract_gpt_info(comp: dict) -> GptInfo:
         knowledge_sources_kind=ks.get("kind"),
         web_browsing=capabilities.get("webBrowsing", False),
         code_interpreter=capabilities.get("codeInterpreter", False),
+        conversation_starters=metadata.get("conversationStarters", []) or [],
     )
 
 
@@ -172,6 +204,27 @@ def parse_yaml(path: Path) -> tuple[BotProfile, dict[str, str]]:
             metadata = comp.get("metadata", {}) or {}
             display_name = metadata.get("displayName", schema_name)
 
+        # DialogComponent: extract trigger queries, model description, action summary
+        model_description = None
+        trigger_queries: list[str] = []
+        action_summary: dict[str, int] = {}
+        has_external_calls = False
+        if kind == "DialogComponent":
+            model_description = dialog.get("modelDescription")
+            trigger_queries = begin_dialog.get("intent", {}).get("triggerQueries", []) or []
+            dialog_actions = begin_dialog.get("actions", []) or []
+            action_summary = _count_action_kinds(dialog_actions)
+            has_external_calls = bool(set(action_summary) & _EXTERNAL_ACTION_KINDS)
+
+        # KnowledgeSourceComponent: extract source config
+        source_kind = None
+        source_site = None
+        if kind == "KnowledgeSourceComponent":
+            ks_config = comp.get("configuration", {}) or {}
+            source = ks_config.get("source", {}) or {}
+            source_kind = source.get("kind")
+            source_site = source.get("siteName") or source.get("siteUrl")
+
         components.append(
             ComponentSummary(
                 kind=kind,
@@ -182,6 +235,12 @@ def parse_yaml(path: Path) -> tuple[BotProfile, dict[str, str]]:
                 dialog_kind=dialog_kind,
                 action_kind=action_kind,
                 description=description,
+                model_description=model_description,
+                trigger_queries=trigger_queries,
+                action_summary=action_summary,
+                has_external_calls=has_external_calls,
+                source_kind=source_kind,
+                source_site=source_site,
             )
         )
 
@@ -217,6 +276,10 @@ def parse_yaml(path: Path) -> tuple[BotProfile, dict[str, str]]:
                 _extract_begin_dialogs(dialog_actions, comp_schema, comp_display, schema_to_display)
             )
 
+    # Extract environment variables and connectors from config
+    env_vars = config.get("environmentVariables", []) or []
+    connectors_raw = config.get("connectors", []) or []
+
     profile = BotProfile(
         schema_name=entity.get("schemaName", ""),
         bot_id=entity.get("cdsBotId", ""),
@@ -225,6 +288,8 @@ def parse_yaml(path: Path) -> tuple[BotProfile, dict[str, str]]:
         ai_settings=ai_settings,
         recognizer_kind=recognizer_kind,
         components=components,
+        environment_variables=env_vars,
+        connectors=connectors_raw,
         is_orchestrator=is_orchestrator,
         gpt_info=gpt_info,
         topic_connections=topic_connections,
