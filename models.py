@@ -106,6 +106,36 @@ class ExecutionPhase(BaseModel):
     state: str = "completed"
 
 
+class SearchResult(BaseModel):
+    name: str | None = None
+    url: str | None = None
+    text: str | None = None  # snippet
+    file_type: str | None = None
+    result_type: str | None = None  # e.g. "SharepointSiteSearch"
+
+
+class KnowledgeSearchInfo(BaseModel):
+    position: int = 0
+    timestamp: str | None = None
+    search_query: str | None = None
+    search_keywords: str | None = None
+    knowledge_sources: list[str] = Field(default_factory=list)
+    execution_time: str | None = None
+    thought: str | None = None
+    search_results: list[SearchResult] = Field(default_factory=list)
+    output_knowledge_sources: list[str] = Field(default_factory=list)
+    search_errors: list[str] = Field(default_factory=list)
+
+
+class CustomSearchStep(BaseModel):
+    task_dialog_id: str
+    display_name: str = ""
+    thought: str | None = None
+    status: str = "unknown"  # "inProgress", "completed", "failed"
+    error: str | None = None
+    execution_time: str | None = None
+
+
 class ConversationTimeline(BaseModel):
     bot_name: str = ""
     conversation_id: str = ""
@@ -114,3 +144,5 @@ class ConversationTimeline(BaseModel):
     phases: list[ExecutionPhase] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     total_elapsed_ms: float = 0.0
+    knowledge_searches: list[KnowledgeSearchInfo] = Field(default_factory=list)
+    custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)

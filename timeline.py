@@ -1,6 +1,7 @@
+import re
 from datetime import datetime, timezone
 
-from models import ConversationTimeline, EventType, ExecutionPhase, TimelineEvent
+from models import ConversationTimeline, CustomSearchStep, EventType, ExecutionPhase, KnowledgeSearchInfo, SearchResult, TimelineEvent
 
 
 def _parse_timestamp(ts: str | None) -> datetime | None:
@@ -94,6 +95,14 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
     events: list[TimelineEvent] = []
     phases: list[ExecutionPhase] = []
     errors: list[str] = []
+    knowledge_searches: list[KnowledgeSearchInfo] = []
+    custom_search_steps: list[CustomSearchStep] = []
+    pending_ks_query: dict | None = None
+    pending_ks_info: KnowledgeSearchInfo | None = None
+    pending_ks_thought: str | None = None
+    pending_ks_execution_time: str | None = None
+    pending_ks_results: list[SearchResult] = []
+    pending_ks_errors: list[str] = []
     bot_name = ""
     conversation_id = ""
     user_query = ""
@@ -102,6 +111,8 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
 
     # Track step triggers for duration calculation
     step_triggers: dict[str, str] = {}  # step_id -> trigger timestamp
+    tool_display_names: dict[str, str] = {}  # schemaName → displayName
+    pending_custom_searches: dict[str, CustomSearchStep] = {}  # task_dialog_id → step
 
     for activity in activities:
         act_type = activity.get("type", "")
@@ -185,6 +196,11 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                         plan_identifier=value.get("planIdentifier"),
                     )
                 )
+                for td in value.get("toolDefinitions", []):
+                    schema = td.get("schemaName", "")
+                    display = td.get("displayName", "")
+                    if schema and display:
+                        tool_display_names[schema] = display
 
             elif value_type == "DynamicPlanReceivedDebug":
                 ask = value.get("ask", "")
@@ -222,8 +238,60 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                     )
                 )
 
+                # Capture orchestrator reasoning for KS
+                if task_dialog_id == "P:UniversalSearchTool":
+                    pending_ks_thought = value.get("thought")
+
+                # Track custom search topics
+                if value.get("type") == "CustomTopic" and "search" in task_dialog_id.lower():
+                    pending_custom_searches[task_dialog_id] = CustomSearchStep(
+                        task_dialog_id=task_dialog_id,
+                        display_name=tool_display_names.get(task_dialog_id, task_dialog_id.split(".")[-1]),
+                        thought=value.get("thought"),
+                        status="inProgress",
+                    )
+
             elif value_type == "DynamicPlanStepFinished":
                 task_dialog_id = value.get("taskDialogId", "")
+                if task_dialog_id == "P:UniversalSearchTool":
+                    observation = value.get("observation") or {}
+                    sr = observation.get("search_result") or {}
+                    raw_results = sr.get("search_results") or []
+                    step_results = [
+                        SearchResult(
+                            name=r.get("Name"),
+                            url=r.get("Url"),
+                            text=r.get("Text"),
+                            file_type=r.get("FileType"),
+                            result_type=r.get("Type"),
+                        )
+                        for r in raw_results[:10]
+                    ]
+                    step_errors = list(sr.get("search_errors") or [])
+                    if pending_ks_info:
+                        pending_ks_info.execution_time = value.get("executionTime")
+                        pending_ks_info.search_results = step_results
+                        pending_ks_info.search_errors = step_errors
+                        knowledge_searches.append(pending_ks_info)
+                        pending_ks_info = None
+                        pending_ks_execution_time = None
+                        pending_ks_results = []
+                        pending_ks_errors = []
+                    else:
+                        # Finished event arrived before TraceData — store for later
+                        pending_ks_execution_time = value.get("executionTime")
+                        pending_ks_results = step_results
+                        pending_ks_errors = step_errors
+
+                if task_dialog_id in pending_custom_searches:
+                    step = pending_custom_searches.pop(task_dialog_id)
+                    step.status = value.get("state", "unknown")
+                    err = value.get("error")
+                    if err:
+                        step.error = err.get("message") if isinstance(err, dict) else str(err)
+                    step.execution_time = value.get("executionTime")
+                    custom_search_steps.append(step)
+
                 from parser import resolve_topic_name
 
                 topic = resolve_topic_name(task_dialog_id, schema_lookup)
@@ -329,6 +397,12 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                         )
                     )
 
+            elif value_type == "DynamicPlanStepBindUpdate" and value.get("taskDialogId") == "P:UniversalSearchTool":
+                pending_ks_query = {
+                    "search_query": value.get("arguments", {}).get("search_query"),
+                    "search_keywords": value.get("arguments", {}).get("search_keywords"),
+                }
+
             elif value_type == "UniversalSearchToolTraceData":
                 sources = value.get("knowledgeSources", [])
                 source_names = [s.split(".")[-1] if "." in s else s for s in sources]
@@ -341,6 +415,42 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                         + (f" (+{len(source_names) - 3})" if len(source_names) > 3 else ""),
                     )
                 )
+                def _clean_source(s: str) -> str:
+                    """Clean a raw knowledge source identifier to a display name."""
+                    if ".file." in s:
+                        # e.g. "cr4d9_sfdc.file.Printerdata.xlsx_8H0" → "Printerdata.xlsx"
+                        filename_with_id = s.split(".file.", 1)[1]
+                        return re.sub(r"_[A-Za-z0-9]{3,}$", "", filename_with_id)
+                    # topic/skill/other: strip ID suffix, take last segment
+                    # e.g. "topic.CloudOrchestration_TkDpn5ZmHLFOx4Oj" → "CloudOrchestration"
+                    base = re.sub(r"_[A-Za-z0-9]{3,}$", "", s)
+                    return base.split(".")[-1]
+
+                cleaned = [_clean_source(s) for s in sources]
+                deduped = list(dict.fromkeys(cleaned))
+                output_sources = value.get("outputKnowledgeSources", [])
+                output_cleaned = [_clean_source(s) for s in output_sources]
+                output_deduped = list(dict.fromkeys(output_cleaned))
+                pending_ks_info = KnowledgeSearchInfo(
+                    position=position,
+                    timestamp=timestamp,
+                    knowledge_sources=deduped,
+                    thought=pending_ks_thought,
+                    output_knowledge_sources=output_deduped,
+                    **(pending_ks_query or {}),
+                )
+                pending_ks_query = None
+                pending_ks_thought = None
+                # If DynamicPlanStepFinished already arrived (inverted order), commit now
+                if pending_ks_execution_time is not None:
+                    pending_ks_info.execution_time = pending_ks_execution_time
+                    pending_ks_info.search_results = pending_ks_results
+                    pending_ks_info.search_errors = pending_ks_errors
+                    knowledge_searches.append(pending_ks_info)
+                    pending_ks_info = None
+                    pending_ks_execution_time = None
+                    pending_ks_results = []
+                    pending_ks_errors = []
 
             elif value_type == "ErrorCode":
                 error_code = value.get("ErrorCode", "Unknown")
@@ -396,6 +506,9 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                     )
                 )
 
+    if pending_ks_info:
+        knowledge_searches.append(pending_ks_info)
+
     total_elapsed = _ms_between(first_timestamp, last_timestamp)
 
     return ConversationTimeline(
@@ -406,4 +519,6 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         phases=phases,
         errors=errors,
         total_elapsed_ms=total_elapsed,
+        knowledge_searches=knowledge_searches,
+        custom_search_steps=custom_search_steps,
     )

@@ -17,6 +17,18 @@ ACTOR_NAMES: dict[str, str] = {
 }
 
 
+def _parse_execution_time_ms(raw: str | None) -> float | None:
+    """Parse .NET TimeSpan 'HH:MM:SS.fffffff' to milliseconds."""
+    if not raw:
+        return None
+    import re
+    m = re.match(r"(\d+):(\d+):(\d+(?:\.\d+)?)", raw)
+    if not m:
+        return None
+    h, mi, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
+    return (h * 3600 + mi * 60 + s) * 1000
+
+
 def _format_duration(ms: float) -> str:
     """Format milliseconds to human-readable duration."""
     if ms < 1000:
@@ -173,7 +185,7 @@ _CATEGORY_COLUMNS: dict[str, list[str]] = {
     "orchestrator_topics": ["Name", "Schema", "State", "Dialog Kind", "Action Kind"],
     "system_topics": ["Name", "Schema", "State", "Trigger"],
     "automation_topics": ["Name", "Schema", "State", "Trigger"],
-    "knowledge": ["Name", "Type", "State", "Description"],
+    "knowledge": ["Name", "Status", "Description"],
     "skills": ["Name", "Schema", "State", "Description"],
     "custom_entities": ["Name", "Schema", "State"],
     "variables": ["Name", "Schema", "State"],
@@ -209,11 +221,12 @@ def _classify_component(comp: ComponentSummary) -> str | None:
 
 def _render_component_row(comp: ComponentSummary, category: str) -> str:
     """Render a single component row matching the category's columns."""
+    def _cell(text: str | None, maxlen: int = 100) -> str:
+        s = (text or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
+        return (s[:maxlen] + "...") if len(s) > maxlen else s
+
     if category == "user_topics":
-        desc = (comp.description or "—").replace("|", "\\|")
-        if len(desc) > 100:
-            desc = desc[:100] + "..."
-        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {desc} |"
+        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {_cell(comp.description)} |"
     if category == "orchestrator_topics":
         dialog = comp.dialog_kind or "—"
         action = comp.action_kind or "—"
@@ -223,15 +236,11 @@ def _render_component_row(comp: ComponentSummary, category: str) -> str:
         return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {trigger} |"
     if category == "knowledge":
         kind_type = "File" if comp.kind == "FileAttachmentComponent" else "Source"
-        desc = (comp.description or "—").replace("|", "\\|")
-        if len(desc) > 100:
-            desc = desc[:100] + "..."
-        return f"| {comp.display_name} | {kind_type} | {comp.state} | {desc} |"
+        state_icon = "✓" if comp.state == "Active" else "✗"
+        status = f"{kind_type} {state_icon}"
+        return f"| {comp.display_name} | {status} | {_cell(comp.description)} |"
     if category == "skills":
-        desc = (comp.description or "—").replace("|", "\\|")
-        if len(desc) > 100:
-            desc = desc[:100] + "..."
-        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {desc} |"
+        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {_cell(comp.description)} |"
     # custom_entities, variables, settings
     return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} |"
 
@@ -745,14 +754,7 @@ def render_gantt_chart(timeline: ConversationTimeline) -> str:
 
     lines = [
         "### Execution Gantt\n",
-        "| Color | Category |",
-        "| --- | --- |",
-        "| Blue | Orchestrator |",
-        "| Green | User |",
-        "| Purple | Agent |",
-        "| Orange | Tool Calls |",
-        "| Red | Errors |",
-        "| Gray | Idle |\n",
+        "*Color coding: 🔵 Orchestrator · 🟢 User · 🟣 Agent · 🟠 Tool Calls · 🔴 Errors · ⚫ Idle*\n",
         "```mermaid",
         "%%{init: {'theme':'base','themeVariables':{"
         "'taskBkgColor':'#4a90d9','taskBorderColor':'#357abd','taskTextColor':'#fff',"
@@ -760,7 +762,7 @@ def render_gantt_chart(timeline: ConversationTimeline) -> str:
         "'doneTaskBkgColor':'#9b59b6','doneTaskBorderColor':'#8e44ad',"
         "'critBkgColor':'#e74c3c','critBorderColor':'#c0392b',"
         "'activeCritBkgColor':'#f39c12','activeCritBorderColor':'#e67e22',"
-        "'doneCritBkgColor':'#95a5a6','doneCritBorderColor':'#7f8c8d'}}}%%",
+        "'doneCritBkgColor':'#2a2a2a','doneCritBorderColor':'#555555'}}}%%",
         "gantt",
         "    dateFormat x",
         "    axisFormat %M:%S",
@@ -805,7 +807,7 @@ def render_gantt_chart(timeline: ConversationTimeline) -> str:
                     if current_section != "Idle":
                         lines.append("    section Idle")
                         current_section = "Idle"
-                    lines.append(f"    {idle_label} :done, crit, idle{i}, {idle_start}, {idle_end}")
+                    lines.append(f"    {idle_label} :crit, done, idle{i}, {idle_start}, {idle_end}")
                     break
 
         section = _sanitize_mermaid(_gantt_section(event))
@@ -820,6 +822,150 @@ def render_gantt_chart(timeline: ConversationTimeline) -> str:
 
     lines.append("```")
     lines.append("")
+    return "\n".join(lines)
+
+
+def _grounding_score(ks: "KnowledgeSearchInfo") -> tuple[str, str]:
+    count = len(ks.search_results)
+    if count == 0:
+        return "⚠️", "No Grounding"
+    raw = f"{ks.search_query or ''} {ks.search_keywords or ''}".lower()
+    stop = {"the", "a", "an", "is", "in", "of", "to", "for", "and", "or", "what", "how", ""}
+    terms = {w for w in raw.split() if w not in stop and len(w) > 2}
+    if terms:
+        hits = sum(
+            1 for r in ks.search_results[:5]
+            if any(t in (r.name or "").lower() or t in (r.text or "").lower()[:200] for t in terms)
+        )
+        relevance = hits / min(count, 5)
+    else:
+        relevance = 0.5
+    if count >= 7 and relevance >= 0.4:
+        return "🟢", "Strong"
+    elif count >= 3 or relevance >= 0.4:
+        return "🟡", "Moderate"
+    else:
+        return "🟠", "Weak"
+
+
+def _source_efficiency(ks: "KnowledgeSearchInfo") -> str | None:
+    queried = set(ks.knowledge_sources)
+    used = set(ks.output_knowledge_sources)
+    if not queried or not used:
+        return None
+    contributing = queried & used
+    silent = queried - used
+    pct = int(len(contributing) / len(queried) * 100)
+
+    if pct >= 80:
+        badge = "🟢"
+    elif pct >= 50:
+        badge = "🟡"
+    else:
+        badge = "🔴"
+
+    line = f"{badge} **Source efficiency:** {len(contributing)}/{len(queried)} sources returned results ({pct}%)"
+    if silent:
+        silent_names = ", ".join(f"`{s}`" for s in sorted(silent))
+        line += f"\n⚫ **Silent sources** (no results): {silent_names}"
+    return line
+
+
+def render_knowledge_search_section(
+    timeline: ConversationTimeline,
+    profile: BotProfile | None = None,
+) -> str:
+    """Render Knowledge Search section as Markdown."""
+    searches = timeline.knowledge_searches
+    custom = getattr(timeline, "custom_search_steps", [])
+    gk = (
+        "✓ On"
+        if (profile and profile.ai_settings and profile.ai_settings.use_model_knowledge)
+        else "✗ Off"
+    )
+    count = len(searches)
+
+    lines = [f"## Knowledge Search\n"]
+    lines.append(f"**{count} search{'es' if count != 1 else ''}** | General Knowledge: {gk}\n")
+
+    if not searches and not custom:
+        lines.append("No knowledge searches recorded.\n")
+        return "\n".join(lines)
+
+    if searches:
+        lines += [
+            "| # | Search Query | Keywords | Sources | Duration | Grounding |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for i, ks in enumerate(searches, 1):
+            query = (ks.search_query or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
+            keywords = (ks.search_keywords or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
+            keywords = keywords[:80] + "…" if len(keywords) > 80 else keywords
+            src_list = ks.knowledge_sources
+            sources = ", ".join(src_list) if src_list else "—"
+            dur_ms = _parse_execution_time_ms(ks.execution_time)
+            dur = _format_duration(dur_ms) if dur_ms is not None else (ks.execution_time or "—")
+            badge, label = _grounding_score(ks)
+            lines.append(f"| {i} | {query} | {keywords} | {sources} | {dur} | {badge} {label} |")
+
+        lines.append("")
+
+        for i, ks in enumerate(searches, 1):
+            if ks.thought:
+                lines.append(f"**#{i} Why searched:** *{ks.thought}*\n")
+
+        # Grounding details per search
+        for i, ks in enumerate(searches, 1):
+            has_detail = ks.search_results or ks.search_errors or ks.output_knowledge_sources
+            if not has_detail:
+                continue
+            lines.append(f"\n#### Search #{i} — Grounding Details\n")
+
+            if ks.output_knowledge_sources:
+                out_src = ", ".join(ks.output_knowledge_sources)
+                lines.append(f"**Sources used for grounding:** {out_src}\n")
+            eff = _source_efficiency(ks)
+            if eff:
+                lines.append(f"{eff}\n")
+
+            for err in ks.search_errors:
+                lines.append(f"> ⚠ Search error: `{err}`\n")
+
+            count = len(ks.search_results)
+            if count == 0:
+                lines.append("> ⚠ **No results returned** — response may not be grounded.\n")
+            else:
+                lines.append(f"**{count} result{'s' if count != 1 else ''} retrieved:**\n")
+                for j, r in enumerate(ks.search_results, 1):
+                    title = r.name or r.url or f"Result {j}"
+                    title = title.replace("|", "\\|").replace("\n", " ")[:80]
+                    snippet = (r.text or "").replace("\n", " ").replace("|", "\\|")
+                    snippet_len = len(r.text or "")
+                    if snippet_len >= 200:
+                        ke_icon = "🟢"
+                    elif snippet_len >= 50:
+                        ke_icon = "🟡"
+                    else:
+                        ke_icon = "🔴"
+                    if r.url:
+                        lines.append(f"{ke_icon} {j}. [{title}]({r.url})" + (f" — {snippet}" if snippet else "") + "\n")
+                    else:
+                        lines.append(f"{ke_icon} {j}. **{title}**" + (f" — {snippet}" if snippet else "") + "\n")
+            lines.append("")
+
+    if custom:
+        lines.append("\n### Custom Search Topics\n")
+        for cs in custom:
+            status_icon = "✓" if cs.status == "completed" else ("✗" if cs.status == "failed" else "⏳")
+            lines.append(f"**{status_icon} {cs.display_name}** ({cs.status})")
+            if cs.thought:
+                lines.append(f"> {cs.thought}")
+            if cs.error:
+                lines.append(f"> ⚠ Error: `{cs.error}`")
+            dur_ms = _parse_execution_time_ms(cs.execution_time)
+            dur = _format_duration(dur_ms) if dur_ms is not None else (cs.execution_time or "—")
+            lines.append(f"Duration: {dur}\n")
+
     return "\n".join(lines)
 
 
@@ -853,6 +999,8 @@ def render_transcript_report(
         lines.append("")
         sections.append("\n".join(lines))
 
+    sections.append(render_knowledge_search_section(timeline))
+
     # Conversation trace (reuses existing render_timeline which includes
     # sequence diagram, gantt, phase breakdown, event log, errors)
     sections.append(render_timeline(timeline))
@@ -877,6 +1025,7 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline) -> str:
 
     sections.append(render_bot_metadata(profile))
     sections.append(render_components(profile))
+    sections.append(render_knowledge_search_section(timeline, profile=profile))
 
     topic_graph = render_topic_graph(profile)
     if topic_graph:

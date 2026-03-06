@@ -27,40 +27,104 @@ def split_markdown_mermaid(md: str) -> list[tuple[str, str]]:
 
 
 def mermaid_script() -> rx.Component:
-    """Load mermaid.js CDN and auto-render diagrams via MutationObserver."""
+    """Load mermaid.js CDN and auto-render diagrams via MutationObserver.
+
+    Supports dynamic light/dark theme switching and injects readability CSS.
+    """
     return rx.fragment(
         rx.script(src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"),
         rx.script(
             """
             (function() {
+                // Inject readability CSS
+                (function injectCSS() {
+                    var style = document.createElement('style');
+                    style.textContent = [
+                        '.rx-Markdown { line-height: 1.75; font-size: 15px; }',
+                        '.rx-Markdown table { border-collapse: collapse; width: 100%; font-size: 13.5px; }',
+                        '.rx-Markdown th, .rx-Markdown td { border: 1px solid var(--gray-a5); padding: 8px 14px; text-align: left; }',
+                        '.rx-Markdown th { background: var(--gray-a3); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }',
+                        '.rx-Markdown tr:nth-child(even) td { background: var(--gray-a2); }',
+                        '.rx-Markdown pre:not(.mermaid) { background: var(--gray-a3); border: 1px solid var(--gray-a5); border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 13px; font-family: \\'JetBrains Mono\\', monospace; }',
+                        '.rx-Markdown code:not(pre code) { background: var(--gray-a3); border-radius: 4px; padding: 2px 6px; font-size: 0.875em; font-family: \\'JetBrains Mono\\', monospace; }',
+                        'pre.mermaid { background: var(--gray-a2); border: 1px solid var(--gray-a4); border-radius: 10px; padding: 24px; margin: 16px 0; }',
+                    ].join('\\n');
+                    document.head.appendChild(style);
+                })();
+
+                function getMermaidTheme() {
+                    var cl = document.documentElement.className;
+                    return cl.indexOf('dark') !== -1 ? 'dark' : 'default';
+                }
+
                 function initMermaidObserver() {
                     if (typeof mermaid === 'undefined') {
                         setTimeout(initMermaidObserver, 100);
                         return;
                     }
-                    mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
+                    mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
 
-                    function renderUnprocessed() {
-                        var els = document.querySelectorAll('pre.mermaid:not([data-processed])');
+                    var isRendering = false;
+
+                    function fixIdleBars() {
+                        document.querySelectorAll('pre.mermaid svg rect.task.done.crit, pre.mermaid svg rect.task.crit.done').forEach(function(r) {
+                            r.style.setProperty('fill', '#2a2a2a', 'important');
+                            r.style.setProperty('stroke', '#555555', 'important');
+                        });
+                        document.querySelectorAll('pre.mermaid svg text.taskText.done.crit, pre.mermaid svg text.taskText.crit.done').forEach(function(t) {
+                            t.style.setProperty('fill', '#cccccc', 'important');
+                        });
+                    }
+
+                    function storeAndRender() {
+                        if (isRendering) return;
+                        var els = Array.from(document.querySelectorAll('pre.mermaid:not([data-processed])'));
+                        els.forEach(function(el) {
+                            if (!el.getAttribute('data-mermaid-source')) {
+                                el.setAttribute('data-mermaid-source', el.textContent);
+                            }
+                        });
                         if (els.length > 0) {
-                            mermaid.run({ nodes: els });
+                            isRendering = true;
+                            mermaid.run({ nodes: els }).then(function() {
+                                fixIdleBars();
+                                isRendering = false;
+                            }).catch(function(err) {
+                                console.error('Mermaid render error:', err);
+                                isRendering = false;
+                            });
                         }
                     }
 
-                    renderUnprocessed();
+                    function rerenderAll() {
+                        mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
+                        document.querySelectorAll('pre.mermaid').forEach(function(el) {
+                            var src = el.getAttribute('data-mermaid-source');
+                            if (src) { el.removeAttribute('data-processed'); el.innerHTML = src; }
+                        });
+                        storeAndRender();
+                    }
 
-                    var observer = new MutationObserver(function(mutations) {
-                        var dominated = false;
+                    storeAndRender();
+
+                    // Watch for new mermaid nodes (Reflex SPA navigation)
+                    var domObserver = new MutationObserver(function(mutations) {
+                        var hasNew = false;
                         for (var i = 0; i < mutations.length; i++) {
-                            if (mutations[i].addedNodes.length > 0) {
-                                dominated = true;
-                                break;
-                            }
+                            if (mutations[i].addedNodes.length > 0) { hasNew = true; break; }
                         }
-                        if (dominated) { renderUnprocessed(); }
+                        if (hasNew) { storeAndRender(); }
                     });
-                    observer.observe(document.body, { childList: true, subtree: true });
+                    domObserver.observe(document.body, { childList: true, subtree: true });
+
+                    // Watch for color mode changes on <html> element
+                    new MutationObserver(function(muts) {
+                        muts.forEach(function(m) {
+                            if (m.attributeName === 'class') { rerenderAll(); }
+                        });
+                    }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
                 }
+
                 initMermaidObserver();
             })();
             """

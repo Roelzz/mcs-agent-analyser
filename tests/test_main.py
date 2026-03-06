@@ -2,13 +2,16 @@ from pathlib import Path
 
 import pytest
 
-from models import BotProfile, ConversationTimeline, EventType, TimelineEvent
+from models import BotProfile, ConversationTimeline, EventType, KnowledgeSearchInfo, SearchResult, TimelineEvent
 from parser import _sanitize_yaml, parse_dialog_json, parse_yaml, resolve_topic_name
 from renderer import (
+    _grounding_score,
+    _source_efficiency,
     _topic_display,
     render_components,
     render_event_log,
     render_gantt_chart,
+    render_knowledge_search_section,
     render_mermaid_sequence,
     render_report,
     render_topic_graph,
@@ -783,7 +786,7 @@ def test_gantt_collapses_idle_gaps():
     # Idle marker should span the actual gap (~120s = 120000ms)
     idle_positions = []
     for line in output.split("\n"):
-        if "crit, idle" in line:
+        if ":crit, done, idle" in line:
             parts = line.strip().rsplit(",", 2)
             if len(parts) == 3:
                 try:
@@ -938,7 +941,7 @@ def test_gantt_semantic_color_tags():
 
 
 def test_gantt_has_legend():
-    """Gantt output should include a color legend table."""
+    """Gantt output should include inline emoji color legend."""
     timeline = ConversationTimeline(
         bot_name="TestBot",
         conversation_id="conv-1",
@@ -958,13 +961,213 @@ def test_gantt_has_legend():
     )
     output = render_gantt_chart(timeline)
 
-    assert "| Color | Category |" in output
-    assert "| Blue | Orchestrator |" in output
-    assert "| Green | User |" in output
-    assert "| Purple | Agent |" in output
-    assert "| Orange | Tool Calls |" in output
-    assert "| Red | Errors |" in output
-    assert "| Gray | Idle |" in output
+    assert "🔵 Orchestrator" in output
+    assert "🟢 User" in output
+    assert "🟣 Agent" in output
+    assert "🟠 Tool Calls" in output
+    assert "| Color | Category |" not in output
+    assert "🔴 Errors" in output
+    assert "⚫ Idle" in output
+
+
+def test_knowledge_search_section_basic():
+    """Timeline with 2 KnowledgeSearchInfo objects → table with 2 rows."""
+    timeline = ConversationTimeline(
+        knowledge_searches=[
+            KnowledgeSearchInfo(
+                search_query="How do I reset my password?",
+                search_keywords="password, reset",
+                knowledge_sources=["Printerdata.xlsx"],
+                execution_time="49.4s",
+            ),
+            KnowledgeSearchInfo(
+                search_query="How do I reset my password?",
+                search_keywords="password, reset",
+                knowledge_sources=["Printerdata.xlsx"],
+                execution_time="20.9s",
+            ),
+        ]
+    )
+    output = render_knowledge_search_section(timeline)
+
+    assert "## Knowledge Search" in output
+    assert "**2 searches**" in output
+    assert "| # | Search Query | Keywords | Sources | Duration |" in output
+    assert "How do I reset my password?" in output
+    assert "49.4s" in output
+    assert "20.9s" in output
+    # Should have 2 data rows
+    rows = [line for line in output.split("\n") if line.startswith("| ") and line[2].isdigit()]
+    assert len(rows) == 2
+
+
+def test_knowledge_search_section_empty():
+    """No searches → 'No knowledge searches recorded.'"""
+    timeline = ConversationTimeline()
+    output = render_knowledge_search_section(timeline)
+
+    assert "## Knowledge Search" in output
+    assert "**0 searches**" in output
+    assert "No knowledge searches recorded." in output
+    assert "| # |" not in output
+
+
+def test_knowledge_search_source_dedup():
+    """Source _XXXXX suffix stripped and duplicates removed via parser."""
+    # Use the actual format from transcripts: "env.file.Name.ext_ID" and "topic.*" format
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepBindUpdate",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 1},
+            "conversation": {"id": "conv-1"},
+            "value": {"taskDialogId": "P:UniversalSearchTool", "arguments": {}},
+        },
+        {
+            "type": "event",
+            "valueType": "UniversalSearchToolTraceData",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "channelData": {"webchat:internal:position": 2},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "knowledgeSources": [
+                    "cr4d9_sfdc.file.Printerdata.xlsx_8H0",
+                    "cr4d9_sfdc.file.Printerdata.xlsx_9AB",
+                    "cr4d9_sfdc.file.Manual.pdf_ZZZ",
+                    "topic.AIAssistant",
+                    "topic.CloudOrchestration_TkDpn5ZmHLFOx4Oj",
+                ],
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:50Z",
+            "channelData": {"webchat:internal:position": 3},
+            "conversation": {"id": "conv-1"},
+            "value": {"taskDialogId": "P:UniversalSearchTool", "stepId": "s1", "state": "completed"},
+        },
+    ]
+    timeline = build_timeline(activities, {})
+    sources = timeline.knowledge_searches[0].knowledge_sources
+
+    assert "Printerdata.xlsx" in sources
+    assert "Manual.pdf" in sources
+    assert "AIAssistant" in sources
+    assert "CloudOrchestration" in sources
+    assert len(sources) == 4  # Printerdata.xlsx deduplicated, topic.* cleaned
+
+
+def test_knowledge_search_parser():
+    """Parser populates knowledge_searches from DynamicPlanStepBindUpdate + UniversalSearchToolTraceData + DynamicPlanStepFinished."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepBindUpdate",
+            "from": {"role": "bot", "name": "TestBot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 1},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "taskDialogId": "P:UniversalSearchTool",
+                "arguments": {
+                    "search_query": "How do I reset my Code1 password?",
+                    "search_keywords": "Code1, password reset",
+                },
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "UniversalSearchToolTraceData",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "channelData": {"webchat:internal:position": 2},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "knowledgeSources": ["cr4d9_sfdc.file.Printerdata.xlsx_8H0", "cr4d9_sfdc.file.Printerdata.xlsx_9AB"],
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:50Z",
+            "channelData": {"webchat:internal:position": 3},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "taskDialogId": "P:UniversalSearchTool",
+                "stepId": "step-1",
+                "state": "completed",
+                "executionTime": "49.4s",
+            },
+        },
+    ]
+    timeline = build_timeline(activities, {})
+
+    assert len(timeline.knowledge_searches) == 1
+    ks = timeline.knowledge_searches[0]
+    assert ks.search_query == "How do I reset my Code1 password?"
+    assert ks.search_keywords == "Code1, password reset"
+    assert "Printerdata.xlsx" in ks.knowledge_sources
+    assert len(ks.knowledge_sources) == 1  # deduped
+    assert ks.execution_time == "49.4s"
+
+
+def test_knowledge_search_inverted_order():
+    """DynamicPlanStepFinished arriving before UniversalSearchToolTraceData still commits the search."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepBindUpdate",
+            "from": {"role": "bot", "name": "TestBot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 1},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "taskDialogId": "P:UniversalSearchTool",
+                "arguments": {
+                    "search_query": "How do I reset my password?",
+                    "search_keywords": "password, reset",
+                },
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:02Z",
+            "channelData": {"webchat:internal:position": 2},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "taskDialogId": "P:UniversalSearchTool",
+                "stepId": "step-1",
+                "state": "completed",
+                "executionTime": "12.3s",
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "UniversalSearchToolTraceData",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:03Z",
+            "channelData": {"webchat:internal:position": 3},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "knowledgeSources": ["cr4d9_sfdc.file.Manual.pdf_XY1"],
+            },
+        },
+    ]
+    timeline = build_timeline(activities, {})
+
+    assert len(timeline.knowledge_searches) == 1
+    ks = timeline.knowledge_searches[0]
+    assert ks.search_query == "How do I reset my password?"
+    assert ks.execution_time == "12.3s"
+    assert "Manual.pdf" in ks.knowledge_sources
 
 
 def test_gantt_idle_gap_tagged():
@@ -994,4 +1197,327 @@ def test_gantt_idle_gap_tagged():
     )
     output = render_gantt_chart(timeline)
 
-    assert ":done, crit, idle" in output
+    assert ":crit, done, idle" in output
+
+
+def test_custom_search_step_tracking():
+    """Custom search topics (type=CustomTopic, taskDialogId contains 'search') should be tracked."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanReceived",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 0},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "planIdentifier": "plan-1",
+                "steps": [],
+                "toolDefinitions": [
+                    {
+                        "schemaName": "cr61c_testKnowledge.topic.AdvancedSearch",
+                        "displayName": "Advanced Search",
+                    }
+                ],
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepTriggered",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "channelData": {"webchat:internal:position": 1},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "taskDialogId": "cr61c_testKnowledge.topic.AdvancedSearch",
+                "type": "CustomTopic",
+                "stepId": "step-1",
+                "thought": "Searching for research plan",
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:02Z",
+            "channelData": {"webchat:internal:position": 2},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "taskDialogId": "cr61c_testKnowledge.topic.AdvancedSearch",
+                "stepId": "step-1",
+                "state": "failed",
+                "error": {"message": "aiModelActionBadRequest"},
+            },
+        },
+    ]
+    timeline = build_timeline(activities, {})
+
+    assert len(timeline.custom_search_steps) == 1
+    cs = timeline.custom_search_steps[0]
+    assert cs.display_name == "Advanced Search"
+    assert cs.status == "failed"
+    assert cs.error == "aiModelActionBadRequest"
+
+
+def test_knowledge_search_sources_all_shown():
+    """Sources list with more than 5 items should all be shown — no truncation."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        knowledge_searches=[
+            KnowledgeSearchInfo(
+                search_query="test query",
+                knowledge_sources=["Src1", "Src2", "Src3", "Src4", "Src5", "Src6", "Src7", "Src8"],
+            )
+        ],
+    )
+    output = render_knowledge_search_section(timeline)
+    assert "Src8" in output
+    assert "+3 more" not in output
+
+
+def test_search_results_captured():
+    """search_results and output_knowledge_sources should be captured from trace events."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepBindUpdate",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 1},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "taskDialogId": "P:UniversalSearchTool",
+                "arguments": {"search_query": "printer issue", "search_keywords": "printer"},
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "UniversalSearchToolTraceData",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "channelData": {"webchat:internal:position": 2},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "knowledgeSources": ["topic.PrinterHelp_ABC"],
+                "outputKnowledgeSources": ["topic.PrinterHelp_ABC"],
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:02Z",
+            "channelData": {"webchat:internal:position": 3},
+            "conversation": {"id": "conv-1"},
+            "value": {
+                "taskDialogId": "P:UniversalSearchTool",
+                "executionTime": "0:00:01.5000000",
+                "state": "completed",
+                "observation": {
+                    "search_result": {
+                        "search_results": [
+                            {"Name": "Printer Guide", "Url": "https://example.com/printer", "Text": "How to fix printer"},
+                            {"Name": "FAQ", "Url": "https://example.com/faq", "Text": "Printer FAQ content"},
+                        ]
+                    }
+                },
+            },
+        },
+    ]
+    timeline = build_timeline(activities, {})
+    assert len(timeline.knowledge_searches) == 1
+    ks = timeline.knowledge_searches[0]
+    assert len(ks.search_results) == 2
+    assert ks.search_results[0].text == "How to fix printer"
+    assert len(ks.output_knowledge_sources) == 1
+    assert ks.output_knowledge_sources[0] == "PrinterHelp"
+
+
+def test_grounding_summary_rendered():
+    """render_knowledge_search_section should include grounding details with name and URL."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        knowledge_searches=[
+            KnowledgeSearchInfo(
+                search_query="test",
+                knowledge_sources=["DocSource"],
+                search_results=[
+                    SearchResult(name="Doc A", url="https://x.com", text="some text"),
+                ],
+            )
+        ],
+    )
+    output = render_knowledge_search_section(timeline)
+    assert "Grounding Details" in output
+    assert "Doc A" in output
+    assert "https://x.com" in output
+
+
+def test_no_results_warning():
+    """When search_results is empty but search_errors is populated, warning should appear."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        knowledge_searches=[
+            KnowledgeSearchInfo(
+                search_query="test",
+                knowledge_sources=["DocSource"],
+                search_results=[],
+                search_errors=["timeout"],
+            )
+        ],
+    )
+    output = render_knowledge_search_section(timeline)
+    assert "No results returned" in output
+
+
+# --- Grounding + polish tests ---
+
+
+def test_grounding_score_strong():
+    """8 results with query keywords in result titles → badge 🟢 Strong."""
+    results = [SearchResult(name=f"printer fix guide {i}", text="printer fix content") for i in range(8)]
+    ks = KnowledgeSearchInfo(
+        search_query="printer fix",
+        search_results=results,
+    )
+    badge, label = _grounding_score(ks)
+    assert badge == "🟢"
+    assert label == "Strong"
+
+
+def test_grounding_score_no_grounding():
+    """0 results → badge ⚠️ No Grounding."""
+    ks = KnowledgeSearchInfo(search_query="anything", search_results=[])
+    badge, label = _grounding_score(ks)
+    assert badge == "⚠️"
+    assert label == "No Grounding"
+
+
+def test_source_efficiency_partial():
+    """5 queried, 3 used → 3/5 sources returned results (60%), silent list shown."""
+    ks = KnowledgeSearchInfo(
+        knowledge_sources=["A", "B", "C", "D", "E"],
+        output_knowledge_sources=["A", "C", "E"],
+        search_results=[SearchResult(name="x")],
+    )
+    result = _source_efficiency(ks)
+    assert result is not None
+    assert "3/5 sources returned results (60%)" in result
+    assert "Silent sources" in result
+    assert "🟡" in result
+    assert "`B`" in result
+    assert "`D`" in result
+    assert "+2 more" not in result
+
+
+def test_source_efficiency_high():
+    """9/10 contributing → 90% → 🟢 badge."""
+    sources = [str(i) for i in range(10)]
+    ks = KnowledgeSearchInfo(
+        knowledge_sources=sources,
+        output_knowledge_sources=sources[:9],
+        search_results=[SearchResult(name="x")],
+    )
+    result = _source_efficiency(ks)
+    assert result is not None
+    assert "9/10 sources returned results (90%)" in result
+    assert "🟢" in result
+
+
+def test_source_efficiency_low():
+    """2/10 contributing → 20% → 🔴 badge."""
+    sources = [str(i) for i in range(10)]
+    ks = KnowledgeSearchInfo(
+        knowledge_sources=sources,
+        output_knowledge_sources=sources[:2],
+        search_results=[SearchResult(name="x")],
+    )
+    result = _source_efficiency(ks)
+    assert result is not None
+    assert "2/10 sources returned results (20%)" in result
+    assert "🔴" in result
+
+
+def test_grounding_details_shows_all_results():
+    """5 results → all 5 shown, no 'more results' text."""
+    from models import ConversationTimeline
+
+    long_snippet = "A" * 300
+    results = [SearchResult(name=f"Result {i}", url=f"http://example.com/{i}", text=long_snippet if i == 1 else None) for i in range(1, 6)]
+    ks = KnowledgeSearchInfo(
+        search_query="test query",
+        knowledge_sources=["src1"],
+        output_knowledge_sources=["src1"],
+        search_results=results,
+    )
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[],
+        knowledge_searches=[ks],
+    )
+    output = render_knowledge_search_section(timeline)
+    assert "Result 5" in output
+    assert "more result" not in output
+    # Snippet must not be truncated and must not have trailing ellipsis
+    assert long_snippet in output
+    assert long_snippet + "..." not in output
+
+
+def test_knowledge_table_merged_status():
+    """Knowledge table should show 'Source ✓' in a single Status column."""
+    from models import AISettings, ComponentSummary
+
+    profile = BotProfile(
+        display_name="TestBot",
+        schema_name="test",
+        bot_id="id",
+        channels=[],
+        recognizer_kind="Gen",
+        is_orchestrator=False,
+        ai_settings=AISettings(),
+        components=[
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="northampton",
+                schema_name="northampton",
+                state="Active",
+                description="Test knowledge source",
+            )
+        ],
+    )
+    output = render_components(profile)
+    assert "Source ✓" in output
+    # Should NOT have separate "Source" and "Active" columns
+    assert "| Source | Active" not in output
+
+
+def test_gantt_legend_inline():
+    """Gantt legend should be inline emoji line, not a table."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary="User: hello",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: hi",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+    assert "🔵" in output
+    assert "| Color | Category |" not in output
