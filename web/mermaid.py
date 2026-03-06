@@ -41,13 +41,20 @@ def mermaid_script() -> rx.Component:
                     var style = document.createElement('style');
                     style.textContent = [
                         '.rx-Markdown { line-height: 1.75; font-size: 15px; }',
-                        '.rx-Markdown table { border-collapse: collapse; width: 100%; font-size: 13.5px; }',
-                        '.rx-Markdown th, .rx-Markdown td { border: 1px solid var(--gray-a5); padding: 8px 14px; text-align: left; }',
-                        '.rx-Markdown th { background: var(--gray-a3); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }',
+                        '.rx-Markdown table { border-collapse: collapse; width: 100%; min-width: 600px; font-size: 13.5px; display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }',
+                        '.rx-Markdown th, .rx-Markdown td { border: 1px solid var(--gray-a5); padding: 8px 14px; text-align: left; word-wrap: break-word; overflow-wrap: break-word; max-width: 400px; vertical-align: top; }',
+                        '.rx-Markdown th { background: var(--gray-a3); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }',
                         '.rx-Markdown tr:nth-child(even) td { background: var(--gray-a2); }',
                         '.rx-Markdown pre:not(.mermaid) { background: var(--gray-a3); border: 1px solid var(--gray-a5); border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 13px; font-family: \\'JetBrains Mono\\', monospace; }',
                         '.rx-Markdown code:not(pre code) { background: var(--gray-a3); border-radius: 4px; padding: 2px 6px; font-size: 0.875em; font-family: \\'JetBrains Mono\\', monospace; }',
                         'pre.mermaid { background: var(--gray-a2); border: 1px solid var(--gray-a4); border-radius: 10px; padding: 24px; margin: 16px 0; }',
+                        '.rx-Markdown h2 { margin-top: 2.5em; margin-bottom: 0.75em; }',
+                        '.rx-Markdown h3 { margin-top: 2em; margin-bottom: 0.75em; padding-bottom: 0.4em; border-bottom: 1px solid var(--gray-a4); }',
+                        '.rx-Markdown h4 { margin-top: 1.5em; margin-bottom: 0.5em; }',
+                        '.rx-Markdown blockquote { border-left: 3px solid var(--amber-8); padding: 8px 16px; margin: 12px 0; background: var(--amber-a2); border-radius: 0 6px 6px 0; }',
+                        '.rx-Markdown ul, .rx-Markdown ol { padding-left: 1.5em; margin: 8px 0; }',
+                        '.rx-Markdown li { margin-bottom: 4px; }',
+                        '.rx-Markdown hr { border: none; border-top: 1px solid var(--gray-a4); margin: 2em 0; }',
                     ].join('\\n');
                     document.head.appendChild(style);
                 })();

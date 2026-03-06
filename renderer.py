@@ -116,6 +116,15 @@ def render_bot_profile(profile: BotProfile) -> str:
             lines.append(f"**System Instructions** ({char_count} chars):\n")
             lines.append(f"```\n{gpt.instructions}\n```")
             lines.append("")
+        if gpt.conversation_starters:
+            lines.append("### Conversation Starters\n")
+            lines.append("| Title | Example Query |")
+            lines.append("| --- | --- |")
+            for starter in gpt.conversation_starters:
+                title = starter.get("title", "—")
+                message = starter.get("message", "—")
+                lines.append(f"| {title} | {message} |")
+            lines.append("")
 
     return "\n".join(lines)
 
@@ -137,6 +146,31 @@ def render_bot_metadata(profile: BotProfile) -> str:
         f"| Content Moderation | {profile.ai_settings.content_moderation} |",
         "",
     ]
+
+    if profile.environment_variables:
+        lines.append("### Environment Variables\n")
+        lines.append("| Name | Type | Value |")
+        lines.append("| --- | --- | --- |")
+        for var in profile.environment_variables:
+            name = var.get("name", var.get("displayName", "—"))
+            var_type = var.get("type", "—")
+            value = str(var.get("value", var.get("defaultValue", "—")))
+            value = value.replace("|", "\\|").replace("\n", " ").replace("\r", "")
+            lines.append(f"| {name} | {var_type} | {value} |")
+        lines.append("")
+
+    if profile.connectors:
+        lines.append("### Connectors\n")
+        lines.append("| Name | Type | Description |")
+        lines.append("| --- | --- | --- |")
+        for conn in profile.connectors:
+            name = conn.get("displayName", conn.get("name", "—"))
+            conn_type = conn.get("type", conn.get("kind", "—"))
+            desc = conn.get("description", "—") or "—"
+            desc = desc.replace("|", "\\|").replace("\n", " ").replace("\r", "")
+            lines.append(f"| {name} | {conn_type} | {desc} |")
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -181,7 +215,7 @@ _CATEGORY_DISPLAY: dict[str, str] = {
 }
 
 _CATEGORY_COLUMNS: dict[str, list[str]] = {
-    "user_topics": ["Name", "Schema", "State", "Description"],
+    "user_topics": ["Name", "Schema", "State", "Triggers", "Description"],
     "orchestrator_topics": ["Name", "Schema", "State", "Dialog Kind", "Action Kind"],
     "system_topics": ["Name", "Schema", "State", "Trigger"],
     "automation_topics": ["Name", "Schema", "State", "Trigger"],
@@ -221,12 +255,13 @@ def _classify_component(comp: ComponentSummary) -> str | None:
 
 def _render_component_row(comp: ComponentSummary, category: str) -> str:
     """Render a single component row matching the category's columns."""
-    def _cell(text: str | None, maxlen: int = 100) -> str:
-        s = (text or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
-        return (s[:maxlen] + "...") if len(s) > maxlen else s
+    def _cell(text: str | None) -> str:
+        return (text or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
 
     if category == "user_topics":
-        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {_cell(comp.description)} |"
+        trigger_str = ", ".join(comp.trigger_queries) if comp.trigger_queries else "—"
+        trigger_str = _cell(trigger_str)
+        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {trigger_str} | {_cell(comp.description)} |"
     if category == "orchestrator_topics":
         dialog = comp.dialog_kind or "—"
         action = comp.action_kind or "—"
@@ -514,7 +549,6 @@ def render_event_log(timeline: ConversationTimeline) -> str:
     for i, event in enumerate(timeline.events, 1):
         etype = event.event_type.value
         summary = event.summary.replace("\n", " ").replace("|", "\\|")
-        summary = summary[:100] + "..." if len(summary) > 100 else summary
         lines.append(f"| {i} | {event.position} | {etype} | {summary} |")
 
     lines.append("")
@@ -871,22 +905,16 @@ def _source_efficiency(ks: "KnowledgeSearchInfo") -> str | None:
     return line
 
 
-def _truncate_user_message(msg: str, maxlen: int = 120) -> str:
-    """Truncate a user message for display as a group header."""
-    clean = msg.replace("\n", " ").replace("\r", "").strip()
-    if len(clean) > maxlen:
-        return clean[:maxlen] + "…"
-    return clean
+def _clean_user_message(msg: str) -> str:
+    """Clean a user message for display as a group header."""
+    return msg.replace("\n", " ").replace("\r", "").strip()
 
 
-def _compact_sources(src_list: list[str], max_shown: int = 3) -> str:
-    """Compact a sources list for table display: show first N, then '+X more'."""
+def _compact_sources(src_list: list[str]) -> str:
+    """Show all sources for table display."""
     if not src_list:
         return "—"
-    if len(src_list) <= max_shown:
-        return ", ".join(src_list)
-    shown = ", ".join(src_list[:max_shown])
-    return f"{shown} (+{len(src_list) - max_shown} more)"
+    return ", ".join(src_list)
 
 
 def _render_ks_table(searches: list[tuple[int, "KnowledgeSearchInfo"]]) -> list[str]:
@@ -897,9 +925,7 @@ def _render_ks_table(searches: list[tuple[int, "KnowledgeSearchInfo"]]) -> list[
     ]
     for idx, ks in searches:
         query = (ks.search_query or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
-        query = query[:60] + "…" if len(query) > 60 else query
         keywords = (ks.search_keywords or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
-        keywords = keywords[:40] + "…" if len(keywords) > 40 else keywords
         sources = _compact_sources(ks.knowledge_sources)
         dur_ms = _parse_execution_time_ms(ks.execution_time)
         dur = _format_duration(dur_ms) if dur_ms is not None else (ks.execution_time or "—")
@@ -939,7 +965,7 @@ def _render_ks_details(searches: list[tuple[int, "KnowledgeSearchInfo"]]) -> lis
             lines.append(f"**{result_count} result{'s' if result_count != 1 else ''} retrieved:**\n")
             for j, r in enumerate(ks.search_results, 1):
                 title = r.name or r.url or f"Result {j}"
-                title = title.replace("|", "\\|").replace("\n", " ")[:80]
+                title = title.replace("|", "\\|").replace("\n", " ")
                 snippet = (r.text or "").replace("\n", " ").replace("|", "\\|")
                 snippet_len = len(r.text or "")
                 if snippet_len >= 200:
@@ -997,7 +1023,7 @@ def render_knowledge_search_section(
         if total_turns > 1:
             lines.append("---\n")
         if msg_key is not None:
-            header = _truncate_user_message(msg_key)
+            header = _clean_user_message(msg_key)
             lines.append(f'### 💬 "{header}"\n')
         elif total_turns > 1:
             lines.append("### 🔧 System-initiated\n")
@@ -1018,6 +1044,107 @@ def render_knowledge_search_section(
             dur = _format_duration(dur_ms) if dur_ms is not None else (cs.execution_time or "—")
             lines.append(f"Duration: {dur}\n")
 
+    return "\n".join(lines)
+
+
+def render_orchestrator_reasoning(timeline: ConversationTimeline) -> str:
+    """Render orchestrator reasoning chain from STEP_TRIGGERED thoughts."""
+    rows: list[tuple[int, str, str]] = []
+    step_num = 0
+    for event in timeline.events:
+        if event.event_type == EventType.STEP_TRIGGERED:
+            step_num += 1
+            if event.thought:
+                topic = event.topic_name or "Unknown"
+                reasoning = event.thought.replace("|", "\\|").replace("\n", " ")
+                rows.append((step_num, topic, reasoning))
+    if not rows:
+        return ""
+    lines = [
+        "### Orchestrator Reasoning\n",
+        "| Step | Topic | Reasoning |",
+        "| --- | --- | --- |",
+    ]
+    for num, topic, reasoning in rows:
+        lines.append(f"| {num} | {topic} | {reasoning} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | None = None) -> str:
+    """Render topic deep dive: external calls and coverage analysis."""
+    lines: list[str] = []
+
+    # Section 1: Topics with external calls
+    external_topics = [
+        c for c in profile.components
+        if c.kind == "DialogComponent" and c.has_external_calls
+    ]
+    if external_topics:
+        lines.append("### Topics with External Calls\n")
+        lines.append("| Topic | Connector | Flow | AI Builder | HTTP | Total Actions |")
+        lines.append("| --- | --- | --- | --- | --- | --- |")
+        for comp in external_topics:
+            connector = comp.action_summary.get("InvokeConnectorAction", 0)
+            flow = comp.action_summary.get("InvokeFlowAction", 0)
+            ai_builder = comp.action_summary.get("InvokeAIBuilderModelAction", 0)
+            http = comp.action_summary.get("HttpRequestAction", 0)
+            total = sum(comp.action_summary.values())
+            lines.append(f"| {comp.display_name} | {connector} | {flow} | {ai_builder} | {http} | {total} |")
+        lines.append("")
+
+    # Section 2: Topic coverage (only if timeline provided)
+    if timeline:
+        dialog_comps = [
+            c for c in profile.components
+            if c.kind == "DialogComponent" and c.trigger_kind not in (
+                _SYSTEM_TRIGGERS | _AUTOMATION_TRIGGERS | {None}
+            ) and c.dialog_kind not in ("TaskDialog", "AgentDialog")
+        ]
+        if dialog_comps:
+            triggered_names = {
+                event.topic_name
+                for event in timeline.events
+                if event.event_type == EventType.STEP_TRIGGERED and event.topic_name
+            }
+            triggered_count = sum(1 for c in dialog_comps if c.display_name in triggered_names)
+            total_count = len(dialog_comps)
+            untriggered = [c for c in dialog_comps if c.display_name not in triggered_names]
+
+            lines.append("### Topic Coverage\n")
+            lines.append(f"**{triggered_count} of {total_count} user topics triggered** in this conversation.")
+            if untriggered:
+                lines.append(" Not triggered in this session:\n")
+                lines.append("| Topic | State | Has External Calls |")
+                lines.append("| --- | --- | --- |")
+                for comp in untriggered:
+                    ext = "Yes" if comp.has_external_calls else "No"
+                    lines.append(f"| {comp.display_name} | {comp.state} | {ext} |")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def render_knowledge_source_details(profile: BotProfile) -> str:
+    """Render expanded knowledge source details with descriptions and source config."""
+    ks_comps = [
+        c for c in profile.components
+        if c.kind == "KnowledgeSourceComponent" and (c.description or c.source_kind)
+    ]
+    if not ks_comps:
+        return ""
+    lines = ["### Knowledge Source Details\n"]
+    for comp in ks_comps:
+        lines.append(f"#### {comp.display_name}\n")
+        source_parts = []
+        if comp.source_kind:
+            source_parts.append(comp.source_kind)
+        if comp.source_site:
+            source_parts.append(comp.source_site)
+        if source_parts:
+            lines.append(f"**Source:** {' · '.join(source_parts)}\n")
+        if comp.description:
+            lines.append(f"{comp.description}\n")
     return "\n".join(lines)
 
 
@@ -1053,6 +1180,10 @@ def render_transcript_report(
 
     sections.append(render_knowledge_search_section(timeline))
 
+    reasoning = render_orchestrator_reasoning(timeline)
+    if reasoning:
+        sections.append(reasoning)
+
     # Conversation trace (reuses existing render_timeline which includes
     # sequence diagram, gantt, phase breakdown, event log, errors)
     sections.append(render_timeline(timeline))
@@ -1077,7 +1208,20 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline) -> str:
 
     sections.append(render_bot_metadata(profile))
     sections.append(render_components(profile))
+
+    topic_details = render_topic_details(profile, timeline)
+    if topic_details:
+        sections.append(topic_details)
+
     sections.append(render_knowledge_search_section(timeline, profile=profile))
+
+    ks_details = render_knowledge_source_details(profile)
+    if ks_details:
+        sections.append(ks_details)
+
+    reasoning = render_orchestrator_reasoning(timeline)
+    if reasoning:
+        sections.append(reasoning)
 
     topic_graph = render_topic_graph(profile)
     if topic_graph:

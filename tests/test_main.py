@@ -2,18 +2,23 @@ from pathlib import Path
 
 import pytest
 
-from models import BotProfile, ConversationTimeline, EventType, KnowledgeSearchInfo, SearchResult, TimelineEvent
-from parser import _sanitize_yaml, parse_dialog_json, parse_yaml, resolve_topic_name
+from models import BotProfile, ComponentSummary, ConversationTimeline, EventType, GptInfo, KnowledgeSearchInfo, SearchResult, TimelineEvent
+from parser import _count_action_kinds, _sanitize_yaml, parse_dialog_json, parse_yaml, resolve_topic_name
 from renderer import (
     _grounding_score,
     _source_efficiency,
     _topic_display,
+    render_bot_metadata,
+    render_bot_profile,
     render_components,
     render_event_log,
     render_gantt_chart,
     render_knowledge_search_section,
+    render_knowledge_source_details,
     render_mermaid_sequence,
+    render_orchestrator_reasoning,
     render_report,
+    render_topic_details,
     render_topic_graph,
     render_transcript_report,
 )
@@ -1259,8 +1264,8 @@ def test_custom_search_step_tracking():
     assert cs.error == "aiModelActionBadRequest"
 
 
-def test_knowledge_search_sources_compact_in_table():
-    """Sources list with more than 3 items should be truncated in table with '+N more'."""
+def test_knowledge_search_sources_all_shown_in_table():
+    """All sources should be shown in table without truncation."""
     timeline = ConversationTimeline(
         bot_name="TestBot",
         conversation_id="conv-1",
@@ -1273,8 +1278,8 @@ def test_knowledge_search_sources_compact_in_table():
         ],
     )
     output = render_knowledge_search_section(timeline)
-    assert "Src1, Src2, Src3" in output
-    assert "(+5 more)" in output
+    assert "Src1, Src2, Src3, Src4, Src5, Src6, Src7, Src8" in output
+    assert "(+" not in output
 
 
 def test_search_results_captured():
@@ -1637,3 +1642,354 @@ def test_gantt_legend_inline():
     output = render_gantt_chart(timeline)
     assert "🔵" in output
     assert "| Color | Category |" not in output
+
+
+# --- Feature: _count_action_kinds ---
+
+
+def test_count_action_kinds_empty():
+    assert _count_action_kinds([]) == {}
+
+
+def test_count_action_kinds_flat():
+    actions = [
+        {"kind": "SendActivity"},
+        {"kind": "HttpRequestAction"},
+        {"kind": "SendActivity"},
+    ]
+    result = _count_action_kinds(actions)
+    assert result == {"SendActivity": 2, "HttpRequestAction": 1}
+
+
+def test_count_action_kinds_nested():
+    actions = [
+        {
+            "kind": "ConditionGroup",
+            "conditions": [
+                {"actions": [{"kind": "InvokeConnectorAction"}]},
+                {"actions": [{"kind": "SendActivity"}, {"kind": "InvokeFlowAction"}]},
+            ],
+            "elseActions": [{"kind": "HttpRequestAction"}],
+        }
+    ]
+    result = _count_action_kinds(actions)
+    assert result["ConditionGroup"] == 1
+    assert result["InvokeConnectorAction"] == 1
+    assert result["SendActivity"] == 1
+    assert result["InvokeFlowAction"] == 1
+    assert result["HttpRequestAction"] == 1
+
+
+# --- Feature: Orchestrator Reasoning ---
+
+
+def test_render_orchestrator_reasoning_with_thoughts():
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="SearchTool",
+                thought="Need to search for password reset info",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                topic_name="SearchTool",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="AdvancedSearch",
+                thought="Compiling reliable guidance from multiple sources",
+            ),
+        ],
+    )
+    output = render_orchestrator_reasoning(timeline)
+    assert "Orchestrator Reasoning" in output
+    assert "SearchTool" in output
+    assert "password reset" in output
+    assert "AdvancedSearch" in output
+    assert "| 1 |" in output
+    assert "| 2 |" in output  # second STEP_TRIGGERED (STEP_FINISHED doesn't increment)
+
+
+def test_render_orchestrator_reasoning_no_thoughts():
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="TopicA",
+            ),
+        ],
+    )
+    output = render_orchestrator_reasoning(timeline)
+    assert output == ""
+
+
+# --- Feature: Topic Details ---
+
+
+def test_render_topic_details_external_calls():
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="API Topic",
+                schema_name="test.topic.api",
+                action_summary={"InvokeConnectorAction": 2, "SendActivity": 1, "HttpRequestAction": 1},
+                has_external_calls=True,
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Simple Topic",
+                schema_name="test.topic.simple",
+                action_summary={"SendActivity": 3},
+                has_external_calls=False,
+            ),
+        ],
+    )
+    output = render_topic_details(profile)
+    assert "Topics with External Calls" in output
+    assert "API Topic" in output
+    assert "Simple Topic" not in output
+    assert "| 2 |" in output  # connector count
+
+
+def test_render_topic_details_coverage():
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="TopicA",
+                schema_name="test.topic.a",
+                trigger_kind="OnIntent",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="TopicB",
+                schema_name="test.topic.b",
+                trigger_kind="OnIntent",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="SystemTopic",
+                schema_name="test.topic.sys",
+                trigger_kind="OnError",
+            ),
+        ],
+    )
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="TopicA",
+            ),
+        ],
+    )
+    output = render_topic_details(profile, timeline)
+    assert "1 of 2 user topics triggered" in output
+    assert "TopicB" in output
+    assert "SystemTopic" not in output  # system topics excluded
+
+
+# --- Feature: Conversation Starters ---
+
+
+def test_render_bot_profile_conversation_starters():
+    profile = BotProfile(
+        display_name="Test Bot",
+        gpt_info=GptInfo(
+            conversation_starters=[
+                {"title": "Password reset", "message": "How do I reset my password?"},
+                {"title": "VPN help", "message": "How to connect to VPN?"},
+            ],
+        ),
+    )
+    output = render_bot_profile(profile)
+    assert "Conversation Starters" in output
+    assert "Password reset" in output
+    assert "How do I reset my password?" in output
+
+
+def test_render_bot_profile_no_conversation_starters():
+    profile = BotProfile(
+        display_name="Test Bot",
+        gpt_info=GptInfo(),
+    )
+    output = render_bot_profile(profile)
+    assert "Conversation Starters" not in output
+
+
+# --- Feature: Knowledge Source Details ---
+
+
+def test_render_knowledge_source_details():
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="northampton",
+                schema_name="test.ks.north",
+                description="Knowledge source for Northampton campus staff",
+                source_kind="SharePointSearchSource",
+                source_site="https://example.sharepoint.com/sites/north",
+            ),
+        ],
+    )
+    output = render_knowledge_source_details(profile)
+    assert "Knowledge Source Details" in output
+    assert "northampton" in output
+    assert "SharePointSearchSource" in output
+    assert "https://example.sharepoint.com/sites/north" in output
+    assert "Northampton campus" in output
+
+
+def test_render_knowledge_source_details_empty():
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="SomeTopic",
+                schema_name="test.topic",
+            ),
+        ],
+    )
+    output = render_knowledge_source_details(profile)
+    assert output == ""
+
+
+# --- Feature: Environment Variables ---
+
+
+def test_render_bot_metadata_env_vars():
+    profile = BotProfile(
+        display_name="Test Bot",
+        environment_variables=[
+            {"name": "API_KEY", "type": "String", "value": "secret123"},
+            {"name": "TIMEOUT", "type": "Integer", "defaultValue": "30"},
+        ],
+    )
+    output = render_bot_metadata(profile)
+    assert "Environment Variables" in output
+    assert "API_KEY" in output
+    assert "TIMEOUT" in output
+
+
+def test_render_bot_metadata_no_env_vars():
+    profile = BotProfile(display_name="Test Bot")
+    output = render_bot_metadata(profile)
+    assert "Environment Variables" not in output
+
+
+# --- Feature: Connectors ---
+
+
+def test_render_bot_metadata_connectors():
+    profile = BotProfile(
+        display_name="Test Bot",
+        connectors=[
+            {"displayName": "SharePoint", "type": "REST", "description": "SharePoint connector"},
+        ],
+    )
+    output = render_bot_metadata(profile)
+    assert "Connectors" in output
+    assert "SharePoint" in output
+    assert "REST" in output
+
+
+def test_render_bot_metadata_no_connectors():
+    profile = BotProfile(display_name="Test Bot")
+    output = render_bot_metadata(profile)
+    assert "Connectors" not in output
+
+
+# --- Feature: Triggers in user_topics table ---
+
+
+def test_render_components_user_topics_triggers():
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Password Help",
+                schema_name="test.topic.password",
+                trigger_kind="OnIntent",
+                trigger_queries=["reset password", "forgot password", "change password", "unlock account"],
+            ),
+        ],
+    )
+    output = render_components(profile)
+    assert "Triggers" in output
+    assert "reset password" in output
+    assert "unlock account" in output  # all 4 queries shown without truncation
+
+
+# --- Feature: thought on TimelineEvent ---
+
+
+def test_timeline_step_triggered_captures_thought():
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepTriggered",
+            "value": {
+                "taskDialogId": "test.topic.search",
+                "type": "KnowledgeSource",
+                "stepId": "step1",
+                "thought": "I need to search for this information",
+            },
+            "from": {"role": "bot"},
+            "channelData": {"webchat:internal:position": 1},
+            "timestamp": "2024-01-01T00:00:01Z",
+        },
+    ]
+    timeline = build_timeline(activities, {"test.topic.search": "SearchTopic"})
+    step_events = [e for e in timeline.events if e.event_type == EventType.STEP_TRIGGERED]
+    assert len(step_events) == 1
+    assert step_events[0].thought == "I need to search for this information"
+
+
+# --- Feature: Integration - render_report includes new sections ---
+
+
+def test_render_report_includes_new_sections():
+    profile = BotProfile(
+        display_name="Full Bot",
+        gpt_info=GptInfo(
+            conversation_starters=[{"title": "Help", "message": "How can you help?"}],
+        ),
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="ExternalTopic",
+                schema_name="test.topic.ext",
+                trigger_kind="OnIntent",
+                action_summary={"InvokeConnectorAction": 1},
+                has_external_calls=True,
+            ),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="MainKS",
+                schema_name="test.ks.main",
+                description="Main knowledge source",
+                source_kind="SharePointSearchSource",
+            ),
+        ],
+        environment_variables=[{"name": "VAR1", "type": "String", "value": "val"}],
+        connectors=[{"displayName": "Conn1", "type": "REST"}],
+    )
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="ExternalTopic",
+                thought="Need to call external service",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    output = render_report(profile, timeline)
+    assert "Conversation Starters" in output
+    assert "Topics with External Calls" in output
+    assert "Knowledge Source Details" in output
+    assert "Orchestrator Reasoning" in output
+    assert "Environment Variables" in output
+    assert "Connectors" in output

@@ -167,13 +167,12 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
             if not text and attachments:
                 text = _extract_adaptive_card_text(attachments)
             clean_text = text.replace("\n", " ").replace("\r", "")
-            summary = clean_text[:120] + "..." if len(clean_text) > 120 else clean_text
             events.append(
                 TimelineEvent(
                     timestamp=timestamp,
                     position=position,
                     event_type=EventType.BOT_MESSAGE,
-                    summary=f"Bot: {summary}" if summary else "Bot message",
+                    summary=f"Bot: {clean_text}" if clean_text else "Bot message",
                 )
             )
             continue
@@ -238,6 +237,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                         state="inProgress",
                         step_id=step_id,
                         plan_identifier=value.get("planIdentifier"),
+                        thought=value.get("thought"),
                     )
                 )
 

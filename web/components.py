@@ -433,7 +433,7 @@ def report_viewer() -> rx.Component:
                 ),
             ),
         ),
-        max_width="1200px",
+        max_width="1400px",
         width="100%",
         padding="28px 32px",
         margin="0 auto",
