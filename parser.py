@@ -394,10 +394,14 @@ def parse_yaml(path: Path) -> tuple[BotProfile, dict[str, str]]:
         if not isinstance(cdef, dict):
             continue
         operations = cdef.get("operations", []) or []
-        has_mcp = any(
-            (op.get("operationId", "") or "").startswith(("InvokeMCP", "mcp_"))
-            for op in operations
-            if isinstance(op, dict)
+        display_name = cdef.get("displayName", "") or ""
+        has_mcp = (
+            "mcp" in display_name.lower()
+            or any(
+                (op.get("operationId", "") or "").startswith(("InvokeMCP", "mcp_"))
+                for op in operations
+                if isinstance(op, dict)
+            )
         )
         connector_definitions.append({
             "connectorId": cdef.get("connectorId", ""),
