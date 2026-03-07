@@ -93,38 +93,44 @@ def _topic_display(name: str) -> str:
 
 
 def render_bot_profile(profile: BotProfile) -> str:
-    """Render H1 heading and AI Configuration section as Markdown."""
-    lines = [f"# {profile.display_name}\n"]
+    """Render H1 heading only."""
+    return f"# {profile.display_name}\n"
 
-    # AI Configuration section (if GPT component exists)
-    if profile.gpt_info:
-        gpt = profile.gpt_info
-        lines.append("## AI Configuration\n")
-        lines.append("| Property | Value |")
-        lines.append("| --- | --- |")
-        if gpt.model_hint:
-            lines.append(f"| Model | {gpt.model_hint} |")
-        if gpt.knowledge_sources_kind:
-            lines.append(f"| Knowledge Sources | {gpt.knowledge_sources_kind} |")
-        lines.append(f"| Web Browsing | {gpt.web_browsing} |")
-        lines.append(f"| Code Interpreter | {gpt.code_interpreter} |")
+
+def render_ai_config(profile: BotProfile) -> str:
+    """Render AI Configuration section as Markdown."""
+    if not profile.gpt_info:
+        return ""
+
+    gpt = profile.gpt_info
+    lines = [
+        "## AI Configuration\n",
+        "| Property | Value |",
+        "| --- | --- |",
+    ]
+    if gpt.model_hint:
+        lines.append(f"| Model | {gpt.model_hint} |")
+    if gpt.knowledge_sources_kind:
+        lines.append(f"| Knowledge Sources | {gpt.knowledge_sources_kind} |")
+    lines.append(f"| Web Browsing | {gpt.web_browsing} |")
+    lines.append(f"| Code Interpreter | {gpt.code_interpreter} |")
+    lines.append("")
+    if gpt.description:
+        lines.append(f"**Description:** {gpt.description}\n")
+    if gpt.instructions:
+        char_count = len(gpt.instructions)
+        lines.append(f"**System Instructions** ({char_count} chars):\n")
+        lines.append(f"```\n{gpt.instructions}\n```")
         lines.append("")
-        if gpt.description:
-            lines.append(f"**Description:** {gpt.description}\n")
-        if gpt.instructions:
-            char_count = len(gpt.instructions)
-            lines.append(f"**System Instructions** ({char_count} chars):\n")
-            lines.append(f"```\n{gpt.instructions}\n```")
-            lines.append("")
-        if gpt.conversation_starters:
-            lines.append("### Conversation Starters\n")
-            lines.append("| Title | Example Query |")
-            lines.append("| --- | --- |")
-            for starter in gpt.conversation_starters:
-                title = starter.get("title", "—")
-                message = starter.get("message", "—")
-                lines.append(f"| {title} | {message} |")
-            lines.append("")
+    if gpt.conversation_starters:
+        lines.append("### Conversation Starters\n")
+        lines.append("| Title | Example Query |")
+        lines.append("| --- | --- |")
+        for starter in gpt.conversation_starters:
+            title = starter.get("title", "—")
+            message = starter.get("message", "—")
+            lines.append(f"| {title} | {message} |")
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -240,10 +246,8 @@ _AUTOMATION_TRIGGERS: set[str] = {
 
 _CATEGORY_ORDER: list[str] = [
     "user_topics",
-    "orchestrator_topics",
     "system_topics",
     "automation_topics",
-    "knowledge",
     "skills",
     "custom_entities",
     "variables",
@@ -342,13 +346,13 @@ def _render_component_row(comp: ComponentSummary, category: str) -> str:
     return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} |"
 
 
-def render_components(profile: BotProfile) -> str:
-    """Render components section with smart categorization."""
-    # Classify into categories (exclude GptComponent)
+def render_topic_inventory(profile: BotProfile) -> str:
+    """Render topic inventory: user, system, automation topics + supporting config."""
+    # Classify into categories (exclude GptComponent, orchestrator_topics, knowledge)
     by_category: dict[str, list[ComponentSummary]] = {}
     for comp in profile.components:
         cat = _classify_component(comp)
-        if cat is not None:
+        if cat is not None and cat in _CATEGORY_ORDER:
             by_category.setdefault(cat, []).append(comp)
 
     total = sum(len(comps) for comps in by_category.values())
@@ -356,8 +360,8 @@ def render_components(profile: BotProfile) -> str:
     inactive = total - active
 
     lines = [
-        "## Components\n",
-        f"**{total}** components total — **{active}** active, **{inactive}** inactive\n",
+        "## Topic Inventory\n",
+        f"**{total}** topics & config — **{active}** active, **{inactive}** inactive\n",
         "| Kind | Count | Active | Inactive |",
         "| --- | --- | --- | --- |",
     ]
@@ -1267,7 +1271,7 @@ def render_security_summary(profile: BotProfile) -> str:
     invoker_count = sum(1 for t in tools if t.connection_mode == "Invoker")
 
     lines = [
-        "## Security & Access\n",
+        "## Security Inventory\n",
         "| Property | Value |",
         "| --- | --- |",
         f"| Authentication | {auth_display} |",
@@ -1373,7 +1377,7 @@ def render_integration_map(profile: BotProfile) -> str:
     return "\n".join(lines)
 
 
-def render_knowledge_architecture(profile: BotProfile) -> str:
+def render_knowledge_inventory(profile: BotProfile) -> str:
     """Render knowledge architecture view combining sources and files."""
     ks_comps = [c for c in profile.components if c.kind == "KnowledgeSourceComponent"]
     file_comps = [c for c in profile.components if c.kind == "FileAttachmentComponent"]
@@ -1381,7 +1385,7 @@ def render_knowledge_architecture(profile: BotProfile) -> str:
     if not ks_comps and not file_comps:
         return ""
 
-    lines = ["## Knowledge Architecture\n"]
+    lines = ["## Knowledge Inventory\n"]
 
     if ks_comps:
         lines.append(f"### Knowledge Sources ({len(ks_comps)})\n")
@@ -1457,21 +1461,45 @@ def render_tldr(profile: BotProfile, timeline: ConversationTimeline) -> str:
 
 
 def render_report(profile: BotProfile, timeline: ConversationTimeline) -> str:
-    """Render complete Markdown report."""
+    """Render complete Markdown report.
+
+    Section order per plan F2:
+    1. Heading
+    2. TL;DR
+    3. AI Config
+    4. Security Inventory
+    5. Bot Profile metadata
+    6. Execution diagrams (sequence + gantt)
+    7. Conversation trace
+    8. Orchestrator reasoning
+    9. Agent instructions (part of AI Config)
+    10. Topic Inventory
+    11. Tool Inventory
+    12. Integration Map
+    13. Topic graph
+    14. Knowledge Inventory
+    15. Deep dive (topic details + knowledge search)
+    """
+    # 1. Heading
     sections = [render_bot_profile(profile)]
 
-    # TL;DR
+    # 2. TL;DR
     sections.append(render_tldr(profile, timeline))
 
-    # Security summary
+    # 3. AI Config (includes system instructions)
+    ai_config = render_ai_config(profile)
+    if ai_config:
+        sections.append(ai_config)
+
+    # 4. Security Inventory
     security = render_security_summary(profile)
     if security:
         sections.append(security)
 
-    # Bot metadata
+    # 5. Bot Profile metadata
     sections.append(render_bot_metadata(profile))
 
-    # Execution diagrams promoted to top
+    # 6. Execution diagrams
     if timeline.events:
         has_steps = timeline.phases or any(
             e.event_type in (EventType.STEP_TRIGGERED, EventType.USER_MESSAGE) for e in timeline.events
@@ -1482,38 +1510,42 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline) -> str:
         if gantt:
             sections.append(gantt)
 
-    # Conversation trace
+    # 7. Conversation trace
     sections.append(render_timeline(timeline, skip_diagrams=True))
 
-    # Orchestrator reasoning
+    # 8. Orchestrator reasoning
     reasoning = render_orchestrator_reasoning(timeline)
     if reasoning:
         sections.append(reasoning)
 
-    # Components
-    sections.append(render_components(profile))
+    # --- Inventories (static capabilities) ---
 
-    # Tool inventory
+    # 10. Topic Inventory
+    sections.append(render_topic_inventory(profile))
+
+    # 11. Tool Inventory
     tool_inv = render_tool_inventory(profile)
     if tool_inv:
         sections.append(tool_inv)
 
-    # Integration map
+    # 12. Integration Map
     int_map = render_integration_map(profile)
     if int_map:
         sections.append(int_map)
 
-    # Topic graph
+    # 13. Topic graph
     topic_graph = render_topic_graph(profile)
     if topic_graph:
         sections.append(topic_graph)
 
-    # Knowledge architecture (replaces KS details)
-    ka = render_knowledge_architecture(profile)
+    # 14. Knowledge Inventory
+    ka = render_knowledge_inventory(profile)
     if ka:
         sections.append(ka)
 
-    # Topic details + knowledge search
+    # --- Deep dive (runtime trace detail) ---
+
+    # 15. Topic details + knowledge search
     topic_details = render_topic_details(profile, timeline)
     if topic_details:
         sections.append(topic_details)

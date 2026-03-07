@@ -9,12 +9,13 @@ from renderer import (
     _source_efficiency,
     _topic_display,
     render_bot_metadata,
+    render_ai_config,
     render_bot_profile,
-    render_components,
+    render_topic_inventory,
     render_event_log,
     render_gantt_chart,
     render_integration_map,
-    render_knowledge_architecture,
+    render_knowledge_inventory,
     render_knowledge_search_section,
     render_knowledge_source_details,
     render_mermaid_sequence,
@@ -188,14 +189,14 @@ def test_render_report_simple_bot():
     assert "## AI Configuration" in report
     assert "## TL;DR" in report
     assert "## Bot Profile" in report
-    assert "## Components" in report
+    assert "## Topic Inventory" in report
     assert "## Conversation Trace" in report
     assert "```mermaid" in report
     assert "sequenceDiagram" in report
     assert "### Errors" in report
-    # TL;DR comes before Bot Profile metadata
-    assert report.index("## TL;DR") < report.index("## Bot Profile")
-    # Bot Profile comes before Execution Flow
+    # Plan F2 order: TL;DR → AI Config → Bot Profile → Execution Flow
+    assert report.index("## TL;DR") < report.index("## AI Configuration")
+    assert report.index("## AI Configuration") < report.index("## Bot Profile")
     assert report.index("## Bot Profile") < report.index("### Execution Flow")
 
 
@@ -292,10 +293,10 @@ def test_gpt_info_with_model_hint():
 # --- Rendering tests ---
 
 
-def test_render_components_has_summary():
+def test_render_topic_inventory_has_summary():
     profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
-    output = render_components(profile)
-    assert "components total" in output
+    output = render_topic_inventory(profile)
+    assert "topics & config" in output
     assert "| Kind | Count |" in output
 
 
@@ -369,22 +370,28 @@ def test_topic_graph_size_capped():
 
 
 def test_report_order():
-    """Report sections should follow the new order: AI Config → Diagrams → Bot Profile → Components."""
+    """Report sections follow plan F2: Heading → TL;DR → AI Config → Security → Bot Profile → Diagrams → Trace → Inventories."""
     profile, lookup = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
     activities = parse_dialog_json(BASE_DIR / "botContent (1)" / "dialog.json")
     timeline = build_timeline(activities, lookup)
     report = render_report(profile, timeline)
 
-    ai_config_pos = report.index("## AI Configuration")
     tldr_pos = report.index("## TL;DR")
+    ai_config_pos = report.index("## AI Configuration")
+    security_pos = report.index("## Security Inventory")
     bot_profile_pos = report.index("## Bot Profile")
     exec_flow_pos = report.index("### Execution Flow")
-    components_pos = report.index("## Components")
+    trace_pos = report.index("## Conversation Trace")
+    topic_inv_pos = report.index("## Topic Inventory")
+    tool_inv_pos = report.index("## Tool Inventory")
 
-    assert ai_config_pos < tldr_pos
-    assert tldr_pos < bot_profile_pos
+    assert tldr_pos < ai_config_pos
+    assert ai_config_pos < security_pos
+    assert security_pos < bot_profile_pos
     assert bot_profile_pos < exec_flow_pos
-    assert exec_flow_pos < components_pos
+    assert exec_flow_pos < trace_pos
+    assert trace_pos < topic_inv_pos
+    assert topic_inv_pos < tool_inv_pos
 
 
 def test_system_instructions_visible():
@@ -1624,10 +1631,9 @@ def test_knowledge_table_merged_status():
             )
         ],
     )
-    output = render_components(profile)
-    assert "Source ✓" in output
-    # Should NOT have separate "Source" and "Active" columns
-    assert "| Source | Active" not in output
+    output = render_knowledge_inventory(profile)
+    assert "Knowledge Sources" in output
+    assert "northampton" in output
 
 
 def test_gantt_legend_inline():
@@ -1803,7 +1809,14 @@ def test_render_topic_details_coverage():
 # --- Feature: Conversation Starters ---
 
 
-def test_render_bot_profile_conversation_starters():
+def test_render_bot_profile_heading_only():
+    profile = BotProfile(display_name="Test Bot")
+    output = render_bot_profile(profile)
+    assert "# Test Bot" in output
+    assert "AI Configuration" not in output
+
+
+def test_render_ai_config_conversation_starters():
     profile = BotProfile(
         display_name="Test Bot",
         gpt_info=GptInfo(
@@ -1813,18 +1826,18 @@ def test_render_bot_profile_conversation_starters():
             ],
         ),
     )
-    output = render_bot_profile(profile)
+    output = render_ai_config(profile)
     assert "Conversation Starters" in output
     assert "Password reset" in output
     assert "How do I reset my password?" in output
 
 
-def test_render_bot_profile_no_conversation_starters():
+def test_render_ai_config_no_conversation_starters():
     profile = BotProfile(
         display_name="Test Bot",
         gpt_info=GptInfo(),
     )
-    output = render_bot_profile(profile)
+    output = render_ai_config(profile)
     assert "Conversation Starters" not in output
 
 
@@ -1914,7 +1927,7 @@ def test_render_bot_metadata_no_connectors():
 # --- Feature: Triggers in user_topics table ---
 
 
-def test_render_components_user_topics_triggers():
+def test_render_topic_inventory_user_topics_triggers():
     profile = BotProfile(
         components=[
             ComponentSummary(
@@ -1926,7 +1939,7 @@ def test_render_components_user_topics_triggers():
             ),
         ],
     )
-    output = render_components(profile)
+    output = render_topic_inventory(profile)
     assert "Triggers" in output
     assert "reset password" in output
     assert "unlock account" in output  # all 4 queries shown without truncation
@@ -1999,7 +2012,7 @@ def test_render_report_includes_new_sections():
     output = render_report(profile, timeline)
     assert "Conversation Starters" in output
     assert "Topics with External Calls" in output
-    assert "Knowledge Architecture" in output
+    assert "Knowledge Inventory" in output
     assert "Orchestrator Reasoning" in output
     assert "Environment Variables" in output
     assert "Connectors" in output
@@ -2147,10 +2160,10 @@ def test_cua_tool_synthetic():
     assert comp.tool_type == "CUATool"
 
 
-def test_tool_type_in_orchestrator_table():
-    """B1: Tool type appears in orchestrator topics table."""
+def test_tool_type_in_tool_inventory():
+    """B1: Tool type appears in tool inventory table."""
     profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
-    output = render_components(profile)
+    output = render_tool_inventory(profile)
     assert "ConnectedAgent" in output
     assert "A2AAgent" in output
     assert "ChildAgent" in output
@@ -2242,7 +2255,7 @@ def test_knowledge_trigger_condition():
 def test_entity_kind_in_component_table():
     """D1: Entity kind appears in custom entities table."""
     profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
-    output = render_components(profile)
+    output = render_topic_inventory(profile)
     assert "ClosedListEntity" in output
 
 
@@ -2258,7 +2271,7 @@ def test_variable_scope_in_table():
             ),
         ],
     )
-    output = render_components(profile)
+    output = render_topic_inventory(profile)
     assert "Global" in output
 
 
@@ -2269,7 +2282,7 @@ def test_security_summary_orchestrator():
     """E1: Security summary rendered for orchestrator bot."""
     profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
     output = render_security_summary(profile)
-    assert "Security & Access" in output
+    assert "Security Inventory" in output
     assert "Integrated" in output
     assert "GroupMembership" in output
 
@@ -2315,8 +2328,8 @@ def test_integration_map_empty_for_simple_bot():
 def test_knowledge_architecture():
     """E4: Knowledge architecture rendered with sources and files."""
     profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
-    output = render_knowledge_architecture(profile)
-    assert "Knowledge Architecture" in output
+    output = render_knowledge_inventory(profile)
+    assert "Knowledge Inventory" in output
     assert "Knowledge Sources" in output
     assert "File Attachments" in output
 
@@ -2324,7 +2337,7 @@ def test_knowledge_architecture():
 def test_knowledge_architecture_trigger_warning():
     """E4: Always-on trigger condition shown as warning."""
     profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
-    output = render_knowledge_architecture(profile)
+    output = render_knowledge_inventory(profile)
     assert "always-on" in output
 
 
@@ -2358,14 +2371,14 @@ def test_report_new_sections_orchestrator():
     timeline = build_timeline(activities, lookup)
     report = render_report(profile, timeline)
     assert "## TL;DR" in report
-    assert "## Security & Access" in report
+    assert "## Security Inventory" in report
     assert "## Tool Inventory" in report
     assert "## Integration Map" in report
-    assert "## Components" in report
+    assert "## Topic Inventory" in report
     # Verify ordering: TL;DR < Security < Bot Profile < Components < Tool Inventory
-    assert report.index("## TL;DR") < report.index("## Security & Access")
-    assert report.index("## Security & Access") < report.index("## Bot Profile")
-    assert report.index("## Components") < report.index("## Tool Inventory")
+    assert report.index("## TL;DR") < report.index("## Security Inventory")
+    assert report.index("## Security Inventory") < report.index("## Bot Profile")
+    assert report.index("## Topic Inventory") < report.index("## Tool Inventory")
     assert report.index("## Tool Inventory") < report.index("## Integration Map")
 
 
@@ -2377,6 +2390,6 @@ def test_report_graceful_degradation_simple_bot():
     report = render_report(profile, timeline)
     assert "## TL;DR" in report
     assert "## Bot Profile" in report
-    assert "## Components" in report
+    assert "## Topic Inventory" in report
     # These should NOT appear for simple bots
     assert "## Tool Inventory" not in report
