@@ -33,6 +33,7 @@ Thumbs.db
 .pytest_cache/
 .ruff_cache/
 .claude/
+.worktrees/
 
 # Bot export data (proprietary)
 botContent*/
