@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from models import AppInsightsConfig, BotProfile, ComponentSummary, ConversationTimeline, EventType, GptInfo, KnowledgeSearchInfo, SearchResult, TimelineEvent
+from models import AppInsightsConfig, BotProfile, ComponentSummary, ConversationTimeline, CreditEstimate, EventType, GptInfo, KnowledgeSearchInfo, SearchResult, TimelineEvent
 from parser import _count_action_kinds, _sanitize_yaml, parse_dialog_json, parse_yaml, resolve_topic_name
 from renderer import (
     _grounding_score,
@@ -11,6 +11,7 @@ from renderer import (
     render_bot_metadata,
     render_ai_config,
     render_bot_profile,
+    render_credit_estimate,
     render_topic_inventory,
     render_event_log,
     render_gantt_chart,
@@ -28,7 +29,7 @@ from renderer import (
     render_topic_graph,
     render_transcript_report,
 )
-from timeline import build_timeline
+from timeline import build_timeline, estimate_credits
 from transcript import parse_transcript_json
 
 BASE_DIR = Path(__file__).parent.parent
@@ -2393,3 +2394,226 @@ def test_report_graceful_degradation_simple_bot():
     assert "## Topic Inventory" in report
     # These should NOT appear for simple bots
     assert "## Tool Inventory" not in report
+
+
+# --- Credit estimation tests ---
+
+
+def test_credit_estimate_empty_timeline():
+    """Empty timeline should produce 0 credits, no crash."""
+    timeline = ConversationTimeline()
+    profile = BotProfile()
+    estimate = estimate_credits(timeline, profile)
+    assert estimate.total_credits == 0.0
+    assert estimate.total_credits == 0.0
+    assert estimate.line_items == []
+    assert len(estimate.warnings) > 0
+
+
+def test_credit_estimate_botcontent_custom_topic():
+    """botContent dialog.json has a CustomTopic step under generative orchestration → 5 credits."""
+    profile, lookup = parse_yaml(BASE_DIR / "botContent" / "botContent.yml")
+    activities = parse_dialog_json(BASE_DIR / "botContent" / "dialog.json")
+    timeline = build_timeline(activities, lookup)
+    estimate = estimate_credits(timeline, profile)
+
+    assert estimate.total_credits > 0
+    assert estimate.total_credits > 0
+    assert len(estimate.line_items) >= 1
+    # The bot uses GenerativeAIRecognizer, so CustomTopic → agent_action (5 credits)
+    step_types = [item.step_type for item in estimate.line_items]
+    assert "agent_action" in step_types
+
+
+def test_credit_estimate_botcontent1_agent_step():
+    """botContent (1) dialog.json has an Agent step → 5 credits."""
+    profile, lookup = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    activities = parse_dialog_json(BASE_DIR / "botContent (1)" / "dialog.json")
+    timeline = build_timeline(activities, lookup)
+    estimate = estimate_credits(timeline, profile)
+
+    assert estimate.total_credits >= 5
+    agent_items = [i for i in estimate.line_items if i.step_type == "agent_action"]
+    assert len(agent_items) >= 1
+    # Connected agent should be 5 credits
+    assert any(i.credits == 5 for i in agent_items)
+
+
+def test_credit_estimate_synthetic_knowledge_search():
+    """Synthetic: KnowledgeSource step → 2 credits."""
+    events = [
+        TimelineEvent(
+            position=1,
+            event_type=EventType.USER_MESSAGE,
+            summary='User: "test query"',
+        ),
+        TimelineEvent(
+            position=2,
+            event_type=EventType.PLAN_RECEIVED,
+            summary="Plan: [UniversalSearchTool]",
+        ),
+        TimelineEvent(
+            position=3,
+            event_type=EventType.STEP_TRIGGERED,
+            topic_name="UniversalSearchTool",
+            summary="Step start: UniversalSearchTool (KnowledgeSource)",
+            state="inProgress",
+        ),
+        TimelineEvent(
+            position=4,
+            event_type=EventType.STEP_FINISHED,
+            topic_name="UniversalSearchTool",
+            summary="Step end: UniversalSearchTool [completed]",
+            state="completed",
+        ),
+    ]
+    timeline = ConversationTimeline(events=events)
+    profile = BotProfile(recognizer_kind="GenerativeAIRecognizer")
+    estimate = estimate_credits(timeline, profile)
+
+    assert estimate.total_credits == 2
+    assert len(estimate.line_items) == 1
+    assert estimate.line_items[0].step_type == "generative_answer"
+    assert estimate.line_items[0].credits == 2
+
+
+def test_credit_estimate_synthetic_mixed():
+    """Synthetic: knowledge search + agent action → 7 credits total."""
+    events = [
+        TimelineEvent(
+            position=1,
+            event_type=EventType.USER_MESSAGE,
+            summary='User: "find printers"',
+        ),
+        TimelineEvent(
+            position=2,
+            event_type=EventType.PLAN_RECEIVED,
+            summary="Plan: [UniversalSearchTool, Equippy]",
+        ),
+        TimelineEvent(
+            position=3,
+            event_type=EventType.STEP_TRIGGERED,
+            topic_name="UniversalSearchTool",
+            summary="Step start: UniversalSearchTool (KnowledgeSource)",
+            state="inProgress",
+        ),
+        TimelineEvent(
+            position=4,
+            event_type=EventType.STEP_FINISHED,
+            topic_name="UniversalSearchTool",
+            summary="Step end: UniversalSearchTool [completed]",
+            state="completed",
+        ),
+        TimelineEvent(
+            position=5,
+            event_type=EventType.STEP_TRIGGERED,
+            topic_name="Equippy",
+            summary="Step start: Equippy (Agent)",
+            state="inProgress",
+        ),
+        TimelineEvent(
+            position=6,
+            event_type=EventType.STEP_FINISHED,
+            topic_name="Equippy",
+            summary="Step end: Equippy [completed]",
+            state="completed",
+        ),
+    ]
+    timeline = ConversationTimeline(events=events)
+    profile = BotProfile(recognizer_kind="GenerativeAIRecognizer")
+    estimate = estimate_credits(timeline, profile)
+
+    assert estimate.total_credits == 7
+    assert len(estimate.line_items) == 2
+    assert estimate.line_items[0].credits == 2  # knowledge search
+    assert estimate.line_items[1].credits == 5  # agent action
+
+
+def test_credit_estimate_classic_recognizer():
+    """CustomTopic under classic recognizer → 1 credit."""
+    events = [
+        TimelineEvent(
+            position=1,
+            event_type=EventType.STEP_TRIGGERED,
+            topic_name="Greeting",
+            summary="Step start: Greeting (CustomTopic)",
+            state="inProgress",
+        ),
+    ]
+    timeline = ConversationTimeline(events=events)
+    profile = BotProfile(recognizer_kind="ClassicRecognizer")
+    estimate = estimate_credits(timeline, profile)
+
+    assert estimate.total_credits == 1
+    assert estimate.line_items[0].step_type == "classic_answer"
+
+
+def test_credit_estimate_in_report():
+    """Credit estimate section should appear in rendered report."""
+    profile, lookup = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    activities = parse_dialog_json(BASE_DIR / "botContent (1)" / "dialog.json")
+    timeline = build_timeline(activities, lookup)
+    report = render_report(profile, timeline)
+
+    assert "## MCS Credit Estimate" in report
+    assert "### Credit Breakdown" in report
+    assert "### Credit Flow" in report
+    assert "sequenceDiagram" in report
+    assert "### Estimation Caveats" in report
+
+
+def test_credit_estimate_in_tldr():
+    """TL;DR should include credit summary when credits > 0."""
+    profile, lookup = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    activities = parse_dialog_json(BASE_DIR / "botContent (1)" / "dialog.json")
+    timeline = build_timeline(activities, lookup)
+    estimate = estimate_credits(timeline, profile)
+    tldr = render_tldr(profile, timeline, estimate)
+
+    assert "Estimated Credits" in tldr
+    assert "estimate" in tldr
+
+
+def test_credit_estimate_mermaid_valid_syntax():
+    """Mermaid diagram should have valid structure."""
+    events = [
+        TimelineEvent(
+            position=1,
+            event_type=EventType.USER_MESSAGE,
+            summary='User: "test"',
+        ),
+        TimelineEvent(
+            position=2,
+            event_type=EventType.PLAN_RECEIVED,
+            summary="Plan: [TestTool]",
+        ),
+        TimelineEvent(
+            position=3,
+            event_type=EventType.STEP_TRIGGERED,
+            topic_name="TestTool",
+            summary="Step start: TestTool (Agent)",
+            state="inProgress",
+        ),
+    ]
+    timeline = ConversationTimeline(events=events)
+    profile = BotProfile(recognizer_kind="GenerativeAIRecognizer")
+    estimate = estimate_credits(timeline, profile)
+    rendered = render_credit_estimate(estimate, timeline)
+
+    assert "```mermaid" in rendered
+    assert "sequenceDiagram" in rendered
+    assert "participant U as User" in rendered
+    assert "participant O as Orchestrator" in rendered
+    assert "```" in rendered
+    # Check proper closing
+    mermaid_blocks = rendered.split("```mermaid")
+    assert len(mermaid_blocks) == 2
+    assert "```" in mermaid_blocks[1]
+
+
+def test_render_credit_estimate_empty():
+    """Empty estimate should return empty string."""
+    estimate = CreditEstimate()
+    timeline = ConversationTimeline()
+    result = render_credit_estimate(estimate, timeline)
+    assert result == ""

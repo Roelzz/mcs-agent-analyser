@@ -51,10 +51,34 @@ def login_page() -> rx.Component:
     )
 
 
+def _counter_styles() -> rx.Component:
+    return rx.el.style(
+        """
+        @keyframes counter-pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.4); color: var(--amber-9); }
+            100% { transform: scale(1); }
+        }
+        @keyframes milestone-flash {
+            0% { opacity: 1; transform: translateY(0); }
+            70% { opacity: 1; transform: translateY(-4px); }
+            100% { opacity: 0; transform: translateY(-8px); }
+        }
+        .counter-pop {
+            animation: counter-pop 0.4s ease-out;
+        }
+        .milestone-flash {
+            animation: milestone-flash 2s ease-out forwards;
+        }
+        """
+    )
+
+
 def upload_page() -> rx.Component:
     return rx.vstack(
         navbar(),
         mermaid_script(),
+        _counter_styles(),
         rx.cond(
             State.has_report,
             report_viewer(),

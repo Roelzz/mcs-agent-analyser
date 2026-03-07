@@ -187,3 +187,20 @@ class ConversationTimeline(BaseModel):
     total_elapsed_ms: float = 0.0
     knowledge_searches: list[KnowledgeSearchInfo] = Field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)
+
+
+# --- Credit estimation models ---
+
+
+class CreditLineItem(BaseModel):
+    step_name: str
+    step_type: str  # "generative_answer", "classic_answer", "agent_action", "flow_action"
+    credits: float
+    detail: str = ""
+    position: int = 0
+
+
+class CreditEstimate(BaseModel):
+    line_items: list[CreditLineItem] = Field(default_factory=list)
+    total_credits: float = 0.0
+    warnings: list[str] = Field(default_factory=list)

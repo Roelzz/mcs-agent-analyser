@@ -111,6 +111,39 @@ def navbar() -> rx.Component:
             align="center",
             spacing="2",
         ),
+        # Counter badge
+        rx.hstack(
+            rx.text(State.cat_emoji, font_size="18px"),
+            rx.text(
+                State.analyses_count,
+                font_family=_MONO,
+                font_weight="600",
+                color="var(--amber-11)",
+                class_name=rx.cond(State.counter_animating, "counter-pop", ""),
+            ),
+            rx.text(
+                State.cat_title,
+                size="1",
+                color="var(--gray-a8)",
+                font_family=_BODY,
+            ),
+            rx.cond(
+                State.milestone_reached,
+                rx.text(
+                    "\U0001f389 NEW RANK!",
+                    size="1",
+                    color="var(--amber-9)",
+                    font_weight="600",
+                    class_name="milestone-flash",
+                ),
+            ),
+            align="center",
+            spacing="2",
+            padding="4px 12px",
+            background="var(--amber-a2)",
+            border="1px solid var(--amber-a4)",
+            border_radius="20px",
+        ),
         rx.spacer(),
         # Right side
         rx.hstack(

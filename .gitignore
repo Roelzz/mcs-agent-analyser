@@ -38,3 +38,6 @@ Thumbs.db
 # Bot export data (proprietary)
 botContent*/
 Transcripts/
+
+# Persistent app data
+data/

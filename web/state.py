@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import tempfile
@@ -24,6 +25,45 @@ from linter import run_lint as _run_lint  # noqa: E402
 from models import BotProfile  # noqa: E402
 
 load_dotenv()
+
+# --- Analysis counter persistence ---
+
+_STATS_FILE = Path(__file__).resolve().parent.parent / "data" / "stats.json"
+
+_CAT_MILESTONES: list[tuple[int, str, str]] = [
+    (1000, "\U0001f406", "Legendary Leopard"),
+    (500, "\U0001f42f", "Tiger Analyst"),
+    (250, "\U0001f981", "Lion Mode"),
+    (100, "\U0001f408\u200d\u2b1b", "Shadow Cat"),
+    (50, "\U0001f408", "Prowling Cat"),
+    (25, "\U0001f638", "Grinning Cat"),
+    (10, "\U0001f63a", "Happy Cat"),
+    (0, "\U0001f431", "Curious Kitten"),
+]
+
+_MILESTONE_THRESHOLDS: set[int] = {t for t, _, _ in _CAT_MILESTONES if t > 0}
+
+
+def _load_count() -> int:
+    """Load analysis count from disk."""
+    try:
+        if _STATS_FILE.exists():
+            data = json.loads(_STATS_FILE.read_text())
+            return int(data.get("analyses_count", 0))
+    except (json.JSONDecodeError, ValueError, OSError) as e:
+        logger.warning(f"Failed to load stats: {e}")
+    return 0
+
+
+def _save_count(count: int) -> None:
+    """Atomically save count to disk."""
+    _STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = _STATS_FILE.with_suffix(".tmp")
+    try:
+        tmp_path.write_text(json.dumps({"analyses_count": count}))
+        tmp_path.replace(_STATS_FILE)
+    except OSError as e:
+        logger.error(f"Failed to save stats: {e}")
 
 
 def _load_users() -> dict[str, str]:
@@ -70,6 +110,11 @@ class State(rx.State):
     is_linting: bool = False
     lint_error: str = ""
 
+    # Counter
+    analyses_count: int = 0
+    counter_animating: bool = False
+    milestone_reached: bool = False
+
     # Explicit setters (auto-setters deprecated in 0.8.9)
     @rx.event
     def set_username(self, value: str):
@@ -102,6 +147,20 @@ class State(rx.State):
     @rx.var
     def can_lint(self) -> bool:
         return bool(self.bot_profile_json) and bool(self.report_markdown)
+
+    @rx.var
+    def cat_emoji(self) -> str:
+        for threshold, emoji, _ in _CAT_MILESTONES:
+            if self.analyses_count >= threshold:
+                return emoji
+        return "\U0001f431"
+
+    @rx.var
+    def cat_title(self) -> str:
+        for threshold, _, title in _CAT_MILESTONES:
+            if self.analyses_count >= threshold:
+                return title
+        return "Curious Kitten"
 
     @rx.var
     def has_lint_report(self) -> bool:
@@ -145,6 +204,7 @@ class State(rx.State):
     def check_auth(self):
         if not self.is_authenticated:
             return rx.redirect("/")
+        self.analyses_count = _load_count()
 
     def check_already_authed(self):
         if self.is_authenticated:
@@ -212,6 +272,7 @@ class State(rx.State):
             self.report_markdown = render_report(profile, timeline)
             self.report_title = profile.display_name
             self.bot_profile_json = profile.model_dump_json()
+            self._increment_counter()
 
     async def _process_bot_files(self, files: list[rx.UploadFile]):
         if len(files) != 2:
@@ -244,6 +305,7 @@ class State(rx.State):
             self.report_markdown = render_report(profile, timeline)
             self.report_title = profile.display_name
             self.bot_profile_json = profile.model_dump_json()
+            self._increment_counter()
 
     async def _process_transcript(self, files: list[rx.UploadFile]):
         if len(files) != 1:
@@ -263,6 +325,18 @@ class State(rx.State):
             self.report_markdown = render_transcript_report(title, timeline, metadata)
             self.report_title = title
             self.bot_profile_json = ""
+            self._increment_counter()
+
+    def _increment_counter(self):
+        self.analyses_count = _load_count() + 1
+        _save_count(self.analyses_count)
+        self.counter_animating = True
+        self.milestone_reached = self.analyses_count in _MILESTONE_THRESHOLDS
+
+    @rx.event
+    def reset_counter_animation(self):
+        self.counter_animating = False
+        self.milestone_reached = False
 
     # --- Report handlers ---
 
