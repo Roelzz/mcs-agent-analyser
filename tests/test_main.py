@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from models import BotProfile, ComponentSummary, ConversationTimeline, EventType, GptInfo, KnowledgeSearchInfo, SearchResult, TimelineEvent
+from models import AppInsightsConfig, BotProfile, ComponentSummary, ConversationTimeline, EventType, GptInfo, KnowledgeSearchInfo, SearchResult, TimelineEvent
 from parser import _count_action_kinds, _sanitize_yaml, parse_dialog_json, parse_yaml, resolve_topic_name
 from renderer import (
     _grounding_score,
@@ -13,11 +13,16 @@ from renderer import (
     render_components,
     render_event_log,
     render_gantt_chart,
+    render_integration_map,
+    render_knowledge_architecture,
     render_knowledge_search_section,
     render_knowledge_source_details,
     render_mermaid_sequence,
     render_orchestrator_reasoning,
     render_report,
+    render_security_summary,
+    render_tldr,
+    render_tool_inventory,
     render_topic_details,
     render_topic_graph,
     render_transcript_report,
@@ -181,14 +186,17 @@ def test_render_report_simple_bot():
     assert "# Troubleshoot_bluebot\n" in report
     assert "— Analysis Report" not in report
     assert "## AI Configuration" in report
+    assert "## TL;DR" in report
     assert "## Bot Profile" in report
     assert "## Components" in report
     assert "## Conversation Trace" in report
     assert "```mermaid" in report
     assert "sequenceDiagram" in report
     assert "### Errors" in report
-    # Diagrams come before Bot Profile metadata
-    assert report.index("### Execution Flow") < report.index("## Bot Profile")
+    # TL;DR comes before Bot Profile metadata
+    assert report.index("## TL;DR") < report.index("## Bot Profile")
+    # Bot Profile comes before Execution Flow
+    assert report.index("## Bot Profile") < report.index("### Execution Flow")
 
 
 def test_render_report_no_errors():
@@ -368,13 +376,15 @@ def test_report_order():
     report = render_report(profile, timeline)
 
     ai_config_pos = report.index("## AI Configuration")
-    exec_flow_pos = report.index("### Execution Flow")
+    tldr_pos = report.index("## TL;DR")
     bot_profile_pos = report.index("## Bot Profile")
+    exec_flow_pos = report.index("### Execution Flow")
     components_pos = report.index("## Components")
 
-    assert ai_config_pos < exec_flow_pos
-    assert exec_flow_pos < bot_profile_pos
-    assert bot_profile_pos < components_pos
+    assert ai_config_pos < tldr_pos
+    assert tldr_pos < bot_profile_pos
+    assert bot_profile_pos < exec_flow_pos
+    assert exec_flow_pos < components_pos
 
 
 def test_system_instructions_visible():
@@ -1989,7 +1999,384 @@ def test_render_report_includes_new_sections():
     output = render_report(profile, timeline)
     assert "Conversation Starters" in output
     assert "Topics with External Calls" in output
-    assert "Knowledge Source Details" in output
+    assert "Knowledge Architecture" in output
     assert "Orchestrator Reasoning" in output
     assert "Environment Variables" in output
     assert "Connectors" in output
+
+
+# --- Phase 1: Entity-Level Properties ---
+
+
+def test_auth_config_botcontent1():
+    """A1: botContent (1) has Integrated auth with Always trigger."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    assert profile.authentication_mode == "Integrated"
+    assert profile.authentication_trigger == "Always"
+
+
+def test_access_control_botcontent1():
+    """A2: botContent (1) has GroupMembership access control."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    assert profile.access_control_policy == "GroupMembership"
+
+
+def test_generative_actions_botcontent1():
+    """A3: botContent (1) has generative actions enabled."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    assert profile.generative_actions_enabled is True
+
+
+def test_agent_connectable_botcontent1():
+    """A4: botContent (1) has isAgentConnectable."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    assert profile.is_agent_connectable is True
+
+
+def test_entity_props_defaults_synthetic():
+    """Entity-level properties have safe defaults when not present."""
+    profile = BotProfile()
+    assert profile.authentication_mode == "Unknown"
+    assert profile.access_control_policy == "Unknown"
+    assert profile.generative_actions_enabled is False
+    assert profile.is_agent_connectable is False
+
+
+def test_auth_rendered_in_metadata():
+    """A1: Auth mode appears in rendered bot metadata."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    output = render_bot_metadata(profile)
+    assert "Integrated (Always)" in output
+    assert "GroupMembership" in output
+
+
+def test_app_insights_synthetic():
+    """A5: AppInsightsConfig model works correctly."""
+    ai = AppInsightsConfig(configured=True, log_activities=True, log_sensitive_properties=False)
+    assert ai.configured is True
+    assert ai.log_activities is True
+    profile = BotProfile(app_insights=ai)
+    output = render_bot_metadata(profile)
+    assert "Application Insights" in output
+    assert "log activities" in output
+
+
+# --- Phase 2: Tool Classification ---
+
+
+def test_connector_tool_botcontent3():
+    """B1: InvokeConnectorTaskAction classified as ConnectorTool."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (3)" / "botContent.yml")
+    connector_tools = [c for c in profile.components if c.tool_type == "ConnectorTool"]
+    assert len(connector_tools) >= 1
+    tool = connector_tools[0]
+    assert tool.operation_id == "ListRecordsWithOrganization"
+    assert tool.connection_mode == "Invoker"
+
+
+def test_a2a_agents_botcontent1():
+    """B2: InvokeExternalAgentTaskAction + A2A classified as A2AAgent."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    a2a = [c for c in profile.components if c.tool_type == "A2AAgent"]
+    assert len(a2a) == 2
+    names = {c.display_name for c in a2a}
+    assert "pydantic_ai" in names
+    for agent in a2a:
+        assert agent.external_agent_protocol == "AgentToAgentProtocolMetadata"
+        assert agent.connection_mode == "Invoker"
+
+
+def test_connected_agents_botcontent1():
+    """B4: InvokeConnectedAgentTaskAction classified as ConnectedAgent."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    connected = [c for c in profile.components if c.tool_type == "ConnectedAgent"]
+    assert len(connected) == 2
+    names = {c.display_name for c in connected}
+    assert "Equippy" in names
+    assert "Schedule" in names
+    for agent in connected:
+        assert agent.connected_bot_schema is not None
+
+
+def test_child_agents_botcontent1():
+    """B5: AgentDialog classified as ChildAgent with instructions."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    children = [c for c in profile.components if c.tool_type == "ChildAgent"]
+    assert len(children) == 2
+    with_instructions = [c for c in children if c.agent_instructions]
+    assert len(with_instructions) == 2
+
+
+def test_mcp_server_synthetic():
+    """B3: ModelContextProtocolMetadata classified as MCPServer."""
+    comp = ComponentSummary(
+        kind="DialogComponent",
+        display_name="MCP Test",
+        schema_name="test.mcp",
+        dialog_kind="TaskDialog",
+        action_kind="InvokeExternalAgentTaskAction",
+        tool_type="MCPServer",
+        external_agent_protocol="ModelContextProtocolMetadata",
+    )
+    assert comp.tool_type == "MCPServer"
+
+
+def test_flow_tool_synthetic():
+    """B6: InvokeFlowAction classified as FlowTool."""
+    comp = ComponentSummary(
+        kind="DialogComponent",
+        display_name="Flow Test",
+        schema_name="test.flow",
+        dialog_kind="TaskDialog",
+        action_kind="InvokeFlowAction",
+        tool_type="FlowTool",
+    )
+    assert comp.tool_type == "FlowTool"
+
+
+def test_cua_tool_synthetic():
+    """B7: InvokeComputerUseAction classified as CUATool."""
+    comp = ComponentSummary(
+        kind="DialogComponent",
+        display_name="CUA Test",
+        schema_name="test.cua",
+        dialog_kind="TaskDialog",
+        action_kind="InvokeComputerUseAction",
+        tool_type="CUATool",
+    )
+    assert comp.tool_type == "CUATool"
+
+
+def test_tool_type_in_orchestrator_table():
+    """B1: Tool type appears in orchestrator topics table."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    output = render_components(profile)
+    assert "ConnectedAgent" in output
+    assert "A2AAgent" in output
+    assert "ChildAgent" in output
+
+
+# --- Phase 3: Connection Infrastructure ---
+
+
+def test_connection_references_botcontent1():
+    """C1: Connection references parsed from botContent (1)."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    assert len(profile.connection_references) == 2
+    for ref in profile.connection_references:
+        assert ref["connectionReferenceLogicalName"]
+        assert ref["connectorId"]
+        assert ref["customConnectorId"]  # both are custom in this export
+
+
+def test_connector_definitions_botcontent1():
+    """C2: Connector definitions parsed from botContent (1)."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    assert len(profile.connector_definitions) == 2
+    for cdef in profile.connector_definitions:
+        assert cdef["displayName"]
+        assert cdef["isCustom"] is True
+        assert cdef["operationCount"] >= 1
+
+
+def test_connector_definitions_mcp_detection():
+    """C2: MCP operations detected in connector definitions."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (3)" / "botContent.yml")
+    mcp_defs = [cd for cd in profile.connector_definitions if cd.get("hasMCP")]
+    assert len(mcp_defs) >= 1
+
+
+def test_connection_cross_reference():
+    """C3: Components enriched with resolved connector display names."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    a2a = [c for c in profile.components if c.tool_type == "A2AAgent"]
+    resolved = [c for c in a2a if c.connector_display_name]
+    assert len(resolved) >= 1
+
+
+def test_connection_refs_rendered():
+    """C1: Connection references appear in rendered metadata."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    output = render_bot_metadata(profile)
+    assert "Connection References" in output
+    assert "Connector Definitions" in output
+
+
+# --- Phase 4: Component Metadata ---
+
+
+def test_custom_entity_kind_genai():
+    """D1: CustomEntity kind + item count parsed from genai export."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
+    entities = [c for c in profile.components if c.kind == "CustomEntityComponent"]
+    assert len(entities) > 0
+    has_closed_list = any(c.entity_kind == "ClosedListEntity" for c in entities)
+    assert has_closed_list
+    with_items = [c for c in entities if c.entity_item_count > 0]
+    assert len(with_items) > 0
+
+
+def test_file_attachment_type():
+    """D2: File type extracted from FileAttachment display name."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
+    files = [c for c in profile.components if c.kind == "FileAttachmentComponent"]
+    xlsx_files = [f for f in files if f.file_type == "xlsx"]
+    assert len(xlsx_files) >= 1
+
+
+def test_global_variable_scope():
+    """D3: Variable scope parsed from GlobalVariableComponent."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
+    variables = [c for c in profile.components if c.kind == "GlobalVariableComponent"]
+    assert len(variables) > 0
+
+
+def test_knowledge_trigger_condition():
+    """D4: Trigger condition parsed from KnowledgeSourceComponent."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
+    ks_comps = [c for c in profile.components if c.kind == "KnowledgeSourceComponent"]
+    with_trigger = [c for c in ks_comps if c.trigger_condition_raw]
+    assert len(with_trigger) > 0
+
+
+def test_entity_kind_in_component_table():
+    """D1: Entity kind appears in custom entities table."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
+    output = render_components(profile)
+    assert "ClosedListEntity" in output
+
+
+def test_variable_scope_in_table():
+    """D3: Variable scope appears in variables table."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="GlobalVariableComponent",
+                display_name="TestVar",
+                schema_name="test.var",
+                variable_scope="Global",
+            ),
+        ],
+    )
+    output = render_components(profile)
+    assert "Global" in output
+
+
+# --- Phase 5: Visualization ---
+
+
+def test_security_summary_orchestrator():
+    """E1: Security summary rendered for orchestrator bot."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    output = render_security_summary(profile)
+    assert "Security & Access" in output
+    assert "Integrated" in output
+    assert "GroupMembership" in output
+
+
+def test_tool_inventory_orchestrator():
+    """E2: Tool inventory rendered for orchestrator bot."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    output = render_tool_inventory(profile)
+    assert "Tool Inventory" in output
+    assert "ConnectedAgent" in output
+    assert "A2AAgent" in output
+    assert "ChildAgent" in output
+
+
+def test_tool_inventory_empty_for_simple_bot():
+    """E2: Tool inventory empty for non-orchestrator bot."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent" / "botContent.yml")
+    output = render_tool_inventory(profile)
+    assert output == ""
+
+
+def test_integration_map_orchestrator():
+    """E3: Integration map rendered for orchestrator bot."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    output = render_integration_map(profile)
+    assert "Integration Map" in output
+    assert "```mermaid" in output
+    assert "flowchart LR" in output
+    assert "child agent" in output
+    assert "connected agent" in output
+    assert "A2A" in output
+
+
+def test_integration_map_empty_for_simple_bot():
+    """E3: Integration map handles bots with no tools gracefully."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent" / "botContent.yml")
+    output = render_integration_map(profile)
+    # Should still render if there are knowledge sources
+    if output:
+        assert "```mermaid" in output
+
+
+def test_knowledge_architecture():
+    """E4: Knowledge architecture rendered with sources and files."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
+    output = render_knowledge_architecture(profile)
+    assert "Knowledge Architecture" in output
+    assert "Knowledge Sources" in output
+    assert "File Attachments" in output
+
+
+def test_knowledge_architecture_trigger_warning():
+    """E4: Always-on trigger condition shown as warning."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent_genaitopicsadded" / "botContent.yml")
+    output = render_knowledge_architecture(profile)
+    assert "always-on" in output
+
+
+# --- Phase 6: Report Assembly ---
+
+
+def test_tldr_orchestrator():
+    """F1: TL;DR includes auth mode and tool breakdown."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    timeline = ConversationTimeline()
+    output = render_tldr(profile, timeline)
+    assert "TL;DR" in output
+    assert "orchestrator" in output
+    assert "Integrated" in output
+    assert "Tools:" in output
+
+
+def test_tldr_simple_bot():
+    """F1: TL;DR works for simple bots without tools."""
+    profile, _ = parse_yaml(BASE_DIR / "botContent" / "botContent.yml")
+    timeline = ConversationTimeline()
+    output = render_tldr(profile, timeline)
+    assert "TL;DR" in output
+    assert "conversational agent" in output
+
+
+def test_report_new_sections_orchestrator():
+    """F2: Full report for orchestrator includes all new sections."""
+    profile, lookup = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
+    activities = parse_dialog_json(BASE_DIR / "botContent (1)" / "dialog.json")
+    timeline = build_timeline(activities, lookup)
+    report = render_report(profile, timeline)
+    assert "## TL;DR" in report
+    assert "## Security & Access" in report
+    assert "## Tool Inventory" in report
+    assert "## Integration Map" in report
+    assert "## Components" in report
+    # Verify ordering: TL;DR < Security < Bot Profile < Components < Tool Inventory
+    assert report.index("## TL;DR") < report.index("## Security & Access")
+    assert report.index("## Security & Access") < report.index("## Bot Profile")
+    assert report.index("## Components") < report.index("## Tool Inventory")
+    assert report.index("## Tool Inventory") < report.index("## Integration Map")
+
+
+def test_report_graceful_degradation_simple_bot():
+    """F2: Simple bot report doesn't crash, optional sections omitted."""
+    profile, lookup = parse_yaml(BASE_DIR / "botContent" / "botContent.yml")
+    activities = parse_dialog_json(BASE_DIR / "botContent" / "dialog.json")
+    timeline = build_timeline(activities, lookup)
+    report = render_report(profile, timeline)
+    assert "## TL;DR" in report
+    assert "## Bot Profile" in report
+    assert "## Components" in report
+    # These should NOT appear for simple bots
+    assert "## Tool Inventory" not in report

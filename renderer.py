@@ -131,6 +131,10 @@ def render_bot_profile(profile: BotProfile) -> str:
 
 def render_bot_metadata(profile: BotProfile) -> str:
     """Render Bot Profile metadata table as Markdown."""
+    auth_display = profile.authentication_mode
+    if profile.authentication_trigger != "Unknown":
+        auth_display += f" ({profile.authentication_trigger})"
+
     lines = [
         "## Bot Profile\n",
         "| Property | Value |",
@@ -140,12 +144,29 @@ def render_bot_metadata(profile: BotProfile) -> str:
         f"| Channels | {', '.join(profile.channels) if profile.channels else 'None configured'} |",
         f"| Recognizer | {profile.recognizer_kind} |",
         f"| Orchestrator | {'Yes' if profile.is_orchestrator else 'No'} |",
+        f"| Authentication | {auth_display} |",
+        f"| Access Control | {profile.access_control_policy} |",
+        f"| Generative Actions | {'Enabled' if profile.generative_actions_enabled else 'Disabled'} |",
+        f"| Agent Connectable | {'Yes' if profile.is_agent_connectable else 'No'} |",
+    ]
+    if profile.is_lightweight_bot:
+        lines.append("| Lightweight Bot | Yes |")
+    if profile.app_insights:
+        ai = profile.app_insights
+        flags = []
+        if ai.log_activities:
+            flags.append("log activities")
+        if ai.log_sensitive_properties:
+            flags.append("log sensitive")
+        detail = f"Configured ({', '.join(flags)})" if flags else "Configured"
+        lines.append(f"| Application Insights | {detail} |")
+    lines.extend([
         f"| Use Model Knowledge | {profile.ai_settings.use_model_knowledge} |",
         f"| File Analysis | {profile.ai_settings.file_analysis} |",
         f"| Semantic Search | {profile.ai_settings.semantic_search} |",
         f"| Content Moderation | {profile.ai_settings.content_moderation} |",
         "",
-    ]
+    ])
 
     if profile.environment_variables:
         lines.append("### Environment Variables\n")
@@ -169,6 +190,33 @@ def render_bot_metadata(profile: BotProfile) -> str:
             desc = conn.get("description", "—") or "—"
             desc = desc.replace("|", "\\|").replace("\n", " ").replace("\r", "")
             lines.append(f"| {name} | {conn_type} | {desc} |")
+        lines.append("")
+
+    if profile.connection_references:
+        lines.append("### Connection References\n")
+        lines.append("| Name | Connector | Custom |")
+        lines.append("| --- | --- | --- |")
+        for ref in profile.connection_references:
+            name = ref.get("displayName", ref.get("connectionReferenceLogicalName", "—"))
+            connector = ref.get("connectorId", "—")
+            # Extract short connector name from path
+            if "/" in connector:
+                connector = connector.rsplit("/", 1)[-1]
+            custom = "Yes" if ref.get("customConnectorId") else "No"
+            lines.append(f"| {name} | {connector} | {custom} |")
+        lines.append("")
+
+    if profile.connector_definitions:
+        lines.append("### Connector Definitions\n")
+        lines.append("| Name | Type | Custom | Operations | MCP |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for cdef in profile.connector_definitions:
+            name = cdef.get("displayName", "—")
+            ctype = cdef.get("connectorType", "—")
+            custom = "Yes" if cdef.get("isCustom") else "No"
+            ops = cdef.get("operationCount", 0)
+            mcp = "Yes" if cdef.get("hasMCP") else "No"
+            lines.append(f"| {name} | {ctype} | {custom} | {ops} | {mcp} |")
         lines.append("")
 
     return "\n".join(lines)
@@ -216,13 +264,13 @@ _CATEGORY_DISPLAY: dict[str, str] = {
 
 _CATEGORY_COLUMNS: dict[str, list[str]] = {
     "user_topics": ["Name", "Schema", "State", "Triggers", "Description"],
-    "orchestrator_topics": ["Name", "Schema", "State", "Dialog Kind", "Action Kind"],
+    "orchestrator_topics": ["Name", "State", "Tool Type", "Connector", "Mode"],
     "system_topics": ["Name", "Schema", "State", "Trigger"],
     "automation_topics": ["Name", "Schema", "State", "Trigger"],
     "knowledge": ["Name", "Status", "Description"],
     "skills": ["Name", "Schema", "State", "Description"],
-    "custom_entities": ["Name", "Schema", "State"],
-    "variables": ["Name", "Schema", "State"],
+    "custom_entities": ["Name", "Schema", "State", "Entity Kind"],
+    "variables": ["Name", "Schema", "State", "Scope"],
     "settings": ["Name", "Schema", "State"],
 }
 
@@ -263,9 +311,10 @@ def _render_component_row(comp: ComponentSummary, category: str) -> str:
         trigger_str = _cell(trigger_str)
         return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {trigger_str} | {_cell(comp.description)} |"
     if category == "orchestrator_topics":
-        dialog = comp.dialog_kind or "—"
-        action = comp.action_kind or "—"
-        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {dialog} | {action} |"
+        tool = comp.tool_type or comp.action_kind or "—"
+        connector = comp.connector_display_name or "—"
+        mode = comp.connection_mode or "—"
+        return f"| {comp.display_name} | {comp.state} | {tool} | {connector} | {mode} |"
     if category in ("system_topics", "automation_topics"):
         trigger = comp.trigger_kind or "—"
         return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {trigger} |"
@@ -273,10 +322,23 @@ def _render_component_row(comp: ComponentSummary, category: str) -> str:
         kind_type = "File" if comp.kind == "FileAttachmentComponent" else "Source"
         state_icon = "✓" if comp.state == "Active" else "✗"
         status = f"{kind_type} {state_icon}"
-        return f"| {comp.display_name} | {status} | {_cell(comp.description)} |"
+        extra = ""
+        if comp.file_type:
+            extra = f" ({comp.file_type})"
+        if comp.trigger_condition_raw and comp.trigger_condition_raw.lower() == "false":
+            extra = " ⚠ always-on"
+        return f"| {comp.display_name}{extra} | {status} | {_cell(comp.description)} |"
     if category == "skills":
         return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {_cell(comp.description)} |"
-    # custom_entities, variables, settings
+    if category == "custom_entities":
+        entity_info = comp.entity_kind or "—"
+        if comp.entity_item_count:
+            entity_info += f" ({comp.entity_item_count} items)"
+        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {entity_info} |"
+    if category == "variables":
+        scope = comp.variable_scope or "—"
+        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {scope} |"
+    # settings
     return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} |"
 
 
@@ -1191,9 +1253,223 @@ def render_transcript_report(
     return "\n".join(sections)
 
 
+def render_security_summary(profile: BotProfile) -> str:
+    """Render security and access configuration summary."""
+    tools = [c for c in profile.components if c.tool_type]
+    if not tools and profile.authentication_mode == "Unknown" and profile.access_control_policy == "Unknown":
+        return ""
+
+    auth_display = profile.authentication_mode
+    if profile.authentication_trigger != "Unknown":
+        auth_display += f" ({profile.authentication_trigger})"
+
+    maker_count = sum(1 for t in tools if t.connection_mode == "Maker")
+    invoker_count = sum(1 for t in tools if t.connection_mode == "Invoker")
+
+    lines = [
+        "## Security & Access\n",
+        "| Property | Value |",
+        "| --- | --- |",
+        f"| Authentication | {auth_display} |",
+        f"| Access Control | {profile.access_control_policy} |",
+        f"| Agent Connectable | {'Yes' if profile.is_agent_connectable else 'No'} |",
+    ]
+    if tools:
+        lines.append(f"| Connection Modes | {maker_count} Maker, {invoker_count} Invoker |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_tool_inventory(profile: BotProfile) -> str:
+    """Render tool inventory for orchestrator bots."""
+    tools = [c for c in profile.components if c.tool_type]
+    if not tools:
+        return ""
+
+    lines = [
+        "## Tool Inventory\n",
+        f"**{len(tools)}** tools configured\n",
+        "| Tool | Type | Connector | Mode | State | Description |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for t in tools:
+        desc = (t.description or t.model_description or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
+        connector = t.connector_display_name or "—"
+        mode = t.connection_mode or "—"
+        lines.append(f"| {t.display_name} | {t.tool_type} | {connector} | {mode} | {t.state} | {desc} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_integration_map(profile: BotProfile) -> str:
+    """Render Mermaid integration map showing agent connections."""
+    tools = [c for c in profile.components if c.tool_type]
+    ks_comps = [c for c in profile.components if c.kind in ("KnowledgeSourceComponent", "FileAttachmentComponent")]
+    mcp_connectors = [cd for cd in profile.connector_definitions if cd.get("hasMCP")]
+
+    if not tools and not ks_comps and not mcp_connectors:
+        return ""
+
+    lines = ["## Integration Map\n", "```mermaid", "flowchart LR"]
+    agent_id = "Agent"
+    lines.append(f'    {agent_id}["{_sanitize_mermaid(profile.display_name)}"]')
+
+    node_idx = 0
+
+    # Group connector tools by connector name
+    connector_groups: dict[str, list[ComponentSummary]] = {}
+    for t in tools:
+        if t.tool_type == "ConnectorTool":
+            key = t.connector_display_name or t.display_name
+            connector_groups.setdefault(key, []).append(t)
+        elif t.tool_type == "ChildAgent":
+            node_id = f"child{node_idx}"
+            node_idx += 1
+            lines.append(f'    {node_id}["{_sanitize_mermaid(t.display_name)}"]')
+            lines.append(f"    {agent_id} -->|child agent| {node_id}")
+        elif t.tool_type == "ConnectedAgent":
+            node_id = f"conn{node_idx}"
+            node_idx += 1
+            lines.append(f'    {node_id}["{_sanitize_mermaid(t.display_name)}"]')
+            lines.append(f"    {agent_id} -->|connected agent| {node_id}")
+        elif t.tool_type == "A2AAgent":
+            node_id = f"a2a{node_idx}"
+            node_idx += 1
+            lines.append(f'    {node_id}["{_sanitize_mermaid(t.display_name)}"]')
+            lines.append(f"    {agent_id} -->|A2A| {node_id}")
+        elif t.tool_type == "MCPServer":
+            node_id = f"mcp{node_idx}"
+            node_idx += 1
+            lines.append(f'    {node_id}["{_sanitize_mermaid(t.display_name)}"]')
+            lines.append(f"    {agent_id} -->|MCP| {node_id}")
+        elif t.tool_type == "FlowTool":
+            node_id = f"flow{node_idx}"
+            node_idx += 1
+            lines.append(f'    {node_id}["{_sanitize_mermaid(t.display_name)}"]')
+            lines.append(f"    {agent_id} -->|flow| {node_id}")
+
+    for group_name, group_tools in connector_groups.items():
+        node_id = f"ctr{node_idx}"
+        node_idx += 1
+        label = f"{_sanitize_mermaid(group_name)} ({len(group_tools)} ops)"
+        lines.append(f'    {node_id}["{label}"]')
+        lines.append(f"    {agent_id} -->|connector| {node_id}")
+
+    # MCP from connector definitions (not component-level)
+    for mcp_cd in mcp_connectors:
+        node_id = f"mcpcd{node_idx}"
+        node_idx += 1
+        lines.append(f'    {node_id}["{_sanitize_mermaid(mcp_cd.get("displayName", "MCP"))} MCP"]')
+        lines.append(f"    {agent_id} -.->|MCP connector| {node_id}")
+
+    # Knowledge sources
+    if ks_comps:
+        ks_id = f"ks{node_idx}"
+        node_idx += 1
+        lines.append(f'    {ks_id}[("Knowledge ({len(ks_comps)} sources)")]')
+        lines.append(f"    {agent_id} -->|search| {ks_id}")
+
+    lines.extend(["```", ""])
+    return "\n".join(lines)
+
+
+def render_knowledge_architecture(profile: BotProfile) -> str:
+    """Render knowledge architecture view combining sources and files."""
+    ks_comps = [c for c in profile.components if c.kind == "KnowledgeSourceComponent"]
+    file_comps = [c for c in profile.components if c.kind == "FileAttachmentComponent"]
+
+    if not ks_comps and not file_comps:
+        return ""
+
+    lines = ["## Knowledge Architecture\n"]
+
+    if ks_comps:
+        lines.append(f"### Knowledge Sources ({len(ks_comps)})\n")
+        lines.append("| Name | Type | Site | Trigger | Status |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for comp in ks_comps:
+            source_type = comp.source_kind or "—"
+            site = comp.source_site or "—"
+            trigger = comp.trigger_condition_raw or "auto"
+            if trigger.lower() == "false":
+                trigger = "⚠ always-on"
+            state_icon = "✓" if comp.state == "Active" else "✗"
+            lines.append(f"| {comp.display_name} | {source_type} | {site} | {trigger} | {state_icon} |")
+        lines.append("")
+
+    if file_comps:
+        lines.append(f"### File Attachments ({len(file_comps)})\n")
+        lines.append("| File | Type | Status |")
+        lines.append("| --- | --- | --- |")
+        for comp in file_comps:
+            ftype = comp.file_type or "—"
+            state_icon = "✓" if comp.state == "Active" else "✗"
+            lines.append(f"| {comp.display_name} | {ftype} | {state_icon} |")
+        lines.append("")
+
+    total = len(ks_comps) + len(file_comps)
+    active = sum(1 for c in ks_comps + file_comps if c.state == "Active")
+    lines.append(f"**Summary:** {total} knowledge entries, {active} active\n")
+
+    return "\n".join(lines)
+
+
+def render_tldr(profile: BotProfile, timeline: ConversationTimeline) -> str:
+    """Render TL;DR summary section."""
+    lines = ["## TL;DR\n"]
+
+    # Bot type
+    if profile.is_orchestrator:
+        lines.append(f"**{profile.display_name}** is an orchestrator agent")
+    else:
+        lines.append(f"**{profile.display_name}** is a conversational agent")
+
+    # Auth
+    if profile.authentication_mode != "Unknown":
+        auth = profile.authentication_mode
+        if profile.authentication_trigger != "Unknown":
+            auth += f" ({profile.authentication_trigger})"
+        lines.append(f" with **{auth}** authentication")
+
+    lines.append(".\n")
+
+    # Tool breakdown
+    tools = [c for c in profile.components if c.tool_type]
+    if tools:
+        type_counts: dict[str, int] = {}
+        for t in tools:
+            tt = t.tool_type or "Unknown"
+            type_counts[tt] = type_counts.get(tt, 0) + 1
+        parts = [f"{count} {ttype}" for ttype, count in sorted(type_counts.items())]
+        lines.append(f"**Tools:** {', '.join(parts)}\n")
+
+    # Component counts
+    total = len(profile.components)
+    active = sum(1 for c in profile.components if c.state == "Active")
+    lines.append(f"**Components:** {total} total, {active} active\n")
+
+    # Knowledge
+    ks = [c for c in profile.components if c.kind in ("KnowledgeSourceComponent", "FileAttachmentComponent")]
+    if ks:
+        lines.append(f"**Knowledge:** {len(ks)} sources\n")
+
+    return "\n".join(lines)
+
+
 def render_report(profile: BotProfile, timeline: ConversationTimeline) -> str:
     """Render complete Markdown report."""
     sections = [render_bot_profile(profile)]
+
+    # TL;DR
+    sections.append(render_tldr(profile, timeline))
+
+    # Security summary
+    security = render_security_summary(profile)
+    if security:
+        sections.append(security)
+
+    # Bot metadata
+    sections.append(render_bot_metadata(profile))
 
     # Execution diagrams promoted to top
     if timeline.events:
@@ -1206,27 +1482,42 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline) -> str:
         if gantt:
             sections.append(gantt)
 
-    sections.append(render_bot_metadata(profile))
+    # Conversation trace
+    sections.append(render_timeline(timeline, skip_diagrams=True))
+
+    # Orchestrator reasoning
+    reasoning = render_orchestrator_reasoning(timeline)
+    if reasoning:
+        sections.append(reasoning)
+
+    # Components
     sections.append(render_components(profile))
 
+    # Tool inventory
+    tool_inv = render_tool_inventory(profile)
+    if tool_inv:
+        sections.append(tool_inv)
+
+    # Integration map
+    int_map = render_integration_map(profile)
+    if int_map:
+        sections.append(int_map)
+
+    # Topic graph
+    topic_graph = render_topic_graph(profile)
+    if topic_graph:
+        sections.append(topic_graph)
+
+    # Knowledge architecture (replaces KS details)
+    ka = render_knowledge_architecture(profile)
+    if ka:
+        sections.append(ka)
+
+    # Topic details + knowledge search
     topic_details = render_topic_details(profile, timeline)
     if topic_details:
         sections.append(topic_details)
 
     sections.append(render_knowledge_search_section(timeline, profile=profile))
-
-    ks_details = render_knowledge_source_details(profile)
-    if ks_details:
-        sections.append(ks_details)
-
-    reasoning = render_orchestrator_reasoning(timeline)
-    if reasoning:
-        sections.append(reasoning)
-
-    topic_graph = render_topic_graph(profile)
-    if topic_graph:
-        sections.append(topic_graph)
-
-    sections.append(render_timeline(timeline, skip_diagrams=True))
 
     return "\n".join(sections)

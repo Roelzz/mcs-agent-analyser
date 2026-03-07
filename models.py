@@ -29,6 +29,21 @@ class ComponentSummary(BaseModel):
     has_external_calls: bool = False
     source_kind: str | None = None
     source_site: str | None = None
+    # Tool classification (TaskDialog/AgentDialog)
+    tool_type: str | None = None
+    connection_reference: str | None = None
+    operation_id: str | None = None
+    connection_mode: str | None = None
+    external_agent_protocol: str | None = None
+    connected_bot_schema: str | None = None
+    agent_instructions: str | None = None
+    connector_display_name: str | None = None
+    # Component-specific metadata
+    entity_kind: str | None = None
+    entity_item_count: int = 0
+    file_type: str | None = None
+    variable_scope: str | None = None
+    trigger_condition_raw: str | None = None
 
 
 class GptInfo(BaseModel):
@@ -50,6 +65,12 @@ class TopicConnection(BaseModel):
     condition: str | None = None
 
 
+class AppInsightsConfig(BaseModel):
+    configured: bool = False
+    log_activities: bool = False
+    log_sensitive_properties: bool = False
+
+
 class BotProfile(BaseModel):
     schema_name: str = ""
     bot_id: str = ""
@@ -65,6 +86,17 @@ class BotProfile(BaseModel):
     is_orchestrator: bool = False
     gpt_info: GptInfo | None = None
     topic_connections: list[TopicConnection] = Field(default_factory=list)
+    # Entity-level properties (Phase 1)
+    authentication_mode: str = "Unknown"
+    authentication_trigger: str = "Unknown"
+    access_control_policy: str = "Unknown"
+    generative_actions_enabled: bool = False
+    is_agent_connectable: bool = False
+    is_lightweight_bot: bool = False
+    app_insights: AppInsightsConfig | None = None
+    # Connection infrastructure (Phase 3)
+    connection_references: list[dict] = Field(default_factory=list)
+    connector_definitions: list[dict] = Field(default_factory=list)
 
 
 # --- Timeline models (from dialog.json) ---
