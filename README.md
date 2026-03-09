@@ -1,5 +1,7 @@
 # Agent Analyser
 
+![Repo Views](https://komarev.com/ghpvc/?username=Roelzz&label=Repo%20Views&color=0e75b6&style=flat)
+
 Parses Microsoft Copilot Studio bot exports (`botContent.yml` + `dialog.json`) and conversation transcripts, generating Markdown reports with Mermaid diagrams. Includes a web UI for upload-and-analyse workflows.
 
 ## Quick Start
