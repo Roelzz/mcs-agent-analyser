@@ -485,14 +485,47 @@ def report_viewer() -> rx.Component:
             ),
             rx.spacer(),
             rx.hstack(
-                rx.button(
-                    rx.icon("download", size=14),
-                    rx.text("Download"),
-                    variant="outline",
-                    size="2",
-                    color_scheme="gray",
-                    on_click=State.download_report,
-                    cursor="pointer",
+                rx.menu.root(
+                    rx.menu.trigger(
+                        rx.button(
+                            rx.icon("download", size=14),
+                            rx.text("Download"),
+                            rx.icon("chevron-down", size=12),
+                            variant="outline",
+                            size="2",
+                            color_scheme="gray",
+                            cursor="pointer",
+                        ),
+                    ),
+                    rx.menu.content(
+                        rx.menu.item(
+                            rx.hstack(
+                                rx.icon("file-text", size=14),
+                                rx.text("Markdown (.md)"),
+                                align="center",
+                                spacing="2",
+                            ),
+                            on_click=State.download_report,
+                        ),
+                        rx.menu.item(
+                            rx.hstack(
+                                rx.icon("globe", size=14),
+                                rx.text("HTML (.html)"),
+                                align="center",
+                                spacing="2",
+                            ),
+                            on_click=State.download_report_html,
+                        ),
+                        rx.menu.item(
+                            rx.hstack(
+                                rx.icon("printer", size=14),
+                                rx.text("Print to PDF"),
+                                align="center",
+                                spacing="2",
+                            ),
+                            on_click=State.download_report_pdf,
+                        ),
+                    ),
                 ),
                 rx.cond(
                     State.can_lint,
@@ -612,6 +645,7 @@ def report_viewer() -> rx.Component:
                 ),
             ),
         ),
+        id="report-content",
         max_width="1400px",
         width="100%",
         padding="28px 32px",

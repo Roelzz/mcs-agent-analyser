@@ -55,6 +55,7 @@ def mermaid_script() -> rx.Component:
                         '.rx-Markdown ul, .rx-Markdown ol { padding-left: 1.5em; margin: 8px 0; }',
                         '.rx-Markdown li { margin-bottom: 4px; }',
                         '.rx-Markdown hr { border: none; border-top: 1px solid var(--gray-a4); margin: 2em 0; }',
+                        '@media print { #report-content { position: absolute; top: 0; left: 0; width: 100%; z-index: 99999; background: white; } #report-content button, #report-content hr, #report-content [role="separator"] { display: none !important; } nav, header, [class*="navbar"], [class*="NavBar"] { display: none !important; } @page { margin: 1.5cm; } }',
                     ].join('\\n');
                     document.head.appendChild(style);
                 })();
@@ -138,6 +139,66 @@ def mermaid_script() -> rx.Component:
             """
         ),
     )
+
+
+def build_standalone_html(markdown: str, title: str) -> str:
+    """Build a self-contained HTML file from report markdown.
+
+    Uses CDN-loaded marked.js and mermaid.js to render markdown and diagrams.
+    """
+    # Escape for JS template literal: backslashes first, then backticks, then ${}
+    escaped = markdown.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title}</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.75; font-size: 15px; max-width: 960px; margin: 0 auto; padding: 32px 24px; color: #1a1a1a; background: #fff; }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 13.5px; }}
+  th, td {{ border: 1px solid #d4d4d4; padding: 8px 14px; text-align: left; }}
+  th {{ background: #f5f5f5; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }}
+  tr:nth-child(even) td {{ background: #fafafa; }}
+  pre:not(.mermaid) {{ background: #f5f5f5; border: 1px solid #d4d4d4; border-radius: 8px; padding: 16px; overflow-x: auto; font-size: 13px; }}
+  code:not(pre code) {{ background: #f5f5f5; border-radius: 4px; padding: 2px 6px; font-size: 0.875em; }}
+  pre.mermaid {{ background: #fafafa; border: 1px solid #e5e5e5; border-radius: 10px; padding: 24px; margin: 16px 0; }}
+  h2 {{ margin-top: 2.5em; margin-bottom: 0.75em; }}
+  h3 {{ margin-top: 2em; margin-bottom: 0.75em; padding-bottom: 0.4em; border-bottom: 1px solid #e5e5e5; }}
+  h4 {{ margin-top: 1.5em; margin-bottom: 0.5em; }}
+  blockquote {{ border-left: 3px solid #f59e0b; padding: 8px 16px; margin: 12px 0; background: #fffbeb; border-radius: 0 6px 6px 0; }}
+  ul, ol {{ padding-left: 1.5em; margin: 8px 0; }}
+  li {{ margin-bottom: 4px; }}
+  hr {{ border: none; border-top: 1px solid #e5e5e5; margin: 2em 0; }}
+  @media print {{ body {{ max-width: 100%; padding: 0; }} }}
+</style>
+</head>
+<body>
+<div id="content"></div>
+<script>
+(function() {{
+  const md = `{escaped}`;
+
+  // Custom renderer: mermaid code blocks -> <pre class="mermaid">
+  const renderer = new marked.Renderer();
+  const origCode = renderer.code.bind(renderer);
+  renderer.code = function(token) {{
+    if (token.lang === 'mermaid') {{
+      return '<pre class="mermaid">' + token.text + '</pre>';
+    }}
+    return origCode(token);
+  }};
+
+  document.getElementById('content').innerHTML = marked.parse(md, {{ renderer: renderer }});
+  mermaid.initialize({{ startOnLoad: true, theme: 'default' }});
+  mermaid.run();
+}})();
+</script>
+</body>
+</html>"""
 
 
 def render_segment(segment: dict) -> rx.Component:

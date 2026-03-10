@@ -1161,6 +1161,16 @@ class State(rx.State):
         filename = f"{self.report_title}.md" if self.report_title else "report.md"
         return rx.download(data=self.report_markdown, filename=filename)
 
+    def download_report_html(self):
+        from web.mermaid import build_standalone_html
+
+        title = self.report_title or "report"
+        html = build_standalone_html(self.report_markdown, title)
+        return rx.download(data=html, filename=f"{title}.html")
+
+    def download_report_pdf(self):
+        return rx.call_script("window.print()")
+
     def new_upload(self):
         self.report_markdown = ""
         self.report_title = ""
