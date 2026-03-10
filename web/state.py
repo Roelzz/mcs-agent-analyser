@@ -1,8 +1,11 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import tempfile
+import time
+import urllib.request
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -28,9 +31,37 @@ from models import BotProfile  # noqa: E402
 
 load_dotenv()
 
-# --- Analysis counter persistence ---
+# --- Community counter (komarev badge) ---
 
-_STATS_FILE = Path(__file__).resolve().parent.parent / "data" / "stats.json"
+_KOMAREV_URL = (
+    "https://komarev.com/ghpvc/?username=Roelzz"
+    "&label=Community%20Views&color=0e75b6&style=flat"
+)
+
+_community_count_cache: dict[str, float | int] = {"count": 0, "fetched_at": 0.0}
+
+
+def _fetch_community_count() -> int:
+    """Fetch community view count from komarev badge SVG (cached 30s)."""
+    now = time.time()
+    if now - _community_count_cache["fetched_at"] < 30:
+        return int(_community_count_cache["count"])
+    try:
+        req = urllib.request.Request(
+            _KOMAREV_URL, headers={"User-Agent": "AgentAnalyser/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            svg = resp.read().decode()
+            numbers = re.findall(r">(\d+)</", svg)
+            if numbers:
+                count = int(numbers[-1])
+                _community_count_cache["count"] = count
+                _community_count_cache["fetched_at"] = now
+                return count
+    except Exception as e:
+        logger.warning(f"Failed to fetch community count: {e}")
+    return int(_community_count_cache["count"])
+
 
 _CAT_MILESTONES: list[tuple[int, str, str]] = [
     (1000, "\U0001f406", "Legendary Leopard"),
@@ -45,30 +76,8 @@ _CAT_MILESTONES: list[tuple[int, str, str]] = [
 
 _MILESTONE_THRESHOLDS: set[int] = {t for t, _, _ in _CAT_MILESTONES if t > 0}
 
-
-def _load_count() -> int:
-    """Load analysis count from disk."""
-    try:
-        if _STATS_FILE.exists():
-            data = json.loads(_STATS_FILE.read_text())
-            return int(data.get("analyses_count", 0))
-    except (json.JSONDecodeError, ValueError, OSError) as e:
-        logger.warning(f"Failed to load stats: {e}")
-    return 0
-
-
-def _save_count(count: int) -> None:
-    """Atomically save count to disk."""
-    _STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = _STATS_FILE.with_suffix(".tmp")
-    try:
-        tmp_path.write_text(json.dumps({"analyses_count": count}))
-        tmp_path.replace(_STATS_FILE)
-    except OSError as e:
-        logger.error(f"Failed to save stats: {e}")
-
-
-_BOT_PROFILE_FILE = _STATS_FILE.parent / "bot_profile.json"
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_BOT_PROFILE_FILE = _DATA_DIR / "bot_profile.json"
 
 
 def _save_bot_profile(json_str: str) -> None:
@@ -335,10 +344,10 @@ class State(rx.State):
         self.dv_bot_analyse_error = ""
         return rx.redirect("/")
 
-    def check_auth(self):
+    async def check_auth(self):
         if not self.is_authenticated:
             return rx.redirect("/")
-        self.analyses_count = _load_count()
+        await self._refresh_community_count()
 
     def check_already_authed(self):
         if self.is_authenticated:
@@ -416,7 +425,7 @@ class State(rx.State):
                 self.report_title = title
                 self.bot_profile_json = ""
                 _clear_bot_profile()
-                self._increment_counter()
+
                 self.paste_json = ""
         except Exception as e:
             logger.error(f"Paste processing failed: {e}")
@@ -461,7 +470,7 @@ class State(rx.State):
             self.report_title = profile.display_name
             self.bot_profile_json = profile.model_dump_json()
             _save_bot_profile(self.bot_profile_json)
-            self._increment_counter()
+
 
     async def _process_bot_files(self, files: list[rx.UploadFile]):
         if len(files) != 2:
@@ -495,7 +504,7 @@ class State(rx.State):
             self.report_title = profile.display_name
             self.bot_profile_json = profile.model_dump_json()
             _save_bot_profile(self.bot_profile_json)
-            self._increment_counter()
+
 
     async def _process_transcript(self, files: list[rx.UploadFile]):
         if len(files) != 1:
@@ -516,13 +525,17 @@ class State(rx.State):
             self.report_title = title
             self.bot_profile_json = ""
             _clear_bot_profile()
-            self._increment_counter()
 
-    def _increment_counter(self):
-        self.analyses_count = _load_count() + 1
-        _save_count(self.analyses_count)
-        self.counter_animating = True
-        self.milestone_reached = self.analyses_count in _MILESTONE_THRESHOLDS
+
+    async def _refresh_community_count(self):
+        """Fetch community count from komarev and trigger animation if it changed."""
+        prev = self.analyses_count
+        self.analyses_count = await asyncio.to_thread(_fetch_community_count)
+        if self.analyses_count > prev and prev > 0:
+            self.counter_animating = True
+            self.milestone_reached = any(
+                prev < t <= self.analyses_count for t in _MILESTONE_THRESHOLDS
+            )
 
     @rx.event
     def reset_counter_animation(self):
@@ -584,10 +597,10 @@ class State(rx.State):
         else:
             self.dv_autofill_error = ""
 
-    def init_import_page(self):
+    async def init_import_page(self):
         if not self.is_authenticated:
             return rx.redirect("/")
-        self.analyses_count = _load_count()
+        await self._refresh_community_count()
         if not self.dv_since_date:
             default_since = datetime.now(timezone.utc) - timedelta(days=30)
             self.dv_since_date = default_since.strftime("%Y-%m-%d")
@@ -816,7 +829,7 @@ class State(rx.State):
                     self.report_markdown = render_transcript_report(title, timeline, metadata)
                     self.report_title = title
                 self.lint_report_markdown = ""
-                self._increment_counter()
+
 
         except Exception as e:
             logger.error(f"Dataverse transcript analysis failed: {e}")
@@ -890,7 +903,7 @@ class State(rx.State):
                     self.report_markdown = render_transcript_report(title, timeline, metadata)
                     self.report_title = title
                 self.lint_report_markdown = ""
-                self._increment_counter()
+
 
         except RuntimeError as e:
             self.dv_single_fetch_error = str(e)
@@ -944,7 +957,7 @@ class State(rx.State):
             _save_bot_profile(self.bot_profile_json)
             logger.debug("Stored bot_profile_json (len={})", len(self.bot_profile_json))
             self.lint_report_markdown = ""
-            self._increment_counter()
+
 
         except RuntimeError as e:
             self.dv_bot_analyse_error = str(e)
