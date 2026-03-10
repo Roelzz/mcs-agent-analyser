@@ -362,9 +362,18 @@ def render_topic_inventory(profile: BotProfile) -> str:
     lines = [
         "## Topic Inventory\n",
         f"**{total}** topics & config — **{active}** active, **{inactive}** inactive\n",
+    ]
+    if total == 0:
+        lines.append(
+            "> **Note:** No components found in Dataverse. "
+            "The bot may use embedded configuration or a different component model.\n"
+        )
+        return "\n".join(lines)
+
+    lines.extend([
         "| Kind | Count | Active | Inactive |",
         "| --- | --- | --- | --- |",
-    ]
+    ])
     for cat in _CATEGORY_ORDER:
         comps = by_category.get(cat)
         if not comps:
@@ -1420,7 +1429,7 @@ def render_knowledge_inventory(profile: BotProfile) -> str:
 
 def render_credit_estimate(estimate: CreditEstimate, timeline: ConversationTimeline) -> str:
     """Render credit estimation section with summary, breakdown table, and Mermaid diagram."""
-    if not estimate.line_items:
+    if not estimate or not estimate.line_items:
         return ""
 
     lines: list[str] = []
@@ -1594,7 +1603,7 @@ def render_tldr(profile: BotProfile, timeline: ConversationTimeline, credit_esti
     return "\n".join(lines)
 
 
-def render_report(profile: BotProfile, timeline: ConversationTimeline) -> str:
+def render_report(profile: BotProfile, timeline: ConversationTimeline | None = None) -> str:
     """Render complete Markdown report.
 
     Section order per plan F2:
@@ -1616,11 +1625,14 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline) -> str:
     """
     from timeline import estimate_credits
 
+    if timeline is None:
+        timeline = ConversationTimeline()
+
     # 1. Heading
     sections = [render_bot_profile(profile)]
 
     # Compute credit estimate upfront (used in TL;DR and as its own section)
-    credit_estimate = estimate_credits(timeline, profile)
+    credit_estimate = estimate_credits(timeline, profile) if timeline.events else None
 
     # 2. TL;DR
     sections.append(render_tldr(profile, timeline, credit_estimate))

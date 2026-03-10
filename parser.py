@@ -149,7 +149,16 @@ def parse_yaml(path: Path) -> tuple[BotProfile, dict[str, str]]:
     """Parse botContent.yml and return (BotProfile, schema_to_display_name lookup)."""
     raw = path.read_text(encoding="utf-8")
     data = yaml.safe_load(_sanitize_yaml(raw))
+    return _parse_bot_dict(data)
 
+
+def parse_bot_data(data: dict) -> tuple[BotProfile, dict[str, str]]:
+    """Public entry point for pre-built dicts (e.g. from Dataverse)."""
+    return _parse_bot_dict(data)
+
+
+def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
+    """Core parsing logic shared by file-based and Dataverse-based flows."""
     entity = data.get("entity", {})
     config = entity.get("configuration", {})
 
@@ -483,3 +492,154 @@ def resolve_topic_name(schema_name: str, lookup: dict[str, str]) -> str:
     if len(parts) >= 2:
         return parts[-1]
     return schema_name
+
+
+def build_bot_dict(bot_record: dict, component_records: list[dict]) -> dict:
+    """Reconstruct a botContent.yml-equivalent dict from Dataverse bot + botcomponents records.
+
+    Maps Dataverse lowercase column names to the camelCase keys expected by _parse_bot_dict.
+    """
+    from loguru import logger
+
+    # Parse the bot's configuration JSON
+    config_raw = bot_record.get("configuration", "") or ""
+    config: dict = {}
+    if config_raw:
+        try:
+            config = json.loads(config_raw) if isinstance(config_raw, str) else config_raw
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"Failed to parse bot configuration JSON: {e}")
+
+    logger.debug(f"Bot config keys: {list(config.keys()) if config else '(empty)'}")
+
+    # Build entity block
+    entity = {
+        "schemaName": bot_record.get("schemaname", ""),
+        "cdsBotId": bot_record.get("botid", ""),
+        "displayName": bot_record.get("name", ""),
+        "description": bot_record.get("description", ""),
+        "authenticationMode": config.get("authenticationMode", "Unknown"),
+        "authenticationTrigger": config.get("authenticationTrigger", "Unknown"),
+        "accessControlPolicy": config.get("accessControlPolicy", "Unknown"),
+        "configuration": config,
+    }
+
+    # Parse each component
+    logger.info(f"Processing {len(component_records)} raw component records from Dataverse")
+    components: list[dict] = []
+    skipped_empty = 0
+    skipped_parse = 0
+    for comp_record in component_records:
+        content_raw = comp_record.get("content", "") or ""
+        if not content_raw:
+            if skipped_empty == 0:
+                logger.debug(f"First empty-content record keys: {list(comp_record.keys())}")
+            skipped_empty += 1
+            continue
+
+        comp_data: dict | None = None
+
+        # Try YAML first, fall back to JSON
+        try:
+            comp_data = yaml.safe_load(_sanitize_yaml(content_raw))
+        except Exception:
+            pass
+
+        if not isinstance(comp_data, dict):
+            try:
+                comp_data = json.loads(content_raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if not isinstance(comp_data, dict):
+            skipped_parse += 1
+            logger.warning(
+                f"Skipping component {comp_record.get('name', '?')} — "
+                "content is neither valid YAML nor JSON"
+            )
+            continue
+
+        # Map Dataverse componenttype int to kind string
+        comp_type = comp_record.get("componenttype")
+        kind = _component_type_to_kind(comp_type, comp_data)
+
+        logger.debug(
+            "Component '{}': componenttype={}, content_kind={}, computed_kind={}",
+            comp_record.get("name", "?"),
+            comp_type,
+            comp_data.get("kind"),
+            kind,
+        )
+
+        # Merge schema-level fields from the record into the parsed content
+        # If componenttype mapped to a known kind, force it (don't let inner YAML shadow)
+        if comp_type is not None and comp_type in _COMPONENT_TYPE_MAP:
+            # Dataverse content is flat — restructure to match botContent.yml wrapper format
+            # that _parse_bot_dict expects (kind + dialog/metadata sub-keys)
+            inner_kind = comp_data.get("kind", "")
+            if kind == "DialogComponent" and inner_kind != "DialogComponent":
+                # Content IS the dialog — wrap it: {kind: DialogComponent, dialog: <content>}
+                wrapped = {
+                    "kind": kind,
+                    "dialog": comp_data,
+                    "schemaName": comp_record.get("schemaname", ""),
+                    "displayName": comp_record.get("name", ""),
+                }
+                comp_data = wrapped
+            elif kind == "GptComponent" and inner_kind != "GptComponent":
+                # Content IS the metadata — wrap it: {kind: GptComponent, metadata: <content>}
+                wrapped = {
+                    "kind": kind,
+                    "metadata": comp_data,
+                    "schemaName": comp_record.get("schemaname", ""),
+                    "displayName": comp_record.get("name", ""),
+                }
+                comp_data = wrapped
+            else:
+                comp_data["kind"] = kind
+        else:
+            comp_data.setdefault("kind", kind)
+        comp_data.setdefault("schemaName", comp_record.get("schemaname", ""))
+        comp_data.setdefault("displayName", comp_record.get("name", ""))
+
+        components.append(comp_data)
+
+    logger.info(
+        f"Components: {len(components)} valid, {skipped_empty} empty content, "
+        f"{skipped_parse} parse failures"
+    )
+
+    # Extract connectionReferences and connectorDefinitions from config
+    connection_references = config.get("connectionReferences", []) or []
+    connector_definitions = config.get("connectorDefinitions", []) or []
+
+    return {
+        "entity": entity,
+        "components": components,
+        "connectionReferences": connection_references,
+        "connectorDefinitions": connector_definitions,
+    }
+
+
+# Mapping from Dataverse botcomponent.componenttype (int) to kind strings
+# Values discovered via diagnostic logging against live Dataverse instances
+_COMPONENT_TYPE_MAP: dict[int, str] = {
+    0: "DialogComponent",
+    1: "GptComponent",
+    2: "KnowledgeSourceComponent",
+    3: "CustomEntityComponent",
+    4: "FileAttachmentComponent",
+    5: "GlobalVariableComponent",
+    6: "SkillComponent",
+    7: "BotSettingsComponent",
+    9: "DialogComponent",       # Dataverse uses 9 for all dialog types
+    15: "GptComponent",         # Dataverse uses 15 for GPT/AI components
+}
+
+
+def _component_type_to_kind(comp_type: int | None, comp_data: dict) -> str:
+    """Resolve component kind from Dataverse componenttype int or content hints."""
+    if comp_type is not None and comp_type in _COMPONENT_TYPE_MAP:
+        return _COMPONENT_TYPE_MAP[comp_type]
+    # Fallback: check if the content already has a kind field
+    return comp_data.get("kind", "Unknown")
