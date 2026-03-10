@@ -20,6 +20,7 @@ Parses Microsoft Copilot Studio bot exports and live Dataverse environments, gen
 | **Conversation transcripts** | Upload or fetch transcripts from Dataverse — sequence diagrams, Gantt charts, event logs |
 | **Instruction Lint** | AI audit of bot instructions, guardrails, and topic architecture (requires OpenAI API key) |
 | **Single conversation lookup** | Fetch and analyse a specific conversation by ID directly from Dataverse |
+| **Solution Tools** | Check, validate, analyse dependencies, or rename Power Platform solution ZIP exports |
 | **Analysis counter** | Tracks how many analyses you've run, with cat-themed gamification milestones |
 | **Dark / Light mode** | Respects your OS preference, green accent theme throughout |
 
@@ -169,7 +170,7 @@ Make sure `.env` contains at least `REFLEX_ENV=prod` and `PORT=2009`.
 ```bash
 cp .env.example .env          # edit credentials
 uv sync
-uv run pytest              # 83 tests
+uv run pytest              # 171 tests
 uv run ruff check .
 uv run ruff format .
 uv run reflex run          # dev server — frontend :3000, backend :8000
@@ -186,7 +187,12 @@ timeline.py          Dialog activity → timeline event conversion
 transcript.py        Transcript JSON parsing and normalization
 dataverse_client.py  Dataverse Web API client (bot config, components, transcripts)
 rxconfig.py          Reflex app config
+best_practices/      GPT model best-practice reference docs
+deps_analyzer.py     Solution dependency analyser
 linter.py            Instruction lint logic (OpenAI API, model resolution, audit prompt)
+renamer.py           Solution rename logic
+solution_checker.py  Solution health checker (agent, topics, knowledge, security)
+validator.py         Instruction validator (AI-powered, model best practices)
 web/
   web.py             Page definitions and Reflex app setup
   state.py           Reflex state (auth, file upload, Dataverse connection, report generation)
