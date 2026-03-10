@@ -65,11 +65,7 @@ class DataverseClient:
             return bot_identifier
 
         token = await self._get_token()
-        url = (
-            f"{self.org_url}/api/data/v9.2/bots"
-            f"?$filter=schemaname eq '{bot_identifier}'"
-            f"&$select=botid,name"
-        )
+        url = f"{self.org_url}/api/data/v9.2/bots?$filter=schemaname eq '{bot_identifier}'&$select=botid,name"
         headers = {"Authorization": f"Bearer {token}", **_ODATA_HEADERS}
 
         async with httpx.AsyncClient() as client:
@@ -112,9 +108,7 @@ class DataverseClient:
 
         records = resp.json().get("value", [])
         guids = {
-            r["_bot_conversationtranscriptid_value"]
-            for r in records
-            if r.get("_bot_conversationtranscriptid_value")
+            r["_bot_conversationtranscriptid_value"] for r in records if r.get("_bot_conversationtranscriptid_value")
         }
 
         if len(guids) == 1:
@@ -125,9 +119,7 @@ class DataverseClient:
         if not guids:
             raise RuntimeError("Cannot auto-detect bot GUID: no recent transcripts found.")
 
-        raise RuntimeError(
-            f"Multiple bots found in transcripts ({guids}). Provide the bot UUID directly."
-        )
+        raise RuntimeError(f"Multiple bots found in transcripts ({guids}). Provide the bot UUID directly.")
 
     async def fetch_transcript_by_id(self, conversation_id: str) -> dict:
         """Fetch a single transcript by its primary key (conversation ID)."""
@@ -140,8 +132,7 @@ class DataverseClient:
 
         if resp.status_code == 404:
             raise RuntimeError(
-                f"No transcript found with ID '{conversation_id}'. "
-                "Check the conversation ID and try again."
+                f"No transcript found with ID '{conversation_id}'. Check the conversation ID and try again."
             )
         resp.raise_for_status()
         return resp.json()
@@ -149,20 +140,14 @@ class DataverseClient:
     async def fetch_bot_config(self, bot_guid: str) -> dict:
         """Fetch a single bot record by GUID."""
         token = await self._get_token()
-        url = (
-            f"{self.org_url}/api/data/v9.2/bots({bot_guid})"
-            f"?$select=botid,name,schemaname,configuration"
-        )
+        url = f"{self.org_url}/api/data/v9.2/bots({bot_guid})?$select=botid,name,schemaname,configuration"
         headers = {"Authorization": f"Bearer {token}", **_ODATA_HEADERS}
 
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, timeout=30)
 
         if resp.status_code == 403:
-            raise RuntimeError(
-                "Access denied. Your account needs read access to the "
-                "bots table in Dataverse."
-            )
+            raise RuntimeError("Access denied. Your account needs read access to the bots table in Dataverse.")
         if resp.status_code == 404:
             raise RuntimeError(f"No bot found with ID '{bot_guid}'.")
         resp.raise_for_status()
@@ -188,16 +173,12 @@ class DataverseClient:
         all_records = await self._paginated_get(url, headers)
 
         if all_records:
-            logger.info(
-                f"Fetched {len(all_records)} bot component(s) via direct lookup"
-            )
+            logger.info(f"Fetched {len(all_records)} bot component(s) via direct lookup")
             all_records = await self._enrich_component_content(all_records, headers)
             return all_records
 
         # --- Attempt 2: M:N navigation property (bot_botcomponent) ---
-        logger.info(
-            "Direct lookup returned 0 components — trying M:N navigation property"
-        )
+        logger.info("Direct lookup returned 0 components — trying M:N navigation property")
         url = (
             f"{self.org_url}/api/data/v9.2/bots({bot_guid})/bot_botcomponent"
             f"?$select=botcomponentid,componenttype,content,schemaname,name"
@@ -205,15 +186,11 @@ class DataverseClient:
         logger.debug("OData component URL (M:N nav): {}", url)
         all_records = await self._paginated_get(url, headers)
 
-        logger.info(
-            f"Fetched {len(all_records)} bot component(s) via M:N navigation"
-        )
+        logger.info(f"Fetched {len(all_records)} bot component(s) via M:N navigation")
         all_records = await self._enrich_component_content(all_records, headers)
         return all_records
 
-    async def _paginated_get(
-        self, url: str | None, headers: dict
-    ) -> list[dict]:
+    async def _paginated_get(self, url: str | None, headers: dict) -> list[dict]:
         """Execute a paginated OData GET, following @odata.nextLink."""
         all_records: list[dict] = []
         async with httpx.AsyncClient() as client:
@@ -222,8 +199,7 @@ class DataverseClient:
 
                 if resp.status_code == 403:
                     raise RuntimeError(
-                        "Access denied. Your account needs read access to the "
-                        "botcomponents table in Dataverse."
+                        "Access denied. Your account needs read access to the botcomponents table in Dataverse."
                     )
                 resp.raise_for_status()
 
@@ -232,9 +208,7 @@ class DataverseClient:
                 url = data.get("@odata.nextLink")
         return all_records
 
-    async def _enrich_component_content(
-        self, records: list[dict], headers: dict
-    ) -> list[dict]:
+    async def _enrich_component_content(self, records: list[dict], headers: dict) -> list[dict]:
         """Fetch content individually if collection query returned empty content.
 
         Dataverse OData omits large text/memo columns from $filter queries.
@@ -261,26 +235,19 @@ class DataverseClient:
         content_field = "content"  # default
         drop_select = False
         if first_id:
-            probe_url = (
-                f"{self.org_url}/api/data/v9.2/botcomponents({first_id})"
-            )
+            probe_url = f"{self.org_url}/api/data/v9.2/botcomponents({first_id})"
             async with httpx.AsyncClient() as client:
                 probe = await client.get(probe_url, headers=headers, timeout=30)
             if probe.status_code == 200:
                 probe_data = probe.json()
-                non_null_keys = [
-                    k for k, v in probe_data.items()
-                    if v is not None and not k.startswith("@")
-                ]
+                non_null_keys = [k for k, v in probe_data.items() if v is not None and not k.startswith("@")]
                 logger.debug(
                     "Probe component (no $select) — non-null keys: {}",
                     non_null_keys,
                 )
                 # Check if content is now populated without $select
                 if probe_data.get("content"):
-                    logger.info(
-                        "Content available without $select — fetching all without $select"
-                    )
+                    logger.info("Content available without $select — fetching all without $select")
                     content_field = "content"
                     drop_select = True
                 else:
@@ -295,8 +262,7 @@ class DataverseClient:
                             break
                     else:
                         logger.warning(
-                            "Probe: content still null even without $select. "
-                            "Non-null keys: {}",
+                            "Probe: content still null even without $select. Non-null keys: {}",
                             non_null_keys,
                         )
 
@@ -311,10 +277,7 @@ class DataverseClient:
                 if drop_select:
                     url = f"{self.org_url}/api/data/v9.2/botcomponents({comp_id})"
                 else:
-                    url = (
-                        f"{self.org_url}/api/data/v9.2/botcomponents({comp_id})"
-                        f"?$select={content_field}"
-                    )
+                    url = f"{self.org_url}/api/data/v9.2/botcomponents({comp_id})?$select={content_field}"
                 resp = await client.get(url, headers=headers, timeout=30)
                 if resp.status_code == 200:
                     value = resp.json().get(content_field, "")
@@ -322,7 +285,8 @@ class DataverseClient:
                 else:
                     logger.warning(
                         "Individual fetch for {} returned status {}",
-                        comp_id, resp.status_code,
+                        comp_id,
+                        resp.status_code,
                     )
 
         enriched = sum(1 for r in records if r.get("content"))

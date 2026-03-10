@@ -28,15 +28,16 @@ from web.mermaid import split_markdown_mermaid  # noqa: E402
 
 from linter import run_lint as _run_lint  # noqa: E402
 from models import BotProfile  # noqa: E402
+from solution_checker import check_solution_zip  # noqa: E402
+from validator import validate_zip_bytes  # noqa: E402
+from deps_analyzer import analyze_deps_zip_bytes  # noqa: E402
+from renamer import rename_solution_from_bytes, inspect_zip  # noqa: E402
 
 load_dotenv()
 
 # --- Community counter (komarev badge) ---
 
-_KOMAREV_URL = (
-    "https://komarev.com/ghpvc/?username=Roelzz"
-    "&label=Community%20Views&color=0e75b6&style=flat"
-)
+_KOMAREV_URL = "https://komarev.com/ghpvc/?username=Roelzz&label=Community%20Views&color=0e75b6&style=flat"
 
 _community_count_cache: dict[str, float | int] = {"count": 0, "fetched_at": 0.0}
 
@@ -47,9 +48,7 @@ def _fetch_community_count() -> int:
     if now - _community_count_cache["fetched_at"] < 30:
         return int(_community_count_cache["count"])
     try:
-        req = urllib.request.Request(
-            _KOMAREV_URL, headers={"User-Agent": "AgentAnalyser/1.0"}
-        )
+        req = urllib.request.Request(_KOMAREV_URL, headers={"User-Agent": "AgentAnalyser/1.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             svg = resp.read().decode()
             numbers = re.findall(r">(\d+)</", svg)
@@ -143,6 +142,7 @@ class State(rx.State):
     # Report
     report_markdown: str = ""
     report_title: str = ""
+    report_source: str = ""  # "upload" | "import" | ""
 
     # Lint
     bot_profile_json: str = ""
@@ -190,6 +190,44 @@ class State(rx.State):
     dv_conversation_id: str = ""
     dv_single_fetch_error: str = ""
     dv_single_fetching: bool = False
+
+    # Solution Tools — shared
+    sol_zip_bytes: bytes = b""
+    sol_zip_name: str = ""
+    sol_active_tab: str = "check"
+
+    # Solution Checker
+    sol_check_results: list[dict] = []
+    sol_check_error: str = ""
+    sol_is_checking: bool = False
+    sol_check_agent_name: str = ""
+    sol_check_solution_name: str = ""
+    sol_check_pass: int = 0
+    sol_check_warn: int = 0
+    sol_check_fail: int = 0
+    sol_check_info: int = 0
+    sol_check_active_category: str = "All"
+
+    # Validator
+    sol_validate_results: list[dict] = []
+    sol_validate_error: str = ""
+    sol_is_validating: bool = False
+    sol_validate_model_display: str = ""
+    sol_validate_best_practices_md: str = ""
+
+    # Dependencies
+    sol_deps_segments: list[dict] = []
+    sol_deps_error: str = ""
+    sol_is_deps_analyzing: bool = False
+
+    # Renamer
+    sol_rename_new_agent: str = ""
+    sol_rename_new_solution: str = ""
+    sol_rename_result_bytes: bytes = b""
+    sol_rename_result: dict = {}
+    sol_rename_error: str = ""
+    sol_is_renaming: bool = False
+    sol_detected_info: dict = {}
 
     # Explicit setters (auto-setters deprecated in 0.8.9)
     @rx.event
@@ -239,6 +277,22 @@ class State(rx.State):
     def set_dv_conversation_id(self, value: str):
         self.dv_conversation_id = value
 
+    @rx.event
+    def set_sol_active_tab(self, value: str):
+        self.sol_active_tab = value
+
+    @rx.event
+    def set_sol_check_active_category(self, value: str):
+        self.sol_check_active_category = value
+
+    @rx.event
+    def set_sol_rename_new_agent(self, value: str):
+        self.sol_rename_new_agent = value
+
+    @rx.event
+    def set_sol_rename_new_solution(self, value: str):
+        self.sol_rename_new_solution = value
+
     @rx.var
     def has_report(self) -> bool:
         return bool(self.report_markdown)
@@ -287,6 +341,23 @@ class State(rx.State):
         segments = split_markdown_mermaid(self.lint_report_markdown)
         return [{"type": t, "content": c} for t, c in segments]
 
+    @rx.var
+    def sol_has_zip(self) -> bool:
+        return len(self.sol_zip_bytes) > 0
+
+    @rx.var
+    def sol_filtered_results(self) -> list[dict]:
+        if self.sol_check_active_category == "All":
+            return self.sol_check_results
+        return [r for r in self.sol_check_results if r.get("category") == self.sol_check_active_category]
+
+    @rx.var
+    def sol_validate_bp_segments(self) -> list[dict[str, str]]:
+        if not self.sol_validate_best_practices_md:
+            return []
+        segments = split_markdown_mermaid(self.sol_validate_best_practices_md)
+        return [{"type": t, "content": c} for t, c in segments]
+
     # --- Auth handlers ---
 
     @rx.event
@@ -298,7 +369,7 @@ class State(rx.State):
         if users.get(self.username) == self.password:
             self.is_authenticated = True
             self.auth_error = ""
-            return rx.redirect("/upload")
+            return rx.redirect("/dashboard")
         self.auth_error = "Invalid username or password."
 
     @rx.event
@@ -309,6 +380,7 @@ class State(rx.State):
         self.auth_error = ""
         self.report_markdown = ""
         self.report_title = ""
+        self.report_source = ""
         self.upload_error = ""
         self.is_processing = False
         self.bot_profile_json = ""
@@ -342,6 +414,32 @@ class State(rx.State):
         self.dv_single_fetching = False
         self.dv_bot_analysing = False
         self.dv_bot_analyse_error = ""
+        self.dv_schema_lookup = {}
+        # Clear solution tools state
+        self.sol_zip_bytes = b""
+        self.sol_zip_name = ""
+        self.sol_active_tab = "check"
+        self.sol_check_results = []
+        self.sol_check_error = ""
+        self.sol_check_agent_name = ""
+        self.sol_check_solution_name = ""
+        self.sol_check_pass = 0
+        self.sol_check_warn = 0
+        self.sol_check_fail = 0
+        self.sol_check_info = 0
+        self.sol_check_active_category = "All"
+        self.sol_validate_results = []
+        self.sol_validate_error = ""
+        self.sol_validate_model_display = ""
+        self.sol_validate_best_practices_md = ""
+        self.sol_deps_segments = []
+        self.sol_deps_error = ""
+        self.sol_rename_new_agent = ""
+        self.sol_rename_new_solution = ""
+        self.sol_rename_result_bytes = b""
+        self.sol_rename_result = {}
+        self.sol_rename_error = ""
+        self.sol_detected_info = {}
         return rx.redirect("/")
 
     async def check_auth(self):
@@ -351,7 +449,14 @@ class State(rx.State):
 
     def check_already_authed(self):
         if self.is_authenticated:
-            return rx.redirect("/upload")
+            return rx.redirect("/dashboard")
+
+    async def check_analysis_page(self):
+        if not self.is_authenticated:
+            return rx.redirect("/")
+        if not self.report_markdown:
+            return rx.redirect("/dashboard")
+        await self._refresh_community_count()
 
     # --- Upload handlers ---
 
@@ -378,8 +483,7 @@ class State(rx.State):
                     await self._process_bot_files(files)
                 else:
                     self.upload_error = (
-                        "Two files uploaded but expected botContent.yml + dialog.json. "
-                        f"Got: {', '.join(names)}"
+                        f"Two files uploaded but expected botContent.yml + dialog.json. Got: {', '.join(names)}"
                     )
             elif len(files) == 1 and exts[0] == ".json":
                 await self._process_transcript(files)
@@ -395,6 +499,10 @@ class State(rx.State):
             self.upload_error = f"Processing failed: {e}"
         finally:
             self.is_processing = False
+            yield
+            await self._refresh_community_count()
+            if self.report_markdown:
+                yield rx.redirect("/analysis")
 
     @rx.event
     async def handle_paste_submit(self):
@@ -423,6 +531,8 @@ class State(rx.State):
                 title = "Pasted Transcript"
                 self.report_markdown = render_transcript_report(title, timeline, metadata)
                 self.report_title = title
+                self.report_source = "upload"
+                self.lint_report_markdown = ""
                 self.bot_profile_json = ""
                 _clear_bot_profile()
 
@@ -432,6 +542,10 @@ class State(rx.State):
             self.upload_error = f"Processing failed: {e}"
         finally:
             self.is_processing = False
+            yield
+            await self._refresh_community_count()
+            if self.report_markdown:
+                yield rx.redirect("/analysis")
 
     async def _process_bot_zip(self, files: list[rx.UploadFile]):
         if len(files) != 1:
@@ -468,9 +582,9 @@ class State(rx.State):
             timeline = build_timeline(activities, schema_lookup)
             self.report_markdown = render_report(profile, timeline)
             self.report_title = profile.display_name
+            self.report_source = "upload"
             self.bot_profile_json = profile.model_dump_json()
             _save_bot_profile(self.bot_profile_json)
-
 
     async def _process_bot_files(self, files: list[rx.UploadFile]):
         if len(files) != 2:
@@ -502,9 +616,9 @@ class State(rx.State):
             timeline = build_timeline(activities, schema_lookup)
             self.report_markdown = render_report(profile, timeline)
             self.report_title = profile.display_name
+            self.report_source = "upload"
             self.bot_profile_json = profile.model_dump_json()
             _save_bot_profile(self.bot_profile_json)
-
 
     async def _process_transcript(self, files: list[rx.UploadFile]):
         if len(files) != 1:
@@ -523,9 +637,9 @@ class State(rx.State):
             title = json_path.stem
             self.report_markdown = render_transcript_report(title, timeline, metadata)
             self.report_title = title
+            self.report_source = "upload"
             self.bot_profile_json = ""
             _clear_bot_profile()
-
 
     async def _refresh_community_count(self):
         """Fetch community count from komarev and trigger animation if it changed."""
@@ -533,9 +647,7 @@ class State(rx.State):
         self.analyses_count = await asyncio.to_thread(_fetch_community_count)
         if self.analyses_count > prev and prev > 0:
             self.counter_animating = True
-            self.milestone_reached = any(
-                prev < t <= self.analyses_count for t in _MILESTONE_THRESHOLDS
-            )
+            self.milestone_reached = any(prev < t <= self.analyses_count for t in _MILESTONE_THRESHOLDS)
 
     @rx.event
     def reset_counter_animation(self):
@@ -591,8 +703,7 @@ class State(rx.State):
         self.dv_session_details_paste = ""
         if missing:
             self.dv_autofill_error = (
-                f"Filled {', '.join(filled)}. Could not find: {', '.join(missing)}. "
-                "Fill the remaining fields manually."
+                f"Filled {', '.join(filled)}. Could not find: {', '.join(missing)}. Fill the remaining fields manually."
             )
         else:
             self.dv_autofill_error = ""
@@ -663,6 +774,10 @@ class State(rx.State):
                     yield  # show spinner on Analyse Bot button
                     await self._run_bot_analysis()
                     self.dv_bot_analysing = False
+                    if self.report_markdown:
+                        yield
+                        await self._refresh_community_count()
+                        yield rx.redirect("/analysis")
             else:
                 error = result.get("error_description", result.get("error", "Unknown error"))
                 self.dv_auth_error = (
@@ -677,6 +792,8 @@ class State(rx.State):
             )
         finally:
             self.dv_is_authenticating = False
+            yield
+            await self._refresh_community_count()
 
     @rx.event
     async def dv_fetch_transcripts(self):
@@ -748,12 +865,14 @@ class State(rx.State):
                 if not preview:
                     preview = "(no user message found)"
 
-                summaries.append({
-                    "id": tid,
-                    "created_on": created[:10] if len(created) >= 10 else created,
-                    "preview": preview,
-                    "activity_count": len(activities),
-                })
+                summaries.append(
+                    {
+                        "id": tid,
+                        "created_on": created[:10] if len(created) >= 10 else created,
+                        "preview": preview,
+                        "activity_count": len(activities),
+                    }
+                )
                 contents[tid] = content_raw
 
             self.dv_transcripts = summaries
@@ -775,14 +894,15 @@ class State(rx.State):
                 self.dv_fetch_error = "Session expired. Click Disconnect, then Connect again to re-authenticate."
             elif "403" in error_str:
                 self.dv_fetch_error = (
-                    "Access denied. Your account needs read access to the "
-                    "conversationtranscripts table in Dataverse."
+                    "Access denied. Your account needs read access to the conversationtranscripts table in Dataverse."
                 )
             else:
                 logger.error(f"Fetch transcripts failed: {e}")
                 self.dv_fetch_error = f"Fetch failed: {e}"
         finally:
             self.dv_is_fetching = False
+            yield
+            await self._refresh_community_count()
 
     @rx.event
     async def dv_analyse_transcript(self, transcript_id: str):
@@ -820,7 +940,9 @@ class State(rx.State):
 
                 if not self.bot_profile_json:
                     self.bot_profile_json = _load_bot_profile()
-                logger.debug("bot_profile_json present: {} (len={})", bool(self.bot_profile_json), len(self.bot_profile_json))
+                logger.debug(
+                    "bot_profile_json present: {} (len={})", bool(self.bot_profile_json), len(self.bot_profile_json)
+                )
                 if self.bot_profile_json:
                     profile = BotProfile.model_validate_json(self.bot_profile_json)
                     self.report_markdown = render_report(profile, timeline)
@@ -828,14 +950,18 @@ class State(rx.State):
                 else:
                     self.report_markdown = render_transcript_report(title, timeline, metadata)
                     self.report_title = title
+                self.report_source = "import"
                 self.lint_report_markdown = ""
-
 
         except Exception as e:
             logger.error(f"Dataverse transcript analysis failed: {e}")
             self.dv_import_error = f"Analysis failed: {e}"
         finally:
             self.dv_import_processing = False
+            yield
+            await self._refresh_community_count()
+            if self.report_markdown:
+                yield rx.redirect("/analysis")
 
     @rx.event
     async def dv_fetch_and_analyse_by_id(self):
@@ -853,8 +979,7 @@ class State(rx.State):
         )
         if not uuid_pattern.match(conversation_id):
             self.dv_single_fetch_error = (
-                "Invalid format. Conversation ID must be a UUID "
-                "(e.g. 12345678-abcd-1234-abcd-1234567890ab)."
+                "Invalid format. Conversation ID must be a UUID (e.g. 12345678-abcd-1234-abcd-1234567890ab)."
             )
             return
 
@@ -894,7 +1019,9 @@ class State(rx.State):
                 title = f"Conversation {conversation_id[:8]}..."
                 if not self.bot_profile_json:
                     self.bot_profile_json = _load_bot_profile()
-                logger.debug("bot_profile_json present: {} (len={})", bool(self.bot_profile_json), len(self.bot_profile_json))
+                logger.debug(
+                    "bot_profile_json present: {} (len={})", bool(self.bot_profile_json), len(self.bot_profile_json)
+                )
                 if self.bot_profile_json:
                     profile = BotProfile.model_validate_json(self.bot_profile_json)
                     self.report_markdown = render_report(profile, timeline)
@@ -902,8 +1029,8 @@ class State(rx.State):
                 else:
                     self.report_markdown = render_transcript_report(title, timeline, metadata)
                     self.report_title = title
+                self.report_source = "import"
                 self.lint_report_markdown = ""
-
 
         except RuntimeError as e:
             self.dv_single_fetch_error = str(e)
@@ -913,14 +1040,17 @@ class State(rx.State):
                 self.dv_single_fetch_error = "Session expired. Disconnect and reconnect to re-authenticate."
             elif "403" in error_str:
                 self.dv_single_fetch_error = (
-                    "Access denied. Your account needs read access to "
-                    "conversationtranscripts in Dataverse."
+                    "Access denied. Your account needs read access to conversationtranscripts in Dataverse."
                 )
             else:
                 logger.error(f"Single transcript fetch failed: {e}")
                 self.dv_single_fetch_error = f"Fetch failed: {e}"
         finally:
             self.dv_single_fetching = False
+            yield
+            await self._refresh_community_count()
+            if self.report_markdown:
+                yield rx.redirect("/analysis")
 
     async def _run_bot_analysis(self):
         """Core bot analysis logic — fetch config + components, generate report.
@@ -948,16 +1078,17 @@ class State(rx.State):
             self.dv_schema_lookup = schema_lookup
             logger.info(
                 "Analyse Bot result: {} — {} components",
-                profile.display_name, len(profile.components),
+                profile.display_name,
+                len(profile.components),
             )
 
             self.report_markdown = render_report(profile)
             self.report_title = profile.display_name
+            self.report_source = "import"
             self.bot_profile_json = profile.model_dump_json()
             _save_bot_profile(self.bot_profile_json)
             logger.debug("Stored bot_profile_json (len={})", len(self.bot_profile_json))
             self.lint_report_markdown = ""
-
 
         except RuntimeError as e:
             self.dv_bot_analyse_error = str(e)
@@ -967,8 +1098,7 @@ class State(rx.State):
                 self.dv_bot_analyse_error = "Session expired. Disconnect and reconnect to re-authenticate."
             elif "403" in error_str:
                 self.dv_bot_analyse_error = (
-                    "Access denied. Your account needs read access to the "
-                    "bots and botcomponents tables in Dataverse."
+                    "Access denied. Your account needs read access to the bots and botcomponents tables in Dataverse."
                 )
             else:
                 logger.error(f"Bot analysis failed: {e}")
@@ -991,6 +1121,10 @@ class State(rx.State):
 
         await self._run_bot_analysis()
         self.dv_bot_analysing = False
+        yield
+        await self._refresh_community_count()
+        if self.report_markdown:
+            yield rx.redirect("/analysis")
 
     @rx.event
     def dv_disconnect(self):
@@ -1015,9 +1149,11 @@ class State(rx.State):
         """Clear report view but preserve bot profile and Dataverse connection."""
         self.report_markdown = ""
         self.report_title = ""
+        self.report_source = ""
         self.lint_report_markdown = ""
         self.is_linting = False
         self.lint_error = ""
+        return rx.redirect("/import")
 
     # --- Report handlers ---
 
@@ -1028,6 +1164,7 @@ class State(rx.State):
     def new_upload(self):
         self.report_markdown = ""
         self.report_title = ""
+        self.report_source = ""
         self.upload_error = ""
         self.paste_json = ""
         self.bot_profile_json = ""
@@ -1035,6 +1172,7 @@ class State(rx.State):
         self.lint_report_markdown = ""
         self.is_linting = False
         self.lint_error = ""
+        return rx.redirect("/dashboard")
 
     # --- Lint handlers ---
 
@@ -1073,3 +1211,228 @@ class State(rx.State):
     def clear_lint(self):
         self.lint_report_markdown = ""
         self.lint_error = ""
+
+    # --- Solution Tools handlers ---
+
+    @rx.event
+    async def handle_solution_upload(self, files: list[rx.UploadFile]):
+        if not files:
+            return
+        upload_file = files[0]
+        data = await upload_file.read()
+        if not data:
+            return
+
+        self.sol_zip_bytes = data
+        self.sol_zip_name = upload_file.filename or "solution.zip"
+        # Reset all results
+        self.sol_check_results = []
+        self.sol_check_error = ""
+        self.sol_check_agent_name = ""
+        self.sol_check_solution_name = ""
+        self.sol_check_pass = 0
+        self.sol_check_warn = 0
+        self.sol_check_fail = 0
+        self.sol_check_info = 0
+        self.sol_check_active_category = "All"
+        self.sol_validate_results = []
+        self.sol_validate_error = ""
+        self.sol_validate_model_display = ""
+        self.sol_validate_best_practices_md = ""
+        self.sol_deps_segments = []
+        self.sol_deps_error = ""
+        self.sol_rename_result_bytes = b""
+        self.sol_rename_result = {}
+        self.sol_rename_error = ""
+        self.sol_detected_info = {}
+        yield
+
+        # Auto-detect solution info for renamer
+        try:
+            info = await asyncio.to_thread(self._detect_solution_info)
+            self.sol_detected_info = info
+            self.sol_rename_new_agent = info.get("bot_display_name", "")
+            self.sol_rename_new_solution = info.get("solution_unique_name", "")
+        except Exception:
+            pass
+
+        # Auto-trigger read-only analyses
+        self.sol_is_checking = True
+        self.sol_is_validating = True
+        self.sol_is_deps_analyzing = True
+        yield
+
+        await self._run_solution_check()
+        yield
+        await self._run_solution_validate()
+        yield
+        await self._run_deps_analysis()
+        yield
+        await self._refresh_community_count()
+
+    def _detect_solution_info(self) -> dict:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            zip_path = tmp / "input.zip"
+            zip_path.write_bytes(self.sol_zip_bytes)
+            info = inspect_zip(zip_path)
+            return {
+                "bot_schema_name": info.bot_schema_name,
+                "bot_display_name": info.bot_display_name,
+                "solution_unique_name": info.solution_unique_name,
+                "solution_display_name": info.solution_display_name,
+            }
+
+    async def _run_solution_check(self):
+        self.sol_is_checking = True
+        self.sol_check_error = ""
+        try:
+            result = await asyncio.to_thread(check_solution_zip, self.sol_zip_bytes)
+            self.sol_check_results = result.get("results", [])
+            self.sol_check_agent_name = result.get("agent_name", "")
+            self.sol_check_solution_name = result.get("solution_name", "")
+            self.sol_check_pass = result.get("pass_count", 0)
+            self.sol_check_warn = result.get("warn_count", 0)
+            self.sol_check_fail = result.get("fail_count", 0)
+            self.sol_check_info = result.get("info_count", 0)
+            error = result.get("error", "")
+            if error:
+                self.sol_check_error = error
+        except Exception as e:
+            logger.error(f"Solution check failed: {e}")
+            self.sol_check_error = f"Check failed: {e}"
+        finally:
+            self.sol_is_checking = False
+
+    @rx.event
+    async def run_solution_check(self):
+        if not self.sol_zip_bytes:
+            self.sol_check_error = "No solution ZIP uploaded."
+            return
+        self.sol_is_checking = True
+        yield
+        await self._run_solution_check()
+
+    async def _run_solution_validate(self):
+        self.sol_is_validating = True
+        self.sol_validate_error = ""
+        try:
+            result = await asyncio.to_thread(validate_zip_bytes, self.sol_zip_bytes)
+            self.sol_validate_results = result.get("results", [])
+            self.sol_validate_model_display = result.get("model_display", "")
+            self.sol_validate_best_practices_md = result.get("best_practices_md", "")
+        except Exception as e:
+            logger.error(f"Validation failed: {e}")
+            self.sol_validate_error = f"Validation failed: {e}"
+        finally:
+            self.sol_is_validating = False
+
+    @rx.event
+    async def run_solution_validate(self):
+        if not self.sol_zip_bytes:
+            self.sol_validate_error = "No solution ZIP uploaded."
+            return
+        self.sol_is_validating = True
+        yield
+        await self._run_solution_validate()
+
+    async def _run_deps_analysis(self):
+        self.sol_is_deps_analyzing = True
+        self.sol_deps_error = ""
+        try:
+            segments = await asyncio.to_thread(analyze_deps_zip_bytes, self.sol_zip_bytes)
+            self.sol_deps_segments = segments
+        except (ValueError, RuntimeError) as e:
+            self.sol_deps_error = str(e)
+        except Exception as e:
+            logger.error(f"Deps analysis failed: {e}")
+            self.sol_deps_error = f"Analysis failed: {e}"
+        finally:
+            self.sol_is_deps_analyzing = False
+
+    @rx.event
+    async def run_deps_analysis(self):
+        if not self.sol_zip_bytes:
+            self.sol_deps_error = "No solution ZIP uploaded."
+            return
+        self.sol_is_deps_analyzing = True
+        yield
+        await self._run_deps_analysis()
+
+    @rx.event
+    async def run_rename(self):
+        if not self.sol_zip_bytes:
+            self.sol_rename_error = "No solution ZIP uploaded."
+            return
+        if not self.sol_rename_new_agent.strip():
+            self.sol_rename_error = "Enter a new agent name."
+            return
+        if not self.sol_rename_new_solution.strip():
+            self.sol_rename_error = "Enter a new solution name."
+            return
+
+        self.sol_is_renaming = True
+        self.sol_rename_error = ""
+        self.sol_rename_result_bytes = b""
+        self.sol_rename_result = {}
+        yield
+
+        try:
+            result_bytes, result = await asyncio.to_thread(
+                rename_solution_from_bytes,
+                self.sol_zip_bytes,
+                self.sol_rename_new_agent.strip(),
+                self.sol_rename_new_solution.strip(),
+            )
+            self.sol_rename_result_bytes = result_bytes
+            self.sol_rename_result = {
+                "old_agent_name": result.old_agent_name,
+                "new_agent_name": result.new_agent_name,
+                "old_solution_name": result.old_solution_name,
+                "new_solution_name": result.new_solution_name,
+                "files_modified": result.files_modified,
+                "folders_renamed": result.folders_renamed,
+                "warnings": result.warnings,
+            }
+        except Exception as e:
+            logger.error(f"Rename failed: {e}")
+            self.sol_rename_error = f"Rename failed: {e}"
+        finally:
+            self.sol_is_renaming = False
+            yield
+            await self._refresh_community_count()
+
+    @rx.event
+    def download_renamed_zip(self):
+        if not self.sol_rename_result_bytes:
+            return
+        new_name = self.sol_rename_new_solution.strip() or "renamed_solution"
+        return rx.download(data=self.sol_rename_result_bytes, filename=f"{new_name}.zip")
+
+    @rx.event
+    def sol_clear(self):
+        """Reset all solution tools state."""
+        self.sol_zip_bytes = b""
+        self.sol_zip_name = ""
+        self.sol_active_tab = "check"
+        self.sol_check_results = []
+        self.sol_check_error = ""
+        self.sol_check_agent_name = ""
+        self.sol_check_solution_name = ""
+        self.sol_check_pass = 0
+        self.sol_check_warn = 0
+        self.sol_check_fail = 0
+        self.sol_check_info = 0
+        self.sol_check_active_category = "All"
+        self.sol_validate_results = []
+        self.sol_validate_error = ""
+        self.sol_validate_model_display = ""
+        self.sol_validate_best_practices_md = ""
+        self.sol_deps_segments = []
+        self.sol_deps_error = ""
+        self.sol_rename_new_agent = ""
+        self.sol_rename_new_solution = ""
+        self.sol_rename_result_bytes = b""
+        self.sol_rename_result = {}
+        self.sol_rename_error = ""
+        self.sol_detected_info = {}

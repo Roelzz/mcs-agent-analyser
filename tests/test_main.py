@@ -2,7 +2,18 @@ from pathlib import Path
 
 import pytest
 
-from models import AppInsightsConfig, BotProfile, ComponentSummary, ConversationTimeline, CreditEstimate, EventType, GptInfo, KnowledgeSearchInfo, SearchResult, TimelineEvent
+from models import (
+    AppInsightsConfig,
+    BotProfile,
+    ComponentSummary,
+    ConversationTimeline,
+    CreditEstimate,
+    EventType,
+    GptInfo,
+    KnowledgeSearchInfo,
+    SearchResult,
+    TimelineEvent,
+)
 from parser import _count_action_kinds, _sanitize_yaml, parse_dialog_json, parse_yaml, resolve_topic_name
 from renderer import (
     _grounding_score,
@@ -1341,7 +1352,11 @@ def test_search_results_captured():
                 "observation": {
                     "search_result": {
                         "search_results": [
-                            {"Name": "Printer Guide", "Url": "https://example.com/printer", "Text": "How to fix printer"},
+                            {
+                                "Name": "Printer Guide",
+                                "Url": "https://example.com/printer",
+                                "Text": "How to fix printer",
+                            },
                             {"Name": "FAQ", "Url": "https://example.com/faq", "Text": "Printer FAQ content"},
                         ]
                     }
@@ -1472,7 +1487,10 @@ def test_grounding_details_shows_all_results():
     from models import ConversationTimeline
 
     long_snippet = "A" * 300
-    results = [SearchResult(name=f"Result {i}", url=f"http://example.com/{i}", text=long_snippet if i == 1 else None) for i in range(1, 6)]
+    results = [
+        SearchResult(name=f"Result {i}", url=f"http://example.com/{i}", text=long_snippet if i == 1 else None)
+        for i in range(1, 6)
+    ]
     ks = KnowledgeSearchInfo(
         search_query="test query",
         knowledge_sources=["src1"],

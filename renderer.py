@@ -1,6 +1,15 @@
 from datetime import datetime, timezone
 
-from models import BotProfile, ComponentSummary, ConversationTimeline, CreditEstimate, CreditLineItem, EventType, KnowledgeSearchInfo, TimelineEvent
+from models import (
+    BotProfile,
+    ComponentSummary,
+    ConversationTimeline,
+    CreditEstimate,
+    CreditLineItem,
+    EventType,
+    KnowledgeSearchInfo,
+    TimelineEvent,
+)
 
 IDLE_THRESHOLD_MS = 5000  # gaps > 5s are shown as idle markers
 
@@ -22,6 +31,7 @@ def _parse_execution_time_ms(raw: str | None) -> float | None:
     if not raw:
         return None
     import re
+
     m = re.match(r"(\d+):(\d+):(\d+(?:\.\d+)?)", raw)
     if not m:
         return None
@@ -166,13 +176,15 @@ def render_bot_metadata(profile: BotProfile) -> str:
             flags.append("log sensitive")
         detail = f"Configured ({', '.join(flags)})" if flags else "Configured"
         lines.append(f"| Application Insights | {detail} |")
-    lines.extend([
-        f"| Use Model Knowledge | {profile.ai_settings.use_model_knowledge} |",
-        f"| File Analysis | {profile.ai_settings.file_analysis} |",
-        f"| Semantic Search | {profile.ai_settings.semantic_search} |",
-        f"| Content Moderation | {profile.ai_settings.content_moderation} |",
-        "",
-    ])
+    lines.extend(
+        [
+            f"| Use Model Knowledge | {profile.ai_settings.use_model_knowledge} |",
+            f"| File Analysis | {profile.ai_settings.file_analysis} |",
+            f"| Semantic Search | {profile.ai_settings.semantic_search} |",
+            f"| Content Moderation | {profile.ai_settings.content_moderation} |",
+            "",
+        ]
+    )
 
     if profile.environment_variables:
         lines.append("### Environment Variables\n")
@@ -307,13 +319,16 @@ def _classify_component(comp: ComponentSummary) -> str | None:
 
 def _render_component_row(comp: ComponentSummary, category: str) -> str:
     """Render a single component row matching the category's columns."""
+
     def _cell(text: str | None) -> str:
         return (text or "—").replace("|", "\\|").replace("\n", " ").replace("\r", "")
 
     if category == "user_topics":
         trigger_str = ", ".join(comp.trigger_queries) if comp.trigger_queries else "—"
         trigger_str = _cell(trigger_str)
-        return f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {trigger_str} | {_cell(comp.description)} |"
+        return (
+            f"| {comp.display_name} | `{comp.schema_name}` | {comp.state} | {trigger_str} | {_cell(comp.description)} |"
+        )
     if category == "orchestrator_topics":
         tool = comp.tool_type or comp.action_kind or "—"
         connector = comp.connector_display_name or "—"
@@ -370,10 +385,12 @@ def render_topic_inventory(profile: BotProfile) -> str:
         )
         return "\n".join(lines)
 
-    lines.extend([
-        "| Kind | Count | Active | Inactive |",
-        "| --- | --- | --- | --- |",
-    ])
+    lines.extend(
+        [
+            "| Kind | Count | Active | Inactive |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
     for cat in _CATEGORY_ORDER:
         comps = by_category.get(cat)
         if not comps:
@@ -943,7 +960,8 @@ def _grounding_score(ks: "KnowledgeSearchInfo") -> tuple[str, str]:
     terms = {w for w in raw.split() if w not in stop and len(w) > 2}
     if terms:
         hits = sum(
-            1 for r in ks.search_results[:5]
+            1
+            for r in ks.search_results[:5]
             if any(t in (r.name or "").lower() or t in (r.text or "").lower()[:200] for t in terms)
         )
         relevance = hits / min(count, 5)
@@ -1064,11 +1082,7 @@ def render_knowledge_search_section(
     """Render Knowledge Search section as Markdown, grouped by triggering user message."""
     searches = timeline.knowledge_searches
     custom = getattr(timeline, "custom_search_steps", [])
-    gk = (
-        "✓ On"
-        if (profile and profile.ai_settings and profile.ai_settings.use_model_knowledge)
-        else "✗ Off"
-    )
+    gk = "✓ On" if (profile and profile.ai_settings and profile.ai_settings.use_model_knowledge) else "✗ Off"
     total = len(searches)
 
     lines: list[str] = ["## Knowledge Search\n"]
@@ -1080,18 +1094,20 @@ def render_knowledge_search_section(
 
     # Group searches by triggering_user_message (preserve order)
     from collections import OrderedDict
+
     groups: OrderedDict[str | None, list[tuple[int, "KnowledgeSearchInfo"]]] = OrderedDict()
     for i, ks in enumerate(searches, 1):
         key = ks.triggering_user_message
         groups.setdefault(key, []).append((i, ks))
 
-    user_turns = sum(1 for k in groups if k is not None)
     total_turns = len(groups)
 
     if total_turns <= 1:
         lines.append(f"**{total} search{'es' if total != 1 else ''}** | General Knowledge: {gk}\n")
     else:
-        lines.append(f"**{total} search{'es' if total != 1 else ''} across {total_turns} user turn{'s' if total_turns != 1 else ''}** | General Knowledge: {gk}\n")
+        lines.append(
+            f"**{total} search{'es' if total != 1 else ''} across {total_turns} user turn{'s' if total_turns != 1 else ''}** | General Knowledge: {gk}\n"
+        )
 
     # Render each group
     for msg_key, group_searches in groups.items():
@@ -1151,10 +1167,7 @@ def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | N
     lines: list[str] = []
 
     # Section 1: Topics with external calls
-    external_topics = [
-        c for c in profile.components
-        if c.kind == "DialogComponent" and c.has_external_calls
-    ]
+    external_topics = [c for c in profile.components if c.kind == "DialogComponent" and c.has_external_calls]
     if external_topics:
         lines.append("### Topics with External Calls\n")
         lines.append("| Topic | Connector | Flow | AI Builder | HTTP | Total Actions |")
@@ -1171,10 +1184,11 @@ def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | N
     # Section 2: Topic coverage (only if timeline provided)
     if timeline:
         dialog_comps = [
-            c for c in profile.components
-            if c.kind == "DialogComponent" and c.trigger_kind not in (
-                _SYSTEM_TRIGGERS | _AUTOMATION_TRIGGERS | {None}
-            ) and c.dialog_kind not in ("TaskDialog", "AgentDialog")
+            c
+            for c in profile.components
+            if c.kind == "DialogComponent"
+            and c.trigger_kind not in (_SYSTEM_TRIGGERS | _AUTOMATION_TRIGGERS | {None})
+            and c.dialog_kind not in ("TaskDialog", "AgentDialog")
         ]
         if dialog_comps:
             triggered_names = {
@@ -1203,8 +1217,7 @@ def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | N
 def render_knowledge_source_details(profile: BotProfile) -> str:
     """Render expanded knowledge source details with descriptions and source config."""
     ks_comps = [
-        c for c in profile.components
-        if c.kind == "KnowledgeSourceComponent" and (c.description or c.source_kind)
+        c for c in profile.components if c.kind == "KnowledgeSourceComponent" and (c.description or c.source_kind)
     ]
     if not ks_comps:
         return ""
@@ -1486,7 +1499,11 @@ def render_credit_estimate(estimate: CreditEstimate, timeline: ConversationTimel
     plan_positions: list[int] = []
     for event in timeline.events:
         if event.event_type == EventType.USER_MESSAGE:
-            msg = event.summary.replace('User: "', "").rstrip('"') if event.summary.startswith('User: "') else event.summary
+            msg = (
+                event.summary.replace('User: "', "").rstrip('"')
+                if event.summary.startswith('User: "')
+                else event.summary
+            )
             user_messages.append(msg[:50])
         elif event.event_type == EventType.PLAN_RECEIVED:
             plan_positions.append(event.position)
@@ -1557,7 +1574,9 @@ def _sanitize_table_cell(text: str) -> str:
     return text.replace("|", "/").replace("\n", " ").replace("\r", "")
 
 
-def render_tldr(profile: BotProfile, timeline: ConversationTimeline, credit_estimate: CreditEstimate | None = None) -> str:
+def render_tldr(
+    profile: BotProfile, timeline: ConversationTimeline, credit_estimate: CreditEstimate | None = None
+) -> str:
     """Render TL;DR summary section."""
     lines = ["## TL;DR\n"]
 

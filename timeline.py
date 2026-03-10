@@ -1,7 +1,18 @@
 import re
 from datetime import datetime, timezone
 
-from models import BotProfile, ConversationTimeline, CreditEstimate, CreditLineItem, CustomSearchStep, EventType, ExecutionPhase, KnowledgeSearchInfo, SearchResult, TimelineEvent
+from models import (
+    BotProfile,
+    ConversationTimeline,
+    CreditEstimate,
+    CreditLineItem,
+    CustomSearchStep,
+    EventType,
+    ExecutionPhase,
+    KnowledgeSearchInfo,
+    SearchResult,
+    TimelineEvent,
+)
 
 
 def _parse_timestamp(ts: str | None) -> datetime | None:
@@ -418,6 +429,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                         + (f" (+{len(source_names) - 3})" if len(source_names) > 3 else ""),
                     )
                 )
+
                 def _clean_source(s: str) -> str:
                     """Clean a raw knowledge source identifier to a display name."""
                     if ".file." in s:
@@ -598,49 +610,59 @@ def estimate_credits(timeline: ConversationTimeline, profile: BotProfile) -> Cre
 
             # Classify the step
             if "P:UniversalSearchTool" in summary or "KnowledgeSource" in step_type_raw:
-                line_items.append(CreditLineItem(
-                    step_name=f"Knowledge Search: {topic}",
-                    step_type="generative_answer",
-                    credits=CREDIT_GENERATIVE_ANSWER,
-                    detail=f"KnowledgeSource via {topic}",
-                    position=position,
-                ))
+                line_items.append(
+                    CreditLineItem(
+                        step_name=f"Knowledge Search: {topic}",
+                        step_type="generative_answer",
+                        credits=CREDIT_GENERATIVE_ANSWER,
+                        detail=f"KnowledgeSource via {topic}",
+                        position=position,
+                    )
+                )
             elif step_type_raw == "Agent" or resolved_tool_type in AGENT_ACTION_TOOL_TYPES:
                 tool_label = resolved_tool_type or "Agent"
-                line_items.append(CreditLineItem(
-                    step_name=topic,
-                    step_type="agent_action",
-                    credits=CREDIT_AGENT_ACTION,
-                    detail=f"{tool_label} tool",
-                    position=position,
-                ))
-            elif step_type_raw == "CustomTopic":
-                if is_generative:
-                    line_items.append(CreditLineItem(
+                line_items.append(
+                    CreditLineItem(
                         step_name=topic,
                         step_type="agent_action",
                         credits=CREDIT_AGENT_ACTION,
-                        detail="Topic transition (generative orchestration)",
+                        detail=f"{tool_label} tool",
                         position=position,
-                    ))
+                    )
+                )
+            elif step_type_raw == "CustomTopic":
+                if is_generative:
+                    line_items.append(
+                        CreditLineItem(
+                            step_name=topic,
+                            step_type="agent_action",
+                            credits=CREDIT_AGENT_ACTION,
+                            detail="Topic transition (generative orchestration)",
+                            position=position,
+                        )
+                    )
                 else:
-                    line_items.append(CreditLineItem(
-                        step_name=topic,
-                        step_type="classic_answer",
-                        credits=CREDIT_CLASSIC_ANSWER,
-                        detail="Classic topic execution",
-                        position=position,
-                    ))
+                    line_items.append(
+                        CreditLineItem(
+                            step_name=topic,
+                            step_type="classic_answer",
+                            credits=CREDIT_CLASSIC_ANSWER,
+                            detail="Classic topic execution",
+                            position=position,
+                        )
+                    )
             else:
                 # Unknown step type — still count as agent action if under generative orchestration
                 if is_generative:
-                    line_items.append(CreditLineItem(
-                        step_name=topic or "Unknown step",
-                        step_type="agent_action",
-                        credits=CREDIT_AGENT_ACTION,
-                        detail=f"Orchestrator step ({step_type_raw or 'unknown'})",
-                        position=position,
-                    ))
+                    line_items.append(
+                        CreditLineItem(
+                            step_name=topic or "Unknown step",
+                            step_type="agent_action",
+                            credits=CREDIT_AGENT_ACTION,
+                            detail=f"Orchestrator step ({step_type_raw or 'unknown'})",
+                            position=position,
+                        )
+                    )
 
             billed_step_positions.add(position)
             active_step_topics.add(topic)
@@ -653,25 +675,29 @@ def estimate_credits(timeline: ConversationTimeline, profile: BotProfile) -> Cre
             # Only bill if not already inside a counted step
             if event.position not in billed_step_positions and not active_step_topics:
                 topic = event.topic_name or "HTTP call"
-                line_items.append(CreditLineItem(
-                    step_name=f"HTTP: {topic}",
-                    step_type="agent_action",
-                    credits=CREDIT_AGENT_ACTION,
-                    detail="Connector/HTTP action",
-                    position=event.position,
-                ))
+                line_items.append(
+                    CreditLineItem(
+                        step_name=f"HTTP: {topic}",
+                        step_type="agent_action",
+                        credits=CREDIT_AGENT_ACTION,
+                        detail="Connector/HTTP action",
+                        position=event.position,
+                    )
+                )
 
         elif event.event_type == EventType.ACTION_BEGIN_DIALOG:
             # Topic transition outside of an active step — agent action under generative orchestration
             if is_generative and not active_step_topics and event.position not in billed_step_positions:
                 topic = event.topic_name or "Dialog"
-                line_items.append(CreditLineItem(
-                    step_name=f"Topic transition: {topic}",
-                    step_type="agent_action",
-                    credits=CREDIT_AGENT_ACTION,
-                    detail="BeginDialog (generative orchestration)",
-                    position=event.position,
-                ))
+                line_items.append(
+                    CreditLineItem(
+                        step_name=f"Topic transition: {topic}",
+                        step_type="agent_action",
+                        credits=CREDIT_AGENT_ACTION,
+                        detail="BeginDialog (generative orchestration)",
+                        position=event.position,
+                    )
+                )
 
     # Add standard warnings
     warnings.append("Cannot detect tenant graph grounding (10 credits) — not in transcript data")

@@ -18,7 +18,12 @@ def _sanitize_yaml(text: str) -> str:
     return text
 
 
-_EXTERNAL_ACTION_KINDS = {"InvokeConnectorAction", "InvokeFlowAction", "InvokeAIBuilderModelAction", "HttpRequestAction"}
+_EXTERNAL_ACTION_KINDS = {
+    "InvokeConnectorAction",
+    "InvokeFlowAction",
+    "InvokeAIBuilderModelAction",
+    "HttpRequestAction",
+}
 
 
 def _count_action_kinds(actions: list) -> dict[str, int]:
@@ -389,13 +394,15 @@ def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
     for ref in connection_refs_raw:
         if not isinstance(ref, dict):
             continue
-        connection_references.append({
-            "connectionReferenceLogicalName": ref.get("connectionReferenceLogicalName", ""),
-            "connectorId": ref.get("connectorId", ""),
-            "customConnectorId": ref.get("customConnectorId"),
-            "displayName": ref.get("displayName", ""),
-            "connectionId": ref.get("connectionId", ""),
-        })
+        connection_references.append(
+            {
+                "connectionReferenceLogicalName": ref.get("connectionReferenceLogicalName", ""),
+                "connectorId": ref.get("connectorId", ""),
+                "customConnectorId": ref.get("customConnectorId"),
+                "displayName": ref.get("displayName", ""),
+                "connectionId": ref.get("connectionId", ""),
+            }
+        )
 
     connector_defs_raw = data.get("connectorDefinitions", []) or []
     connector_definitions = []
@@ -404,22 +411,21 @@ def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
             continue
         operations = cdef.get("operations", []) or []
         display_name = cdef.get("displayName", "") or ""
-        has_mcp = (
-            "mcp" in display_name.lower()
-            or any(
-                (op.get("operationId", "") or "").startswith(("InvokeMCP", "mcp_"))
-                for op in operations
-                if isinstance(op, dict)
-            )
+        has_mcp = "mcp" in display_name.lower() or any(
+            (op.get("operationId", "") or "").startswith(("InvokeMCP", "mcp_"))
+            for op in operations
+            if isinstance(op, dict)
         )
-        connector_definitions.append({
-            "connectorId": cdef.get("connectorId", ""),
-            "displayName": cdef.get("displayName", ""),
-            "isCustom": cdef.get("isCustom", False),
-            "connectorType": cdef.get("connectorType", ""),
-            "operationCount": len(operations),
-            "hasMCP": has_mcp,
-        })
+        connector_definitions.append(
+            {
+                "connectorId": cdef.get("connectorId", ""),
+                "displayName": cdef.get("displayName", ""),
+                "isCustom": cdef.get("isCustom", False),
+                "connectorType": cdef.get("connectorType", ""),
+                "operationCount": len(operations),
+                "hasMCP": has_mcp,
+            }
+        )
 
     # Cross-reference: build connection_ref → connector display name lookup
     connector_id_to_name: dict[str, str] = {}
@@ -554,8 +560,7 @@ def build_bot_dict(bot_record: dict, component_records: list[dict]) -> dict:
         if not isinstance(comp_data, dict):
             skipped_parse += 1
             logger.warning(
-                f"Skipping component {comp_record.get('name', '?')} — "
-                "content is neither valid YAML nor JSON"
+                f"Skipping component {comp_record.get('name', '?')} — content is neither valid YAML nor JSON"
             )
             continue
 
@@ -604,10 +609,7 @@ def build_bot_dict(bot_record: dict, component_records: list[dict]) -> dict:
 
         components.append(comp_data)
 
-    logger.info(
-        f"Components: {len(components)} valid, {skipped_empty} empty content, "
-        f"{skipped_parse} parse failures"
-    )
+    logger.info(f"Components: {len(components)} valid, {skipped_empty} empty content, {skipped_parse} parse failures")
 
     # Extract connectionReferences and connectorDefinitions from config
     connection_references = config.get("connectionReferences", []) or []
@@ -632,8 +634,8 @@ _COMPONENT_TYPE_MAP: dict[int, str] = {
     5: "GlobalVariableComponent",
     6: "SkillComponent",
     7: "BotSettingsComponent",
-    9: "DialogComponent",       # Dataverse uses 9 for all dialog types
-    15: "GptComponent",         # Dataverse uses 15 for GPT/AI components
+    9: "DialogComponent",  # Dataverse uses 9 for all dialog types
+    15: "GptComponent",  # Dataverse uses 15 for GPT/AI components
 }
 
 
