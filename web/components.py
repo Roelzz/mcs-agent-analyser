@@ -83,6 +83,14 @@ def login_form() -> rx.Component:
             on_submit=lambda _: State.login(),
             reset_on_submit=False,
         ),
+        # Community counter badge — shared with GitHub README
+        rx.image(
+            src="https://komarev.com/ghpvc/?username=Roelzz&label=Community%20Views&color=0e75b6&style=flat",
+            alt="Community Views",
+            height="20px",
+            margin_top="12px",
+            opacity="0.6",
+        ),
         width="380px",
         padding="32px",
         background="var(--gray-a2)",
