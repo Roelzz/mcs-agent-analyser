@@ -74,12 +74,13 @@ def mermaid_script() -> rx.Component:
                     var isRendering = false;
 
                     function fixIdleBars() {
+                        var isDark = document.documentElement.className.indexOf('dark') !== -1;
                         document.querySelectorAll('pre.mermaid svg rect.task.done.crit, pre.mermaid svg rect.task.crit.done').forEach(function(r) {
-                            r.style.setProperty('fill', '#2a2a2a', 'important');
-                            r.style.setProperty('stroke', '#555555', 'important');
+                            r.style.setProperty('fill', isDark ? '#2a2a2a' : '#e5e5e5', 'important');
+                            r.style.setProperty('stroke', isDark ? '#555555' : '#a3a3a3', 'important');
                         });
                         document.querySelectorAll('pre.mermaid svg text.taskText.done.crit, pre.mermaid svg text.taskText.crit.done').forEach(function(t) {
-                            t.style.setProperty('fill', '#cccccc', 'important');
+                            t.style.setProperty('fill', isDark ? '#cccccc' : '#525252', 'important');
                         });
                     }
 
