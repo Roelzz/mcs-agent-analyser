@@ -28,6 +28,32 @@ class ReportMixin(rx.State, mixin=True):
         segments = split_markdown_mermaid(self.report_markdown)
         return [{"type": t, "content": c} for t, c in segments]
 
+    @rx.var
+    def report_segments_top(self) -> list[dict[str, str]]:
+        """Segments before the custom-rules-insert marker."""
+        if not self.report_markdown:
+            return []
+        marker = "<!-- custom-rules-insert -->"
+        md = self.report_markdown
+        idx = md.find(marker)
+        top = md[:idx] if idx >= 0 else md
+        segments = split_markdown_mermaid(top)
+        return [{"type": t, "content": c} for t, c in segments]
+
+    @rx.var
+    def report_segments_bottom(self) -> list[dict[str, str]]:
+        """Segments after the custom-rules-insert marker."""
+        if not self.report_markdown:
+            return []
+        marker = "<!-- custom-rules-insert -->"
+        md = self.report_markdown
+        idx = md.find(marker)
+        if idx < 0:
+            return []
+        bottom = md[idx + len(marker) :]
+        segments = split_markdown_mermaid(bottom)
+        return [{"type": t, "content": c} for t, c in segments]
+
     def _evaluate_custom_rules(self, profile: object) -> None:
         """Evaluate custom rules against a BotProfile and store findings."""
         from custom_rules import evaluate_rules

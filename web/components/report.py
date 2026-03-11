@@ -209,12 +209,17 @@ def report_viewer() -> rx.Component:
             ),
         ),
         rx.separator(),
+        # Report top (heading, TL;DR, quick wins, trigger overlaps)
         rx.box(
-            rx.foreach(State.report_segments, render_segment),
+            rx.foreach(State.report_segments_top, render_segment),
             padding_top="24px",
         ),
-        # Custom rule findings (styled, after markdown report)
+        # Custom rule findings (styled badges, between quick wins and AI config)
         _custom_findings_section(),
+        # Report bottom (AI config, security, bot profile, inventories, etc.)
+        rx.box(
+            rx.foreach(State.report_segments_bottom, render_segment),
+        ),
         rx.cond(
             State.has_lint_report,
             rx.box(

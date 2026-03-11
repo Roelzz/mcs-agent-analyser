@@ -3297,6 +3297,8 @@ def test_render_quick_wins_no_custom_rules_in_markdown():
     assert "Quick Wins" in output
     # No custom rules section in markdown
     assert "Custom Rules" not in output
+    # Emoji severity indicators present
+    assert "\U0001f535" in output or "\U0001f7e1" in output  # blue or yellow circle
 
 
 def test_render_report_no_custom_rules_param():
