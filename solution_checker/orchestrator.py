@@ -163,7 +163,7 @@ def _check_orchestrator(work_dir: Path, schema: str) -> list[dict]:
     duplicates = {desc: names for desc, names in seen_descs.items() if len(names) > 1}
     if duplicates:
         dup_detail = "; ".join(
-            f"'{names[0]}' and '{names[1]}'" + (f" (+{len(names)-2} more)" if len(names) > 2 else "")
+            f"'{names[0]}' and '{names[1]}'" + (f" (+{len(names) - 2} more)" if len(names) > 2 else "")
             for names in duplicates.values()
         )
         results.append(

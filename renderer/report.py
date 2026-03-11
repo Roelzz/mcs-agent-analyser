@@ -75,6 +75,7 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline | None = N
 
     # 2.6 Trigger Overlaps
     from parser import detect_trigger_overlaps
+
     overlaps = detect_trigger_overlaps(profile.components)
     trigger_overlap_section = render_trigger_overlaps(overlaps)
     if trigger_overlap_section:

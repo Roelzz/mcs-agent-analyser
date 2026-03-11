@@ -453,7 +453,7 @@ def render_quick_wins(profile: BotProfile) -> str:
         if comp.kind == "DialogComponent" and comp.state != "Active":
             n += 1
             findings.append(
-                f"{n}. **warning** — Disabled topic: \"{comp.display_name}\" — "
+                f'{n}. **warning** — Disabled topic: "{comp.display_name}" — '
                 "Topic is inactive. Enable or remove to reduce clutter."
             )
 
@@ -468,7 +468,7 @@ def render_quick_wins(profile: BotProfile) -> str:
         ):
             n += 1
             findings.append(
-                f"{n}. **warning** — No trigger queries: \"{comp.display_name}\" — "
+                f'{n}. **warning** — No trigger queries: "{comp.display_name}" — '
                 "User topic has no trigger phrases. It may never be matched by the recognizer."
             )
 
@@ -477,14 +477,9 @@ def render_quick_wins(profile: BotProfile) -> str:
         if comp.kind == "DialogComponent":
             desc = comp.description
             if desc is None or len(desc) < 10 or desc.strip() == comp.display_name.strip():
-                reason = "missing" if desc is None else (
-                    "too short" if len(desc) < 10 else "matches display name"
-                )
+                reason = "missing" if desc is None else ("too short" if len(desc) < 10 else "matches display name")
                 n += 1
-                findings.append(
-                    f"{n}. **info** — Weak description: \"{comp.display_name}\" — "
-                    f"Description is {reason}."
-                )
+                findings.append(f'{n}. **info** — Weak description: "{comp.display_name}" — Description is {reason}.')
 
     # 4. Missing system topics
     trigger_kinds = {c.trigger_kind for c in profile.components if c.trigger_kind}
@@ -492,8 +487,7 @@ def render_quick_wins(profile: BotProfile) -> str:
         if trigger not in trigger_kinds:
             n += 1
             findings.append(
-                f"{n}. **warning** — Missing system topic: {trigger} — "
-                "No handler for this lifecycle event."
+                f"{n}. **warning** — Missing system topic: {trigger} — No handler for this lifecycle event."
             )
 
     # 5. Unused global variables (heuristic)
@@ -510,7 +504,7 @@ def render_quick_wins(profile: BotProfile) -> str:
         if gv.schema_name and gv.schema_name not in all_text:
             n += 1
             findings.append(
-                f"{n}. **info** — Possibly unused variable: \"{gv.display_name}\" — "
+                f'{n}. **info** — Possibly unused variable: "{gv.display_name}" — '
                 "Schema name not found in other component references (heuristic)."
             )
 
@@ -551,10 +545,7 @@ def render_trigger_overlaps(overlaps: list[dict]) -> str:
 
 def render_knowledge_coverage(profile: BotProfile) -> str:
     """Render knowledge source status and coverage overview."""
-    ks_comps = [
-        c for c in profile.components
-        if c.kind in ("KnowledgeSourceComponent", "FileAttachmentComponent")
-    ]
+    ks_comps = [c for c in profile.components if c.kind in ("KnowledgeSourceComponent", "FileAttachmentComponent")]
     if not ks_comps:
         return ""
 
@@ -788,8 +779,7 @@ def render_topic_graph(profile: BotProfile) -> str:
         comp = schema_to_component.get(schema)
         if comp and comp.action_summary:
             has_terminal = any(
-                k in comp.action_summary
-                for k in ("EndConversation", "TransferToAgent", "EscalateToAgent")
+                k in comp.action_summary for k in ("EndConversation", "TransferToAgent", "EscalateToAgent")
             )
             if has_terminal:
                 continue
@@ -850,7 +840,9 @@ def render_topic_graph(profile: BotProfile) -> str:
         lines.append("")
         legend_parts: list[str] = []
         if orphaned_nodes:
-            legend_parts.append(f"**Yellow:** orphaned topics ({len(orphaned_nodes)}) or dead ends ({len(dead_end_nodes)})")
+            legend_parts.append(
+                f"**Yellow:** orphaned topics ({len(orphaned_nodes)}) or dead ends ({len(dead_end_nodes)})"
+            )
         elif dead_end_nodes:
             legend_parts.append(f"**Yellow:** dead-end topics ({len(dead_end_nodes)})")
         if cycle_nodes:
