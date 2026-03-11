@@ -218,7 +218,7 @@ _VALID_OPERATORS = frozenset(
 class RuleCondition(BaseModel):
     field: str  # dotted path: "app_insights.configured", "components[].tool_type"
     operator: str  # eq, ne, gt, lt, gte, lte, contains, not_contains, matches, exists, not_exists
-    value: str | int | float | bool | None = None
+    value: str | int | float | bool | list | None = None
 
     @field_validator("operator")
     @classmethod

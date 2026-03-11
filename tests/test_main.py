@@ -3163,6 +3163,22 @@ def test_evaluate_rules_empty_list():
     assert results == []
 
 
+def test_load_default_rules_yaml():
+    """Load data/default_rules.yaml -> 18 valid BP rules, no errors."""
+    rules_path = Path(__file__).parent.parent / "data" / "default_rules.yaml"
+    yaml_text = rules_path.read_text()
+    rules = load_rules_yaml(yaml_text)
+    assert len(rules) == 18
+    rule_ids = [r.rule_id for r in rules]
+    assert all(rid.startswith("BP") for rid in rule_ids)
+    assert len(set(rule_ids)) == 18  # no duplicates
+    for rule in rules:
+        assert rule.severity in ("fail", "warning", "info", "pass")
+        assert rule.message
+        assert rule.condition.field
+        assert rule.condition.operator
+
+
 # --- Bot Comparison / Diff tests ---
 
 
