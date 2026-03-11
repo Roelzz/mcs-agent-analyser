@@ -123,8 +123,7 @@ class DataverseMixin(rx.State, mixin=True):
     @rx.event
     def dv_toggle_select(self, transcript_id: str):
         self.dv_transcripts = [
-            {**t, "selected": not t["selected"]} if t["id"] == transcript_id else t
-            for t in self.dv_transcripts
+            {**t, "selected": not t["selected"]} if t["id"] == transcript_id else t for t in self.dv_transcripts
         ]
 
     @rx.event
