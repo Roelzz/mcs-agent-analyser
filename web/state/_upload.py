@@ -114,6 +114,7 @@ class UploadMixin(rx.State, mixin=True):
                 self.report_source = "upload"  # type: ignore[attr-defined]
                 self.lint_report_markdown = ""  # type: ignore[attr-defined]
                 self.bot_profile_json = ""  # type: ignore[attr-defined]
+                self.report_custom_findings = []  # type: ignore[attr-defined]
                 _clear_bot_profile()
 
                 self.paste_json = ""
@@ -166,6 +167,7 @@ class UploadMixin(rx.State, mixin=True):
             self.report_source = "upload"  # type: ignore[attr-defined]
             self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
             _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
+            self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
 
             instruction_diff = save_snapshot(profile)
             if instruction_diff and instruction_diff.is_significant:
@@ -204,6 +206,7 @@ class UploadMixin(rx.State, mixin=True):
             self.report_source = "upload"  # type: ignore[attr-defined]
             self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
             _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
+            self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
 
             instruction_diff = save_snapshot(profile)
             if instruction_diff and instruction_diff.is_significant:
@@ -228,6 +231,7 @@ class UploadMixin(rx.State, mixin=True):
             self.report_title = title  # type: ignore[attr-defined]
             self.report_source = "upload"  # type: ignore[attr-defined]
             self.bot_profile_json = ""  # type: ignore[attr-defined]
+            self.report_custom_findings = []  # type: ignore[attr-defined]
             _clear_bot_profile()
 
     def new_upload(self):
@@ -237,6 +241,7 @@ class UploadMixin(rx.State, mixin=True):
         self.upload_error = ""
         self.paste_json = ""
         self.bot_profile_json = ""  # type: ignore[attr-defined]
+        self.report_custom_findings = []  # type: ignore[attr-defined]
         _clear_bot_profile()
         self.lint_report_markdown = ""  # type: ignore[attr-defined]
         self.is_linting = False  # type: ignore[attr-defined]

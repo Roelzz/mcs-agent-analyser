@@ -441,6 +441,14 @@ def render_knowledge_inventory(profile: BotProfile) -> str:
     return "\n".join(lines)
 
 
+_SEVERITY_ICON: dict[str, str] = {
+    "fail": "\U0001f534",      # red circle
+    "warning": "\U0001f7e1",   # yellow circle
+    "info": "\U0001f535",      # blue circle
+    "pass": "\U0001f7e2",      # green circle
+}
+
+
 def render_quick_wins(profile: BotProfile) -> str:
     """Surface actionable issues the user would miss reading raw config."""
     from parser import validate_connections
@@ -448,13 +456,18 @@ def render_quick_wins(profile: BotProfile) -> str:
     findings: list[str] = []
     n = 0
 
+    def _fmt(severity: str, text: str) -> str:
+        nonlocal n
+        n += 1
+        icon = _SEVERITY_ICON.get(severity, "\u26aa")
+        return f"{n}. {icon} **{severity}** — {text}"
+
     # 1. Disabled topics
     for comp in profile.components:
         if comp.kind == "DialogComponent" and comp.state != "Active":
-            n += 1
             findings.append(
-                f'{n}. **warning** — Disabled topic: "{comp.display_name}" — '
-                "Topic is inactive. Enable or remove to reduce clutter."
+                _fmt("warning", f'Disabled topic: "{comp.display_name}" — '
+                     "Topic is inactive. Enable or remove to reduce clutter.")
             )
 
     # 2. No trigger queries (user topics only)
@@ -466,10 +479,9 @@ def render_quick_wins(profile: BotProfile) -> str:
             and comp.trigger_kind not in _SYSTEM_TRIGGERS
             and comp.trigger_kind not in _AUTOMATION_TRIGGERS
         ):
-            n += 1
             findings.append(
-                f'{n}. **warning** — No trigger queries: "{comp.display_name}" — '
-                "User topic has no trigger phrases. It may never be matched by the recognizer."
+                _fmt("warning", f'No trigger queries: "{comp.display_name}" — '
+                     "User topic has no trigger phrases. It may never be matched by the recognizer.")
             )
 
     # 3. Weak descriptions
@@ -478,16 +490,16 @@ def render_quick_wins(profile: BotProfile) -> str:
             desc = comp.description
             if desc is None or len(desc) < 10 or desc.strip() == comp.display_name.strip():
                 reason = "missing" if desc is None else ("too short" if len(desc) < 10 else "matches display name")
-                n += 1
-                findings.append(f'{n}. **info** — Weak description: "{comp.display_name}" — Description is {reason}.')
+                findings.append(
+                    _fmt("info", f'Weak description: "{comp.display_name}" — Description is {reason}.')
+                )
 
     # 4. Missing system topics
     trigger_kinds = {c.trigger_kind for c in profile.components if c.trigger_kind}
     for trigger in ("OnError", "OnUnknownIntent", "OnEscalate"):
         if trigger not in trigger_kinds:
-            n += 1
             findings.append(
-                f"{n}. **warning** — Missing system topic: {trigger} — No handler for this lifecycle event."
+                _fmt("warning", f"Missing system topic: {trigger} — No handler for this lifecycle event.")
             )
 
     # 5. Unused global variables (heuristic)
@@ -502,17 +514,17 @@ def render_quick_wins(profile: BotProfile) -> str:
     all_text = " ".join(other_schemas)
     for gv in global_vars:
         if gv.schema_name and gv.schema_name not in all_text:
-            n += 1
             findings.append(
-                f'{n}. **info** — Possibly unused variable: "{gv.display_name}" — '
-                "Schema name not found in other component references (heuristic)."
+                _fmt("info", f'Possibly unused variable: "{gv.display_name}" — '
+                     "Schema name not found in other component references (heuristic).")
             )
 
     # 6. Connection reference issues
     conn_issues = validate_connections(profile)
     for issue in conn_issues:
+        icon = _SEVERITY_ICON.get(issue["severity"], "\u26aa")
         n += 1
-        findings.append(f"{n}. **{issue['severity']}** — {issue['message']}")
+        findings.append(f"{n}. {icon} **{issue['severity']}** — {issue['message']}")
 
     if not findings:
         return ""

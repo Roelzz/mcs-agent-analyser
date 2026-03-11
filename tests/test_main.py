@@ -3237,6 +3237,78 @@ def test_default_rules_no_auto_load_when_user_has_rules(monkeypatch, tmp_path):
     assert rules == []
 
 
+# --- Custom rules evaluation for report ---
+
+
+def test_evaluate_custom_rules_returns_findings():
+    """evaluate_rules returns structured findings for triggered rules."""
+    profile = BotProfile(
+        display_name="TestBot",
+        components=[],
+        authentication_mode="None",
+    )
+    rules = [
+        CustomRule(
+            rule_id="BP-TEST-TRIGGER",
+            category="security",
+            severity="warning",
+            message="Auth should not be None",
+            condition=RuleCondition(field="authentication_mode", operator="eq", value="None"),
+        ),
+        CustomRule(
+            rule_id="BP-TEST-SKIP",
+            category="security",
+            severity="fail",
+            message="Should not fire",
+            condition=RuleCondition(field="authentication_mode", operator="eq", value="OAuth"),
+        ),
+    ]
+    results = evaluate_rules(rules, profile)
+    # Only the triggered rule should appear
+    assert len(results) == 1
+    assert results[0]["rule_id"] == "BP-TEST-TRIGGER"
+    assert results[0]["severity"] == "warning"
+    assert results[0]["category"] == "security"
+    assert results[0]["detail"] == "Auth should not be None"
+
+
+def test_evaluate_custom_rules_empty_list():
+    """Empty rules list returns empty findings."""
+    profile = BotProfile(display_name="TestBot", components=[])
+    results = evaluate_rules([], profile)
+    assert results == []
+
+
+def test_render_quick_wins_no_custom_rules_in_markdown():
+    """render_quick_wins() only contains built-in checks, not custom rules."""
+    profile = BotProfile(
+        display_name="TestBot",
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Greeting",
+                schema_name="cr_greeting",
+                trigger_kind="OnUnknownIntent",
+            ),
+        ],
+    )
+    output = render_quick_wins(profile)
+    # Built-in findings present
+    assert "Quick Wins" in output
+    # No custom rules section in markdown
+    assert "Custom Rules" not in output
+    # Emoji severity indicators present
+    assert "\U0001f535" in output or "\U0001f7e1" in output  # blue or yellow circle
+
+
+def test_render_report_no_custom_rules_param():
+    """render_report() signature has no custom_rules parameter."""
+    import inspect
+
+    sig = inspect.signature(render_report)
+    assert "custom_rules" not in sig.parameters
+
+
 # --- Bot Comparison / Diff tests ---
 
 

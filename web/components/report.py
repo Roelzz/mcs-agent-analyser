@@ -5,6 +5,67 @@ from web.mermaid import render_segment
 from web.state import State
 
 
+def _finding_row(finding: dict) -> rx.Component:
+    """Render a single custom rule finding with colored badges."""
+    return rx.box(
+        rx.hstack(
+            rx.badge(
+                finding["severity"],
+                color_scheme=rx.match(
+                    finding["severity"],
+                    ("warning", "amber"),
+                    ("fail", "red"),
+                    ("info", "blue"),
+                    ("pass", "green"),
+                    "gray",
+                ),
+                variant="soft",
+                size="1",
+            ),
+            rx.badge(finding["category"], color_scheme="gray", variant="outline", size="1"),
+            rx.text(finding["rule_id"], size="2", font_weight="500", color="var(--gray-12)", font_family=_MONO),
+            rx.text(finding["detail"], size="1", color="var(--gray-a9)", flex="1"),
+            width="100%",
+            align="center",
+            spacing="2",
+        ),
+        padding="10px 12px",
+        border_bottom="1px solid var(--gray-a3)",
+        _hover={"background": "var(--gray-a2)"},
+    )
+
+
+def _custom_findings_section() -> rx.Component:
+    """Render custom rule findings with styled badges, matching rules page design."""
+    return rx.cond(
+        State.has_custom_findings,
+        rx.box(
+            rx.hstack(
+                rx.icon("shield-check", size=16, color="var(--green-9)"),
+                rx.text("Custom Rules", size="3", font_weight="500", color="var(--gray-12)"),
+                rx.badge(
+                    State.report_custom_findings.length().to(str),  # type: ignore[union-attr]
+                    color_scheme="green",
+                    variant="soft",
+                    size="1",
+                ),
+                align="center",
+                spacing="2",
+            ),
+            rx.box(
+                rx.foreach(State.report_custom_findings, _finding_row),
+                width="100%",
+                border="1px solid var(--gray-a4)",
+                border_radius="8px",
+                overflow="hidden",
+                margin_top="8px",
+            ),
+            padding_top="24px",
+            padding_bottom="8px",
+        ),
+    )
+
+
 def report_viewer() -> rx.Component:
     return rx.box(
         # Header
@@ -148,9 +209,16 @@ def report_viewer() -> rx.Component:
             ),
         ),
         rx.separator(),
+        # Report top (heading, TL;DR, quick wins, trigger overlaps)
         rx.box(
-            rx.foreach(State.report_segments, render_segment),
+            rx.foreach(State.report_segments_top, render_segment),
             padding_top="24px",
+        ),
+        # Custom rule findings (styled badges, between quick wins and AI config)
+        _custom_findings_section(),
+        # Report bottom (AI config, security, bot profile, inventories, etc.)
+        rx.box(
+            rx.foreach(State.report_segments_bottom, render_segment),
         ),
         rx.cond(
             State.has_lint_report,

@@ -103,6 +103,9 @@ def render_report(
     if trigger_overlap_section:
         sections.append(trigger_overlap_section)
 
+    # Marker for custom rules insertion (rendered as Reflex component in UI)
+    sections.append("<!-- custom-rules-insert -->")
+
     # 3. AI Config (includes system instructions)
     ai_config = render_ai_config(profile)
     if ai_config:
