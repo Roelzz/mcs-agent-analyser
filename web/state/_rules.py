@@ -18,11 +18,15 @@ class RulesMixin(rx.State, mixin=True):
 
     @rx.event
     def on_load_rules_page(self):
-        """Load rules from env var file on first visit."""
+        """Load rules on first visit (env var → bundled defaults)."""
         self.check_auth()  # type: ignore[attr-defined]
         if self.custom_rules_yaml:
             return
         rules_file = os.getenv("CUSTOM_RULES_FILE", "")
+        if not rules_file:
+            default = Path(__file__).resolve().parent.parent.parent / "data" / "default_rules.yaml"
+            if default.is_file():
+                rules_file = str(default)
         if rules_file:
             try:
                 text = Path(rules_file).read_text(encoding="utf-8")
