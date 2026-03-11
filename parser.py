@@ -1,21 +1,10 @@
 import json
-import re
 from pathlib import Path
 
 import yaml
 
 from models import AISettings, AppInsightsConfig, BotProfile, ComponentSummary, GptInfo, TopicConnection
-
-
-def _sanitize_yaml(text: str) -> str:
-    """Fix YAML that contains characters PyYAML can't handle."""
-    # Replace tabs with spaces (YAML spec disallows tabs for indentation, but they appear in values too)
-    text = text.replace("\t", "    ")
-    # Quote bare keys starting with @ (e.g. `@odata.type: String` -> `"@odata.type": String`)
-    text = re.sub(r"^(\s*)(@[a-zA-Z0-9_.]+)(\s*:)", r'\1"\2"\3', text, flags=re.MULTILINE)
-    # Quote bare values starting with @ (e.g. `displayName: @mention tag` -> `displayName: "@mention tag"`)
-    text = re.sub(r"(:\s+)(@[^\n]+)$", lambda m: m.group(1) + '"' + m.group(2) + '"', text, flags=re.MULTILINE)
-    return text
+from utils import sanitize_yaml
 
 
 _EXTERNAL_ACTION_KINDS = {
@@ -153,7 +142,7 @@ def _extract_begin_dialogs(
 def parse_yaml(path: Path) -> tuple[BotProfile, dict[str, str]]:
     """Parse botContent.yml and return (BotProfile, schema_to_display_name lookup)."""
     raw = path.read_text(encoding="utf-8")
-    data = yaml.safe_load(_sanitize_yaml(raw))
+    data = yaml.safe_load(sanitize_yaml(raw))
     return _parse_bot_dict(data)
 
 
@@ -642,7 +631,7 @@ def build_bot_dict(bot_record: dict, component_records: list[dict]) -> dict:
 
         # Try YAML first, fall back to JSON
         try:
-            comp_data = yaml.safe_load(_sanitize_yaml(content_raw))
+            comp_data = yaml.safe_load(sanitize_yaml(content_raw))
         except Exception:
             pass
 

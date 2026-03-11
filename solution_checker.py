@@ -24,7 +24,7 @@ from pathlib import Path
 
 import defusedxml.ElementTree as ET
 
-from renamer import safe_extractall
+from utils import safe_extractall
 
 try:
     import yaml as _yaml  # type: ignore[import-untyped]

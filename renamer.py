@@ -17,6 +17,7 @@ import defusedxml.ElementTree as ET
 from loguru import logger
 
 from models import RenameConfig, RenameResult, SolutionInfo
+from utils import safe_extractall
 
 # ── Text file extensions to process (binary files are skipped) ─────────────
 TEXT_EXTENSIONS = {".xml", ".json", ".yaml", ".yml", ".txt", ".md", ""}
@@ -74,19 +75,6 @@ def derive_schema_name(old_schema: str, new_agent_name: str) -> str:
     else:
         prefix = parts[0] + "_"
     return prefix + sanitize_schema_name(new_agent_name)
-
-
-# ── ZIP utilities ───────────────────────────────────────────────────────────
-
-
-def safe_extractall(zf: zipfile.ZipFile, dest: Path) -> None:
-    """Extract a ZIP, rejecting any entries that would escape *dest* via path traversal."""
-    dest_resolved = dest.resolve()
-    for info in zf.infolist():
-        target = (dest_resolved / info.filename).resolve()
-        if not target.is_relative_to(dest_resolved):
-            raise ValueError(f"Rejected unsafe ZIP entry: {info.filename!r}")
-    zf.extractall(dest)
 
 
 # ── Solution inspection ───────────────────────────────────────────────────────

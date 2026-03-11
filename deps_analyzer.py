@@ -22,7 +22,7 @@ from pathlib import Path
 
 import defusedxml.ElementTree as ET
 
-from renamer import safe_extractall
+from utils import safe_extractall
 
 # ── Component type registry ────────────────────────────────────────────────────
 

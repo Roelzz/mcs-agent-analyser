@@ -12,7 +12,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from renamer import safe_extractall
+from utils import safe_extractall
 
 try:
     import yaml as _yaml  # type: ignore[import-untyped]

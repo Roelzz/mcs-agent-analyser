@@ -16,13 +16,13 @@ from models import (
 )
 from parser import (
     _count_action_kinds,
-    _sanitize_yaml,
     detect_trigger_overlaps,
     parse_dialog_json,
     parse_yaml,
     resolve_topic_name,
     validate_connections,
 )
+from utils import sanitize_yaml
 from renderer import (
     _grounding_score,
     _source_efficiency,
@@ -94,22 +94,22 @@ def test_parse_yaml_no_channels():
     assert profile.channels == []
 
 
-def test_sanitize_yaml_at_keys():
+def testsanitize_yaml_at_keys():
     yaml_text = "  @odata.type: String\n  name: test\n"
-    sanitized = _sanitize_yaml(yaml_text)
+    sanitized = sanitize_yaml(yaml_text)
     assert '"@odata.type"' in sanitized
     assert "name: test" in sanitized
 
 
-def test_sanitize_yaml_at_values():
+def testsanitize_yaml_at_values():
     yaml_text = "  displayName: @mention tag\n"
-    sanitized = _sanitize_yaml(yaml_text)
+    sanitized = sanitize_yaml(yaml_text)
     assert '"@mention tag"' in sanitized
 
 
-def test_sanitize_yaml_tabs():
+def testsanitize_yaml_tabs():
     yaml_text = "  key:\tvalue\n"
-    sanitized = _sanitize_yaml(yaml_text)
+    sanitized = sanitize_yaml(yaml_text)
     assert "\t" not in sanitized
 
 
