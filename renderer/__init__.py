@@ -1,0 +1,92 @@
+"""renderer package — re-exports all public functions and test-imported privates."""
+
+from ._helpers import (
+    ACTOR_NAMES,
+    IDLE_THRESHOLD_MS,
+    _format_duration,
+    _make_participant_id,
+    _parse_execution_time_ms,
+    _pct,
+    _sanitize_mermaid,
+    _sanitize_table_cell,
+    _topic_display,
+)
+from .knowledge import (
+    _grounding_score,
+    _source_efficiency,
+    render_knowledge_search_section,
+)
+from .profile import (
+    render_ai_config,
+    render_bot_metadata,
+    render_bot_profile,
+    render_integration_map,
+    render_knowledge_coverage,
+    render_knowledge_inventory,
+    render_knowledge_source_details,
+    render_quick_wins,
+    render_security_summary,
+    render_tool_inventory,
+    render_topic_details,
+    render_topic_graph,
+    render_topic_inventory,
+    render_trigger_overlaps,
+)
+from .report import (
+    render_credit_estimate,
+    render_report,
+    render_tldr,
+    render_transcript_report,
+)
+from .timeline_render import (
+    render_errors,
+    render_event_log,
+    render_gantt_chart,
+    render_mermaid_sequence,
+    render_orchestrator_reasoning,
+    render_phase_breakdown,
+    render_timeline,
+)
+
+__all__ = [
+    # Constants
+    "ACTOR_NAMES",
+    "IDLE_THRESHOLD_MS",
+    # Private helpers (re-exported for tests)
+    "_format_duration",
+    "_grounding_score",
+    "_make_participant_id",
+    "_parse_execution_time_ms",
+    "_pct",
+    "_sanitize_mermaid",
+    "_sanitize_table_cell",
+    "_source_efficiency",
+    "_topic_display",
+    # Public render functions
+    "render_ai_config",
+    "render_bot_metadata",
+    "render_bot_profile",
+    "render_credit_estimate",
+    "render_errors",
+    "render_event_log",
+    "render_gantt_chart",
+    "render_integration_map",
+    "render_knowledge_coverage",
+    "render_knowledge_inventory",
+    "render_knowledge_search_section",
+    "render_knowledge_source_details",
+    "render_mermaid_sequence",
+    "render_orchestrator_reasoning",
+    "render_phase_breakdown",
+    "render_quick_wins",
+    "render_report",
+    "render_security_summary",
+    "render_timeline",
+    "render_tldr",
+    "render_tool_inventory",
+    "render_topic_details",
+    "render_topic_graph",
+    "render_topic_inventory",
+    "render_transcript_report",
+    "render_trigger_overlaps",
+]
