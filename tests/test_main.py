@@ -3241,7 +3241,7 @@ def test_default_rules_no_auto_load_when_user_has_rules(monkeypatch, tmp_path):
 
 
 def test_render_quick_wins_with_custom_rules():
-    """Custom rules that trigger appear in quick wins; non-triggering rules are absent."""
+    """Custom rules that trigger appear under 'Custom Rules' subsection."""
     profile = BotProfile(
         display_name="TestBot",
         components=[
@@ -3271,8 +3271,13 @@ def test_render_quick_wins_with_custom_rules():
         },
     ]
     output = render_quick_wins(profile, custom_rules=rules)
+    # Sections are separated
+    assert "### Built-in Checks" in output
+    assert "### Custom Rules" in output
+    # Triggered rule present under Custom Rules
     assert "[BP-TEST-TRIGGER]" in output
     assert "Auth should not be None" in output
+    # Non-triggered rule absent
     assert "BP-TEST-SKIP" not in output
 
 
@@ -3282,10 +3287,52 @@ def test_render_quick_wins_custom_rules_none():
         display_name="TestBot",
         components=[],
     )
-    # Should not raise
     output = render_quick_wins(profile, custom_rules=None)
-    # Empty profile with no issues → empty string
     assert isinstance(output, str)
+
+
+def test_render_quick_wins_only_custom_rules():
+    """When no built-in findings exist, only Custom Rules subsection appears."""
+    profile = BotProfile(
+        display_name="TestBot",
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Greeting",
+                schema_name="cr_greeting",
+                trigger_kind="OnError",
+                description="Handles errors properly",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Unknown",
+                schema_name="cr_unknown",
+                trigger_kind="OnUnknownIntent",
+                description="Handles unknown intents",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Escalate",
+                schema_name="cr_escalate",
+                trigger_kind="OnEscalate",
+                description="Handles escalation events",
+            ),
+        ],
+        generative_actions_enabled=True,
+    )
+    rules = [
+        {
+            "rule_id": "BP-GEN",
+            "category": "design",
+            "severity": "info",
+            "message": "Generative actions enabled",
+            "condition": {"field": "generative_actions_enabled", "operator": "eq", "value": True},
+        },
+    ]
+    output = render_quick_wins(profile, custom_rules=rules)
+    assert "### Custom Rules" in output
+    assert "### Built-in Checks" not in output
+    assert "[BP-GEN]" in output
 
 
 def test_render_report_includes_custom_rules():
@@ -3305,6 +3352,7 @@ def test_render_report_includes_custom_rules():
         },
     ]
     md = render_report(profile, custom_rules=rules)
+    assert "### Custom Rules" in md
     assert "[BP-GEN-CHECK]" in md
     assert "Generative actions are enabled" in md
 

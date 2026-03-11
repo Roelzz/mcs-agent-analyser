@@ -515,24 +515,32 @@ def render_quick_wins(profile: BotProfile, custom_rules: list[dict] | None = Non
         findings.append(f"{n}. **{issue['severity']}** — {issue['message']}")
 
     # 7. Custom rules (YAML-defined, user-configurable)
+    custom_findings: list[str] = []
     if custom_rules:
         from custom_rules import evaluate_rules
         from models import CustomRule
 
         parsed = [CustomRule(**r) for r in custom_rules]
         rule_results = evaluate_rules(parsed, profile)
+        cn = 0
         for result in rule_results:
-            n += 1
-            findings.append(
-                f"{n}. **{result['severity']}** — [{result['rule_id']}] {result['detail']}"
+            cn += 1
+            custom_findings.append(
+                f"{cn}. **{result['severity']}** — [{result['rule_id']}] {result['detail']}"
             )
 
-    if not findings:
+    if not findings and not custom_findings:
         return ""
 
     lines = ["## Quick Wins\n"]
-    lines.extend(findings)
-    lines.append("")
+    if findings:
+        lines.append("### Built-in Checks\n")
+        lines.extend(findings)
+        lines.append("")
+    if custom_findings:
+        lines.append("### Custom Rules\n")
+        lines.extend(custom_findings)
+        lines.append("")
     return "\n".join(lines)
 
 
