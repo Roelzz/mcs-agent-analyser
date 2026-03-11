@@ -2,18 +2,28 @@ from pathlib import Path
 
 import pytest
 
+from custom_rules import _apply_operator, _resolve_field, evaluate_rules, load_rules_yaml
+from diff import compare_bots, render_diff_report
 from models import (
+    AISettings,
     AppInsightsConfig,
+    BatchAnalyticsSummary,
+    BotDiffResult,
     BotProfile,
+    ComponentChange,
     ComponentSummary,
     ConversationTimeline,
     CreditEstimate,
+    CustomRule,
     EventType,
     GptInfo,
     KnowledgeSearchInfo,
+    RuleCondition,
     SearchResult,
     TimelineEvent,
+    TopicConnection,
 )
+from batch_analytics import aggregate_timelines, render_batch_report
 from parser import (
     _count_action_kinds,
     detect_trigger_overlaps,
@@ -53,6 +63,11 @@ from renderer import (
 )
 from timeline import build_timeline, estimate_credits
 from transcript import parse_transcript_json
+
+import instruction_store
+from instruction_store import get_history, save_snapshot
+from models import InstructionDiff
+from renderer import render_instruction_drift
 
 BASE_DIR = Path(__file__).parent.parent
 
@@ -2658,7 +2673,9 @@ def test_validate_connections_clean():
         connection_references=[
             {"connectionReferenceLogicalName": "ref-1", "connectorId": "conn-1", "displayName": "Ref 1"}
         ],
-        components=[ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", connection_reference="ref-1")],
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", connection_reference="ref-1")
+        ],
     )
     issues = validate_connections(profile)
     assert issues == []
@@ -2709,10 +2726,18 @@ def test_validate_connections_unused_ref():
 def test_detect_trigger_overlaps_no_overlap():
     """Completely different trigger queries produce no overlaps."""
     components = [
-        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
-                         trigger_queries=["how to reset password", "forgot my password", "password help"]),
-        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
-                         trigger_queries=["track my order", "where is my shipment", "delivery status"]),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T1",
+            schema_name="s1",
+            trigger_queries=["how to reset password", "forgot my password", "password help"],
+        ),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T2",
+            schema_name="s2",
+            trigger_queries=["track my order", "where is my shipment", "delivery status"],
+        ),
     ]
     overlaps = detect_trigger_overlaps(components)
     assert overlaps == []
@@ -2721,10 +2746,18 @@ def test_detect_trigger_overlaps_no_overlap():
 def test_detect_trigger_overlaps_high_overlap():
     """Nearly identical trigger queries should be flagged."""
     components = [
-        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
-                         trigger_queries=["how to reset my password", "I forgot my password"]),
-        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
-                         trigger_queries=["reset my password please", "forgot password help"]),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T1",
+            schema_name="s1",
+            trigger_queries=["how to reset my password", "I forgot my password"],
+        ),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T2",
+            schema_name="s2",
+            trigger_queries=["reset my password please", "forgot password help"],
+        ),
     ]
     overlaps = detect_trigger_overlaps(components)
     assert len(overlaps) > 0
@@ -2734,10 +2767,8 @@ def test_detect_trigger_overlaps_high_overlap():
 def test_detect_trigger_overlaps_skips_short():
     """Topics with fewer than 3 tokens are skipped."""
     components = [
-        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
-                         trigger_queries=["hi", "hello"]),
-        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
-                         trigger_queries=["hi", "hello"]),
+        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", trigger_queries=["hi", "hello"]),
+        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2", trigger_queries=["hi", "hello"]),
     ]
     overlaps = detect_trigger_overlaps(components)
     assert overlaps == []
@@ -2776,8 +2807,13 @@ def test_render_quick_wins_no_trigger_queries():
     """User topics with no trigger queries should be flagged."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="DialogComponent", display_name="NoTrigger", schema_name="s1",
-                             trigger_kind="OnIntent", trigger_queries=[]),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="NoTrigger",
+                schema_name="s1",
+                trigger_kind="OnIntent",
+                trigger_queries=[],
+            ),
         ],
     )
     result = render_quick_wins(profile)
@@ -2808,12 +2844,27 @@ def test_render_quick_wins_empty_when_clean():
     """A well-configured profile should produce empty quick wins."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="DialogComponent", display_name="Error", schema_name="s1",
-                             trigger_kind="OnError", description="Handles all errors gracefully"),
-            ComponentSummary(kind="DialogComponent", display_name="Fallback", schema_name="s2",
-                             trigger_kind="OnUnknownIntent", description="Handles unmatched intents"),
-            ComponentSummary(kind="DialogComponent", display_name="Escalate", schema_name="s3",
-                             trigger_kind="OnEscalate", description="Escalates to human agent"),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Error",
+                schema_name="s1",
+                trigger_kind="OnError",
+                description="Handles all errors gracefully",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Fallback",
+                schema_name="s2",
+                trigger_kind="OnUnknownIntent",
+                description="Handles unmatched intents",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Escalate",
+                schema_name="s3",
+                trigger_kind="OnEscalate",
+                description="Escalates to human agent",
+            ),
         ],
     )
     result = render_quick_wins(profile)
@@ -2834,11 +2885,21 @@ def test_render_knowledge_coverage_with_sources():
     """Knowledge sources render a table."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="KnowledgeSourceComponent", display_name="SharePoint FAQ",
-                             schema_name="ks1", source_kind="SharePoint", state="Active",
-                             trigger_condition_raw="true"),
-            ComponentSummary(kind="FileAttachmentComponent", display_name="guide.pdf",
-                             schema_name="fa1", file_type="pdf", state="Active"),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="SharePoint FAQ",
+                schema_name="ks1",
+                source_kind="SharePoint",
+                state="Active",
+                trigger_condition_raw="true",
+            ),
+            ComponentSummary(
+                kind="FileAttachmentComponent",
+                display_name="guide.pdf",
+                schema_name="fa1",
+                file_type="pdf",
+                state="Active",
+            ),
         ],
     )
     result = render_knowledge_coverage(profile)
@@ -2851,8 +2912,13 @@ def test_render_knowledge_coverage_inactive_flagged():
     """Inactive knowledge sources should have a note."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="KnowledgeSourceComponent", display_name="Old KB",
-                             schema_name="ks1", source_kind="Web", state="Inactive"),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="Old KB",
+                schema_name="ks1",
+                source_kind="Web",
+                state="Inactive",
+            ),
         ],
     )
     result = render_knowledge_coverage(profile)
@@ -2888,7 +2954,9 @@ def test_topic_graph_system_topic_not_orphaned():
 
     profile = BotProfile(
         topic_connections=[
-            TopicConnection(source_schema="s1", source_display="OnError", target_schema="s2", target_display="HandleError"),
+            TopicConnection(
+                source_schema="s1", source_display="OnError", target_schema="s2", target_display="HandleError"
+            ),
         ],
         components=[
             ComponentSummary(kind="DialogComponent", display_name="OnError", schema_name="s1", trigger_kind="OnError"),
@@ -2932,13 +3000,669 @@ def test_render_report_includes_knowledge_coverage():
     """render_report should include Knowledge Coverage section."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="KnowledgeSourceComponent", display_name="KB1",
-                             schema_name="ks1", source_kind="Web", state="Active"),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="KB1",
+                schema_name="ks1",
+                source_kind="Web",
+                state="Active",
+            ),
             # Add system topics so quick wins section doesn't dominate
             ComponentSummary(kind="DialogComponent", display_name="Error", schema_name="s1", trigger_kind="OnError"),
-            ComponentSummary(kind="DialogComponent", display_name="Fallback", schema_name="s2", trigger_kind="OnUnknownIntent"),
-            ComponentSummary(kind="DialogComponent", display_name="Escalate", schema_name="s3", trigger_kind="OnEscalate"),
+            ComponentSummary(
+                kind="DialogComponent", display_name="Fallback", schema_name="s2", trigger_kind="OnUnknownIntent"
+            ),
+            ComponentSummary(
+                kind="DialogComponent", display_name="Escalate", schema_name="s3", trigger_kind="OnEscalate"
+            ),
         ],
     )
     result = render_report(profile)
     assert "## Knowledge Source Coverage" in result
+
+
+# --- Custom Rule Engine tests ---
+
+
+def test_load_rules_yaml_valid():
+    """Load valid YAML -> correct CustomRule list."""
+    yaml_text = """
+rules:
+  - rule_id: CUSTOM001
+    severity: warning
+    category: Security
+    message: "App Insights must be configured"
+    condition:
+      field: "app_insights"
+      operator: not_exists
+  - rule_id: CUSTOM002
+    severity: fail
+    category: Agent
+    message: "Must have components"
+    condition:
+      field: "components"
+      operator: exists
+"""
+    rules = load_rules_yaml(yaml_text)
+    assert len(rules) == 2
+    assert rules[0].rule_id == "CUSTOM001"
+    assert rules[0].severity == "warning"
+    assert rules[0].condition.operator == "not_exists"
+    assert rules[1].rule_id == "CUSTOM002"
+    assert rules[1].category == "Agent"
+
+
+def test_load_rules_yaml_invalid_operator():
+    """Load YAML with invalid operator -> ValueError."""
+    yaml_text = """
+rules:
+  - rule_id: BAD001
+    severity: warning
+    category: Custom
+    message: "bad"
+    condition:
+      field: "app_insights"
+      operator: invalid_op
+"""
+    with pytest.raises(ValueError, match="Invalid operator"):
+        load_rules_yaml(yaml_text)
+
+
+def test_resolve_field_dotted_path():
+    """Resolve dotted path 'gpt_info.instructions' on BotProfile."""
+    profile = BotProfile(gpt_info=GptInfo(display_name="Test", instructions="Do stuff"))
+    values = _resolve_field(profile, "gpt_info.instructions")
+    assert values == ["Do stuff"]
+
+
+def test_resolve_field_components_array():
+    """Resolve components[].tool_type -> iterates all components."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="A", schema_name="a", tool_type="Connector"),
+            ComponentSummary(kind="DialogComponent", display_name="B", schema_name="b", tool_type="Flow"),
+            ComponentSummary(kind="DialogComponent", display_name="C", schema_name="c", tool_type=None),
+        ]
+    )
+    values = _resolve_field(profile, "components[].tool_type")
+    assert values == ["Connector", "Flow", None]
+
+
+def test_operator_eq():
+    """eq operator matches equal values."""
+    assert _apply_operator("hello", "eq", "hello") is True
+    assert _apply_operator("hello", "eq", "world") is False
+    assert _apply_operator(42, "eq", 42) is True
+
+
+def test_operator_ne():
+    """ne operator matches unequal values."""
+    assert _apply_operator("hello", "ne", "world") is True
+    assert _apply_operator("hello", "ne", "hello") is False
+
+
+def test_operator_contains():
+    """contains operator checks substring or list membership."""
+    assert _apply_operator("hello world", "contains", "world") is True
+    assert _apply_operator("hello world", "contains", "xyz") is False
+    assert _apply_operator(["a", "b"], "contains", "b") is True
+
+
+def test_operator_not_contains():
+    """not_contains operator checks absence."""
+    assert _apply_operator("hello world", "not_contains", "xyz") is True
+    assert _apply_operator("hello world", "not_contains", "world") is False
+
+
+def test_operator_matches():
+    """matches operator uses regex search."""
+    assert _apply_operator("error-code-42", "matches", r"error-code-\d+") is True
+    assert _apply_operator("no-match", "matches", r"error-code-\d+") is False
+
+
+def test_operator_exists():
+    """exists operator checks value is not None."""
+    assert _apply_operator("something", "exists", None) is True
+    assert _apply_operator(None, "exists", None) is False
+    assert _apply_operator(0, "exists", None) is True
+
+
+def test_operator_not_exists():
+    """not_exists operator checks value is None."""
+    assert _apply_operator(None, "not_exists", None) is True
+    assert _apply_operator("something", "not_exists", None) is False
+
+
+def test_evaluate_rules_against_profile():
+    """Evaluate rule against profile -> correct result dict."""
+    profile = BotProfile(
+        app_insights=AppInsightsConfig(configured=False),
+    )
+    rules = [
+        CustomRule(
+            rule_id="TEST001",
+            severity="warning",
+            category="Security",
+            message="App Insights not configured",
+            condition=RuleCondition(field="app_insights.configured", operator="eq", value=False),
+        )
+    ]
+    results = evaluate_rules(rules, profile)
+    assert len(results) == 1
+    assert results[0]["rule_id"] == "TEST001"
+    assert results[0]["severity"] == "warning"
+    assert results[0]["category"] == "Security"
+    assert results[0]["detail"] == "App Insights not configured"
+    assert results[0]["title"] == "TEST001"
+
+
+def test_evaluate_rules_empty_list():
+    """Empty rules list -> no extra results."""
+    profile = BotProfile()
+    results = evaluate_rules([], profile)
+    assert results == []
+
+
+# --- Bot Comparison / Diff tests ---
+
+
+def _make_bot(name: str = "TestBot", components: list[ComponentSummary] | None = None, **kwargs) -> BotProfile:
+    return BotProfile(display_name=name, components=components or [], **kwargs)
+
+
+def test_compare_identical_bots():
+    """Identical bots produce empty diff."""
+    comp = ComponentSummary(kind="Topic", display_name="Greeting", schema_name="cr_greeting")
+    a = _make_bot("Bot", components=[comp])
+    b = _make_bot("Bot", components=[comp])
+    diff = compare_bots(a, b)
+    assert diff.added_components == []
+    assert diff.removed_components == []
+    assert diff.changed_components == []
+    assert diff.instruction_diff == ""
+    assert diff.connection_changes == []
+    assert diff.settings_changes == []
+
+
+def test_compare_added_component():
+    """Bot B has extra component -> in added_components."""
+    a = _make_bot("A")
+    b = _make_bot("B", components=[ComponentSummary(kind="Topic", display_name="New", schema_name="cr_new")])
+    diff = compare_bots(a, b)
+    assert "cr_new" in diff.added_components
+    assert diff.removed_components == []
+
+
+def test_compare_removed_component():
+    """Bot A has component not in B -> in removed_components."""
+    a = _make_bot("A", components=[ComponentSummary(kind="Topic", display_name="Old", schema_name="cr_old")])
+    b = _make_bot("B")
+    diff = compare_bots(a, b)
+    assert "cr_old" in diff.removed_components
+    assert diff.added_components == []
+
+
+def test_compare_changed_component():
+    """Same schema_name, different field -> in changed_components."""
+    ca = ComponentSummary(kind="Topic", display_name="Greet", schema_name="cr_greet", state="Active")
+    cb = ComponentSummary(kind="Topic", display_name="Greet", schema_name="cr_greet", state="Disabled")
+    diff = compare_bots(_make_bot("A", components=[ca]), _make_bot("B", components=[cb]))
+    assert len(diff.changed_components) == 1
+    assert diff.changed_components[0].field == "state"
+    assert diff.changed_components[0].value_a == "Active"
+    assert diff.changed_components[0].value_b == "Disabled"
+
+
+def test_compare_instruction_diff():
+    """Different instructions -> instruction_diff not empty."""
+    a = _make_bot("A", gpt_info=GptInfo(instructions="You are helpful."))
+    b = _make_bot("B", gpt_info=GptInfo(instructions="You are concise."))
+    diff = compare_bots(a, b)
+    assert diff.instruction_diff != ""
+    assert "helpful" in diff.instruction_diff
+    assert "concise" in diff.instruction_diff
+
+
+def test_compare_connection_added():
+    """Connection in B not in A -> in connection_changes."""
+    conn = TopicConnection(source_schema="src", source_display="Src", target_schema="tgt", target_display="Tgt")
+    a = _make_bot("A")
+    b = _make_bot("B", topic_connections=[conn])
+    diff = compare_bots(a, b)
+    assert any("+ src -> tgt" in c for c in diff.connection_changes)
+
+
+def test_compare_settings_changed():
+    """Different ai_settings -> in settings_changes."""
+    a = _make_bot("A", ai_settings=AISettings(use_model_knowledge=False))
+    b = _make_bot("B", ai_settings=AISettings(use_model_knowledge=True))
+    diff = compare_bots(a, b)
+    assert any("use_model_knowledge" in s for s in diff.settings_changes)
+
+
+def test_render_diff_report():
+    """render_diff_report produces valid markdown with expected sections."""
+    diff = BotDiffResult(
+        bot_a_name="A",
+        bot_b_name="B",
+        added_components=["cr_new"],
+        removed_components=["cr_old"],
+        changed_components=[
+            ComponentChange(schema_name="cr_x", display_name="X", field="state", value_a="Active", value_b="Disabled")
+        ],
+        instruction_diff="--- a\n+++ b\n-old\n+new",
+        connection_changes=["+ src -> tgt"],
+        settings_changes=["is_orchestrator: False -> True"],
+        summary_markdown="## Comparison: A vs B\n\n| Metric | Count |\n| --- | --- |",
+    )
+    md = render_diff_report(diff)
+    assert "## Comparison" in md
+    assert "Component Changes" in md
+    assert "Instruction Diff" in md
+    assert "Connection Changes" in md
+    assert "Settings Changes" in md
+    assert "cr_new" in md
+    assert "cr_old" in md
+
+
+def test_compare_empty_components():
+    """One bot with no components, other with some -> all shown as added/removed."""
+    comps = [
+        ComponentSummary(kind="Topic", display_name="A", schema_name="cr_a"),
+        ComponentSummary(kind="Topic", display_name="B", schema_name="cr_b"),
+    ]
+    diff = compare_bots(_make_bot("Empty"), _make_bot("Full", components=comps))
+    assert sorted(diff.added_components) == ["cr_a", "cr_b"]
+    assert diff.removed_components == []
+
+    diff2 = compare_bots(_make_bot("Full", components=comps), _make_bot("Empty"))
+    assert diff2.added_components == []
+    assert sorted(diff2.removed_components) == ["cr_a", "cr_b"]
+
+
+def test_compare_no_gpt_info():
+    """Both bots with no gpt_info -> instruction_diff empty."""
+    a = _make_bot("A", gpt_info=None)
+    b = _make_bot("B", gpt_info=None)
+    diff = compare_bots(a, b)
+    assert diff.instruction_diff == ""
+
+
+# --- Instruction versioning tests ---
+
+
+def _make_profile(
+    bot_id: str = "",
+    schema_name: str = "test_bot",
+    display_name: str = "Test Bot",
+    instructions: str | None = None,
+    description: str | None = None,
+) -> BotProfile:
+    gpt = GptInfo(instructions=instructions, description=description) if instructions or description else None
+    return BotProfile(bot_id=bot_id, schema_name=schema_name, display_name=display_name, gpt_info=gpt)
+
+
+def test_instruction_snapshot_first(tmp_path, monkeypatch):
+    """First snapshot returns None (no previous)."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    profile = _make_profile(bot_id="bot1", instructions="Do stuff")
+    result = save_snapshot(profile)
+    assert result is None
+
+
+def test_instruction_snapshot_same(tmp_path, monkeypatch):
+    """Same instructions -> returns None (no change)."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    profile = _make_profile(bot_id="bot1", instructions="Do stuff")
+    save_snapshot(profile)
+    result = save_snapshot(profile)
+    assert result is None
+
+
+def test_instruction_snapshot_changed(tmp_path, monkeypatch):
+    """Changed instructions -> returns diff with instructions_changed=True."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="bot1", instructions="Do stuff"))
+    diff = save_snapshot(_make_profile(bot_id="bot1", instructions="Do other stuff"))
+    assert diff is not None
+    assert diff.instructions_changed is True
+    assert diff.unified_diff != ""
+
+
+def test_instruction_significant(tmp_path, monkeypatch):
+    """is_significant True when >20% changed."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="bot1", instructions="AAAA"))
+    diff = save_snapshot(_make_profile(bot_id="bot1", instructions="BBBB"))
+    assert diff is not None
+    assert diff.is_significant is True
+    assert diff.change_ratio > 0.2
+
+
+def test_instruction_change_ratio(tmp_path, monkeypatch):
+    """change_ratio correct calculation."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    original = "Hello world this is a test"
+    save_snapshot(_make_profile(bot_id="bot1", instructions=original))
+    # Small change
+    diff = save_snapshot(_make_profile(bot_id="bot1", instructions="Hello world this is a test!"))
+    assert diff is not None
+    assert 0.0 < diff.change_ratio < 0.2
+    assert diff.is_significant is False
+
+
+def test_instruction_get_history(tmp_path, monkeypatch):
+    """get_history returns ordered list."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="bot1", instructions="v1"))
+    save_snapshot(_make_profile(bot_id="bot1", instructions="v2"))
+    save_snapshot(_make_profile(bot_id="bot1", instructions="v3"))
+    history = get_history("bot1")
+    assert len(history) == 3
+    assert history[0].instructions == "v1"
+    assert history[2].instructions == "v3"
+
+
+def test_instruction_atomic_write(tmp_path, monkeypatch):
+    """File written correctly."""
+    versions_file = tmp_path / "sub" / "versions.json"
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", versions_file)
+    save_snapshot(_make_profile(bot_id="bot1", instructions="test"))
+    assert versions_file.exists()
+    import json
+
+    data = json.loads(versions_file.read_text())
+    assert "versions" in data
+    assert "bot1" in data["versions"]
+
+
+def test_instruction_identity_bot_id(tmp_path, monkeypatch):
+    """Bot identity uses bot_id when available."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="my-bot-id", schema_name="my_schema", instructions="test"))
+    history = get_history("my-bot-id")
+    assert len(history) == 1
+    assert history[0].bot_identity == "my-bot-id"
+
+
+def test_instruction_identity_schema_name(tmp_path, monkeypatch):
+    """Bot identity falls back to schema_name."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="", schema_name="my_schema", instructions="test"))
+    history = get_history("my_schema")
+    assert len(history) == 1
+    assert history[0].bot_identity == "my_schema"
+
+
+def test_render_instruction_drift():
+    """Renders valid markdown with diff block."""
+    diff = InstructionDiff(
+        bot_identity="bot1",
+        from_timestamp="2026-01-01T00:00:00",
+        to_timestamp="2026-01-02T00:00:00",
+        instructions_changed=True,
+        description_changed=False,
+        unified_diff="--- previous\n+++ current\n-old line\n+new line",
+        change_ratio=0.5,
+        is_significant=True,
+    )
+    result = render_instruction_drift(diff)
+    assert "Instruction Drift Detected" in result
+    assert "50%" in result
+    assert "```diff" in result
+    assert "-old line" in result
+    assert "+new line" in result
+
+
+# --- Batch analytics tests ---
+
+
+def test_batch_single_timeline():
+    """Single timeline produces correct summary with count=1."""
+    timeline = ConversationTimeline(
+        conversation_id="conv-1",
+        total_elapsed_ms=500.0,
+        events=[
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hello"),
+        ],
+    )
+    summary = aggregate_timelines([timeline])
+    assert summary.conversation_count == 1
+    assert summary.avg_elapsed_ms == 500.0
+    assert summary.success_count == 1
+
+
+def test_batch_multiple_timelines():
+    """Multiple timelines aggregate correctly."""
+    t1 = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=200.0,
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="hi")],
+    )
+    t2 = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=400.0,
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="hi")],
+    )
+    summary = aggregate_timelines([t1, t2])
+    assert summary.conversation_count == 2
+    assert summary.avg_elapsed_ms == 300.0
+    assert summary.success_count == 2
+    assert summary.failure_count == 0
+
+
+def test_batch_success_rate():
+    """Success rate calculated correctly with metadata."""
+    t1 = ConversationTimeline(conversation_id="c1", total_elapsed_ms=100.0)
+    t2 = ConversationTimeline(conversation_id="c2", total_elapsed_ms=100.0)
+    meta = [
+        {"session_info": {"outcome": "Resolved"}},
+        {"session_info": {"outcome": "Abandoned"}},
+    ]
+    summary = aggregate_timelines([t1, t2], meta)
+    assert summary.success_count == 1
+    assert summary.failure_count == 1
+    assert summary.success_rate == pytest.approx(0.5)
+
+
+def test_batch_success_heuristic():
+    """Without metadata, success = no errors + has bot message."""
+    t_success = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="ok")],
+    )
+    t_fail = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=100.0,
+        errors=["something broke"],
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="ok")],
+    )
+    summary = aggregate_timelines([t_success, t_fail])
+    assert summary.success_count == 1
+    assert summary.failure_count == 1
+
+
+def test_batch_escalation_detection():
+    """STEP_TRIGGERED with 'Escalate' topic detected as escalation."""
+    timeline = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="Escalate to Agent",
+                summary="escalation",
+            ),
+        ],
+    )
+    summary = aggregate_timelines([timeline])
+    assert summary.escalation_count == 1
+
+
+def test_batch_topic_usage():
+    """Topic usage counted across conversations."""
+    t1 = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        events=[
+            TimelineEvent(event_type=EventType.STEP_TRIGGERED, topic_name="Greeting", summary="greet"),
+            TimelineEvent(event_type=EventType.STEP_TRIGGERED, topic_name="Farewell", summary="bye"),
+        ],
+    )
+    t2 = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=100.0,
+        events=[
+            TimelineEvent(event_type=EventType.STEP_TRIGGERED, topic_name="Greeting", summary="greet"),
+        ],
+    )
+    summary = aggregate_timelines([t1, t2])
+    topic_map = {t.topic_name: t.invocation_count for t in summary.topic_usage}
+    assert topic_map["Greeting"] == 2
+    assert topic_map["Farewell"] == 1
+
+
+def test_batch_failure_mode_grouping():
+    """Errors grouped by normalized pattern (GUIDs stripped)."""
+    t1 = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        errors=["Failed for resource 1a2b3c4d5e6f7890"],
+    )
+    t2 = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=100.0,
+        errors=["Failed for resource 9f8e7d6c5b4a3210"],
+    )
+    summary = aggregate_timelines([t1, t2])
+    assert len(summary.failure_modes) == 1
+    assert summary.failure_modes[0].count == 2
+    assert len(summary.failure_modes[0].example_conversation_ids) == 2
+
+
+def test_batch_empty_list():
+    """Empty timeline list returns zeroed summary."""
+    summary = aggregate_timelines([])
+    assert summary.conversation_count == 0
+    assert summary.avg_elapsed_ms == 0.0
+    assert summary.success_rate == 0.0
+
+
+def test_batch_render_report():
+    """render_batch_report produces valid markdown with expected sections."""
+    summary = BatchAnalyticsSummary(
+        conversation_count=5,
+        avg_elapsed_ms=250.0,
+        success_count=3,
+        failure_count=2,
+        escalation_count=1,
+        success_rate=0.6,
+        escalation_rate=0.2,
+    )
+    report = render_batch_report(summary)
+    assert "# Batch Analytics Report" in report
+    assert "## Overview" in report
+    assert "## Conversation Outcomes" in report
+    assert "```mermaid" in report
+    assert "pie title" in report
+
+
+def test_batch_mixed_outcomes():
+    """Mixed success/failure conversations counted correctly."""
+    timelines = [
+        ConversationTimeline(
+            conversation_id=f"c{i}",
+            total_elapsed_ms=100.0,
+            events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="ok")],
+        )
+        for i in range(3)
+    ]
+    # Third timeline has errors -> failure
+    timelines[2].errors = ["boom"]
+    summary = aggregate_timelines(timelines)
+    assert summary.success_count == 2
+    assert summary.failure_count == 1
+
+
+def test_batch_escalation_rate():
+    """escalation_rate = escalation_count / conversation_count."""
+    t1 = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="Transfer to Human",
+                summary="transfer",
+            ),
+        ],
+    )
+    t2 = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=100.0,
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="hi")],
+    )
+    summary = aggregate_timelines([t1, t2])
+    assert summary.escalation_rate == pytest.approx(0.5)
+    assert summary.escalation_count == 1
+
+
+def test_batch_avg_elapsed():
+    """avg_elapsed_ms calculated correctly."""
+    timelines = [
+        ConversationTimeline(conversation_id="c1", total_elapsed_ms=100.0),
+        ConversationTimeline(conversation_id="c2", total_elapsed_ms=300.0),
+        ConversationTimeline(conversation_id="c3", total_elapsed_ms=500.0),
+    ]
+    summary = aggregate_timelines(timelines)
+    assert summary.avg_elapsed_ms == pytest.approx(300.0)
+
+
+def test_dv_batch_analysis_pipeline():
+    """Dataverse batch pipeline: parse multiple transcripts, aggregate, render report."""
+    import json
+    import tempfile
+
+    # 3 minimal transcript JSONs with different user messages
+    transcripts = [
+        {
+            "activities": [
+                {
+                    "type": "message",
+                    "from": {"role": "user"},
+                    "text": f"Hello from conversation {i}",
+                    "timestamp": f"2025-01-0{i + 1}T10:00:00Z",
+                },
+                {
+                    "type": "message",
+                    "from": {"role": "bot"},
+                    "text": f"Response {i}",
+                    "timestamp": f"2025-01-0{i + 1}T10:00:01Z",
+                },
+            ]
+        }
+        for i in range(3)
+    ]
+
+    timelines = []
+    metadata_list = []
+
+    for i, transcript_data in enumerate(transcripts):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            json_path = Path(tmpdir) / f"transcript_{i}.json"
+            json_path.write_text(json.dumps(transcript_data))
+
+            activities, metadata = parse_transcript_json(json_path)
+            timeline = build_timeline(activities, {})
+            timelines.append(timeline)
+            metadata_list.append(metadata)
+
+    assert len(timelines) == 3
+
+    summary = aggregate_timelines(timelines, metadata_list)
+    assert summary.conversation_count == 3
+
+    report = render_batch_report(summary)
+    assert "## Overview" in report
+    assert "3" in report

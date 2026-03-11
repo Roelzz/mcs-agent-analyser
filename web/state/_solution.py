@@ -163,7 +163,8 @@ class SolutionMixin(rx.State, mixin=True):
         self.sol_is_checking = True
         self.sol_check_error = ""
         try:
-            result = await asyncio.to_thread(check_solution_zip, self.sol_zip_bytes)
+            custom = self.get_custom_rules() or None  # type: ignore[attr-defined]
+            result = await asyncio.to_thread(check_solution_zip, self.sol_zip_bytes, custom_rules=custom)
             self.sol_check_results = result.get("results", [])
             self.sol_check_agent_name = result.get("agent_name", "")
             self.sol_check_solution_name = result.get("solution_name", "")

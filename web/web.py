@@ -1,6 +1,17 @@
 import reflex as rx
 
-from web.components import dashboard_cards, import_form, login_form, navbar, report_viewer, solution_tools_form, upload_form
+from web.components import (
+    batch_form,
+    compare_form,
+    dashboard_cards,
+    import_form,
+    login_form,
+    navbar,
+    report_viewer,
+    rules_editor,
+    solution_tools_form,
+    upload_form,
+)
 from web.mermaid import mermaid_script
 from web.state import State
 
@@ -149,9 +160,48 @@ def tools_page() -> rx.Component:
     )
 
 
+def rules_page() -> rx.Component:
+    return rx.vstack(
+        navbar(),
+        mermaid_script(),
+        _counter_styles(),
+        rules_editor(),
+        width="100%",
+        min_height="100vh",
+        spacing="0",
+    )
+
+
+def compare_page() -> rx.Component:
+    return rx.vstack(
+        navbar(),
+        mermaid_script(),
+        _counter_styles(),
+        compare_form(),
+        width="100%",
+        min_height="100vh",
+        spacing="0",
+    )
+
+
+def batch_page() -> rx.Component:
+    return rx.vstack(
+        navbar(),
+        mermaid_script(),
+        _counter_styles(),
+        batch_form(),
+        width="100%",
+        min_height="100vh",
+        spacing="0",
+    )
+
+
 app.add_page(login_page, route="/", on_load=State.check_already_authed)
 app.add_page(dashboard_page, route="/dashboard", on_load=State.check_auth)
 app.add_page(upload_page, route="/upload", on_load=State.check_auth)
 app.add_page(import_page, route="/import", on_load=State.init_import_page)
 app.add_page(analysis_page, route="/analysis", on_load=State.check_analysis_page)
 app.add_page(tools_page, route="/tools", on_load=State.check_auth)
+app.add_page(rules_page, route="/rules", on_load=State.on_load_rules_page)
+app.add_page(compare_page, route="/compare", on_load=State.check_auth)
+app.add_page(batch_page, route="/batch", on_load=State.check_auth)

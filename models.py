@@ -208,6 +208,120 @@ class CreditEstimate(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+# --- Custom rule engine models ---
+
+_VALID_OPERATORS = frozenset(
+    {"eq", "ne", "gt", "lt", "gte", "lte", "contains", "not_contains", "matches", "exists", "not_exists"}
+)
+
+
+class RuleCondition(BaseModel):
+    field: str  # dotted path: "app_insights.configured", "components[].tool_type"
+    operator: str  # eq, ne, gt, lt, gte, lte, contains, not_contains, matches, exists, not_exists
+    value: str | int | float | bool | None = None
+
+    @field_validator("operator")
+    @classmethod
+    def operator_must_be_valid(cls, v: str) -> str:
+        if v not in _VALID_OPERATORS:
+            raise ValueError(f"Invalid operator '{v}'. Must be one of: {sorted(_VALID_OPERATORS)}")
+        return v
+
+
+_VALID_SEVERITIES = frozenset({"warning", "fail", "info", "pass"})
+
+
+class CustomRule(BaseModel):
+    rule_id: str
+    category: str = "Custom"
+    severity: str  # warning, fail, info
+    message: str
+    condition: RuleCondition
+
+    @field_validator("severity")
+    @classmethod
+    def severity_must_be_valid(cls, v: str) -> str:
+        if v not in _VALID_SEVERITIES:
+            raise ValueError(f"Invalid severity '{v}'. Must be one of: {sorted(_VALID_SEVERITIES)}")
+        return v
+
+
+# --- Bot comparison models ---
+
+
+class ComponentChange(BaseModel):
+    schema_name: str
+    display_name: str
+    field: str
+    value_a: str
+    value_b: str
+
+
+class BotDiffResult(BaseModel):
+    bot_a_name: str
+    bot_b_name: str
+    added_components: list[str] = Field(default_factory=list)
+    removed_components: list[str] = Field(default_factory=list)
+    changed_components: list[ComponentChange] = Field(default_factory=list)
+    instruction_diff: str = ""
+    connection_changes: list[str] = Field(default_factory=list)
+    settings_changes: list[str] = Field(default_factory=list)
+    summary_markdown: str = ""
+
+
+# --- Instruction versioning models ---
+
+
+class InstructionSnapshot(BaseModel):
+    bot_identity: str  # bot_id or schema_name
+    bot_name: str
+    timestamp: str  # ISO format
+    instructions: str | None = None
+    instructions_hash: str = ""  # sha256 hex
+    gpt_description: str | None = None
+
+
+class InstructionDiff(BaseModel):
+    bot_identity: str
+    from_timestamp: str
+    to_timestamp: str
+    instructions_changed: bool
+    description_changed: bool
+    unified_diff: str = ""
+    change_ratio: float = 0.0  # 0.0-1.0
+    is_significant: bool = False  # True if change_ratio > 0.2
+
+
+# --- Batch analytics models ---
+
+
+class TopicUsage(BaseModel):
+    topic_name: str
+    invocation_count: int = 0
+    avg_duration_ms: float = 0.0
+    error_count: int = 0
+
+
+class FailureMode(BaseModel):
+    error_pattern: str
+    count: int = 0
+    example_conversation_ids: list[str] = Field(default_factory=list)
+
+
+class BatchAnalyticsSummary(BaseModel):
+    conversation_count: int = 0
+    avg_elapsed_ms: float = 0.0
+    success_count: int = 0
+    failure_count: int = 0
+    escalation_count: int = 0
+    success_rate: float = 0.0
+    escalation_rate: float = 0.0
+    topic_usage: list[TopicUsage] = Field(default_factory=list)
+    failure_modes: list[FailureMode] = Field(default_factory=list)
+    total_credits_estimated: float = 0.0
+    avg_credits_per_conversation: float = 0.0
+
+
 # --- Renamer models ---
 
 

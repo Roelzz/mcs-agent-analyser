@@ -4,6 +4,7 @@ from models import (
     CreditEstimate,
     CreditLineItem,
     EventType,
+    InstructionDiff,
 )
 
 from ._helpers import (
@@ -34,7 +35,24 @@ from .timeline_render import (
 )
 
 
-def render_report(profile: BotProfile, timeline: ConversationTimeline | None = None) -> str:
+def render_instruction_drift(diff: InstructionDiff) -> str:
+    """Render instruction drift warning section."""
+    lines = [
+        "## \u26a0\ufe0f Instruction Drift Detected\n",
+        f"Instructions have changed since last analysis (change ratio: {diff.change_ratio:.0%}).\n",
+    ]
+    if diff.unified_diff:
+        lines.append("```diff")
+        lines.append(diff.unified_diff)
+        lines.append("```\n")
+    return "\n".join(lines)
+
+
+def render_report(
+    profile: BotProfile,
+    timeline: ConversationTimeline | None = None,
+    instruction_diff: InstructionDiff | None = None,
+) -> str:
     """Render complete Markdown report.
 
     Section order per plan F2:
@@ -68,6 +86,10 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline | None = N
     # 2. TL;DR
     sections.append(render_tldr(profile, timeline, credit_estimate))
 
+    # 2.1 Instruction drift warning (if significant)
+    if instruction_diff and instruction_diff.is_significant:
+        sections.append(render_instruction_drift(instruction_diff))
+
     # 2.5 Quick Wins
     quick_wins = render_quick_wins(profile)
     if quick_wins:
@@ -75,6 +97,7 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline | None = N
 
     # 2.6 Trigger Overlaps
     from parser import detect_trigger_overlaps
+
     overlaps = detect_trigger_overlaps(profile.components)
     trigger_overlap_section = render_trigger_overlaps(overlaps)
     if trigger_overlap_section:
