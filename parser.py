@@ -539,25 +539,21 @@ def validate_connections(profile: BotProfile) -> list[dict]:
     # Flag: missing connectors — connection ref points to unknown connector ID
     for logical, cid in ref_connector_map.items():
         if cid and cid not in connector_ids:
-            issues.append(
-                {
-                    "severity": "warning",
-                    "message": f"Missing connector definition for connection reference '{logical}'",
-                    "detail": f"Connection reference '{logical}' points to connector ID '{cid}' which has no matching connector definition.",
-                }
-            )
+            issues.append({
+                "severity": "warning",
+                "message": f"Missing connector definition for connection reference '{logical}'",
+                "detail": f"Connection reference '{logical}' points to connector ID '{cid}' which has no matching connector definition.",
+            })
 
     # Flag: duplicate references — same logical name appears twice
     seen: set[str] = set()
     for name in ref_logical_names:
         if name in seen:
-            issues.append(
-                {
-                    "severity": "warning",
-                    "message": f"Duplicate connection reference: '{name}'",
-                    "detail": f"The logical name '{name}' appears more than once in connection references.",
-                }
-            )
+            issues.append({
+                "severity": "warning",
+                "message": f"Duplicate connection reference: '{name}'",
+                "detail": f"The logical name '{name}' appears more than once in connection references.",
+            })
         seen.add(name)
 
     # Flag: orphaned connectors — connector definition not referenced by any connection ref
@@ -566,24 +562,20 @@ def validate_connections(profile: BotProfile) -> list[dict]:
         cid = cd.get("connectorId", "")
         if cid and cid not in referenced_connector_ids:
             display = cd.get("displayName", cid)
-            issues.append(
-                {
-                    "severity": "info",
-                    "message": f"Orphaned connector definition: '{display}'",
-                    "detail": f"Connector '{display}' (ID: {cid}) is defined but not referenced by any connection reference.",
-                }
-            )
+            issues.append({
+                "severity": "info",
+                "message": f"Orphaned connector definition: '{display}'",
+                "detail": f"Connector '{display}' (ID: {cid}) is defined but not referenced by any connection reference.",
+            })
 
     # Flag: unused refs — connection ref not used by any component
     ref_set = set(ref_logical_names)
     for logical in ref_set - used_refs:
-        issues.append(
-            {
-                "severity": "info",
-                "message": f"Unused connection reference: '{logical}'",
-                "detail": f"Connection reference '{logical}' is defined but not used by any component.",
-            }
-        )
+        issues.append({
+            "severity": "info",
+            "message": f"Unused connection reference: '{logical}'",
+            "detail": f"Connection reference '{logical}' is defined but not used by any component.",
+        })
 
     return issues
 
@@ -610,14 +602,12 @@ def detect_trigger_overlaps(components: list[ComponentSummary]) -> list[dict]:
                 continue
             overlap_pct = len(shared) / min_len
             if overlap_pct > 0.5:
-                overlaps.append(
-                    {
-                        "topic_a": name_a,
-                        "topic_b": name_b,
-                        "overlap_pct": round(overlap_pct * 100, 1),
-                        "shared_tokens": sorted(shared),
-                    }
-                )
+                overlaps.append({
+                    "topic_a": name_a,
+                    "topic_b": name_b,
+                    "overlap_pct": round(overlap_pct * 100, 1),
+                    "shared_tokens": sorted(shared),
+                })
 
     overlaps.sort(key=lambda x: x["overlap_pct"], reverse=True)
     return overlaps

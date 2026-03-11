@@ -311,8 +311,7 @@ def _process_trace_event(
                     position=position,
                     event_type=EventType.STEP_FINISHED,
                     topic_name=topic,
-                    summary=f"Step end: {topic} [{step_state}]"
-                    + (f" ({duration_ms:.0f}ms)" if duration_ms > 0 else ""),
+                    summary=f"Step end: {topic} [{step_state}]" + (f" ({duration_ms:.0f}ms)" if duration_ms > 0 else ""),
                     state=step_state,
                     error=error_msg,
                     step_id=step_id,
@@ -320,7 +319,9 @@ def _process_trace_event(
                 )
             )
 
-            state.phases.append(_build_phase(topic, value, trigger_ts, timestamp, duration_ms, step_state))
+            state.phases.append(
+                _build_phase(topic, value, trigger_ts, timestamp, duration_ms, step_state)
+            )
 
         elif value_type == "DynamicPlanFinished":
             was_cancelled = value.get("wasCancelled", False)

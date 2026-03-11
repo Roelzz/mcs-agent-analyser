@@ -385,9 +385,7 @@ class DataverseMixin(rx.State, mixin=True):
                 if not self.bot_profile_json:  # type: ignore[attr-defined]
                     self.bot_profile_json = _load_bot_profile()  # type: ignore[attr-defined]
                 logger.debug(
-                    "bot_profile_json present: {} (len={})",
-                    bool(self.bot_profile_json),
-                    len(self.bot_profile_json),  # type: ignore[attr-defined]
+                    "bot_profile_json present: {} (len={})", bool(self.bot_profile_json), len(self.bot_profile_json)  # type: ignore[attr-defined]
                 )
                 if self.bot_profile_json:  # type: ignore[attr-defined]
                     profile = BotProfile.model_validate_json(self.bot_profile_json)  # type: ignore[attr-defined]
@@ -464,9 +462,7 @@ class DataverseMixin(rx.State, mixin=True):
                 if not self.bot_profile_json:  # type: ignore[attr-defined]
                     self.bot_profile_json = _load_bot_profile()  # type: ignore[attr-defined]
                 logger.debug(
-                    "bot_profile_json present: {} (len={})",
-                    bool(self.bot_profile_json),
-                    len(self.bot_profile_json),  # type: ignore[attr-defined]
+                    "bot_profile_json present: {} (len={})", bool(self.bot_profile_json), len(self.bot_profile_json)  # type: ignore[attr-defined]
                 )
                 if self.bot_profile_json:  # type: ignore[attr-defined]
                     profile = BotProfile.model_validate_json(self.bot_profile_json)  # type: ignore[attr-defined]
