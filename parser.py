@@ -151,190 +151,157 @@ def parse_bot_data(data: dict) -> tuple[BotProfile, dict[str, str]]:
     return _parse_bot_dict(data)
 
 
-def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
-    """Core parsing logic shared by file-based and Dataverse-based flows."""
-    entity = data.get("entity", {})
-    config = entity.get("configuration", {})
+def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
+    """Parse a single component dict into a ComponentSummary. Returns (summary, is_orchestrator_flag)."""
+    kind = comp.get("kind", "Unknown")
+    display_name = comp.get("displayName", "")
+    schema_name = comp.get("schemaName", "")
+    state = comp.get("state", "Active")
+    description = comp.get("description")
 
-    # Channels
-    channels_raw = config.get("channels", []) or []
-    channels = [ch.get("channelId", "") for ch in channels_raw if isinstance(ch, dict)]
+    # Extract dialog metadata
+    dialog = comp.get("dialog", {}) or {}
+    dialog_kind = dialog.get("kind")
+    trigger_kind = None
+    action_kind = None
 
-    # AI settings
-    ai_raw = config.get("aISettings", {}) or {}
-    ai_settings = AISettings(
-        use_model_knowledge=ai_raw.get("useModelKnowledge", False),
-        file_analysis=ai_raw.get("isFileAnalysisEnabled", False),
-        semantic_search=ai_raw.get("isSemanticSearchEnabled", False),
-        content_moderation=ai_raw.get("contentModeration", "Unknown"),
-        opt_in_latest_models=ai_raw.get("optInUseLatestModels", False),
+    begin_dialog = dialog.get("beginDialog", {}) or {}
+    if begin_dialog:
+        trigger_kind = begin_dialog.get("kind")
+
+    # Tool classification for TaskDialog/AgentDialog
+    tool_type = None
+    connection_reference = None
+    operation_id = None
+    connection_mode = None
+    external_agent_protocol = None
+    connected_bot_schema = None
+    agent_instructions = None
+    marks_orchestrator = False
+
+    if dialog_kind in ("TaskDialog", "AgentDialog"):
+        marks_orchestrator = True
+        action = dialog.get("action", {}) or {}
+        action_kind = action.get("kind")
+        connection_reference = action.get("connectionReference")
+        operation_id = action.get("operationId")
+        conn_props = action.get("connectionProperties", {}) or {}
+        connection_mode = conn_props.get("mode")
+
+        if dialog_kind == "AgentDialog":
+            tool_type = "ChildAgent"
+            settings = dialog.get("settings", {}) or {}
+            agent_instructions = settings.get("instructions")
+        elif action_kind == "InvokeConnectorTaskAction":
+            tool_type = "ConnectorTool"
+        elif action_kind == "InvokeExternalAgentTaskAction":
+            op_details = action.get("operationDetails", {}) or {}
+            protocol_kind = op_details.get("kind")
+            external_agent_protocol = protocol_kind
+            operation_id = operation_id or op_details.get("operationId")
+            if protocol_kind == "AgentToAgentProtocolMetadata":
+                tool_type = "A2AAgent"
+            elif protocol_kind == "ModelContextProtocolMetadata":
+                tool_type = "MCPServer"
+            else:
+                tool_type = "ExternalAgent"
+        elif action_kind == "InvokeConnectedAgentTaskAction":
+            tool_type = "ConnectedAgent"
+            connected_bot_schema = action.get("botSchemaName")
+        elif action_kind == "InvokeFlowAction":
+            tool_type = "FlowTool"
+        elif action_kind == "InvokeComputerUseAction":
+            tool_type = "CUATool"
+        elif dialog_kind == "PromptDialog":
+            tool_type = "AIPrompt"
+
+    # GptComponent fallback for display name
+    if kind == "GptComponent" and not display_name:
+        metadata = comp.get("metadata", {}) or {}
+        display_name = metadata.get("displayName", schema_name)
+
+    # DialogComponent: extract trigger queries, model description, action summary
+    model_description = None
+    trigger_queries: list[str] = []
+    action_summary: dict[str, int] = {}
+    has_external_calls = False
+    if kind == "DialogComponent":
+        model_description = dialog.get("modelDescription")
+        trigger_queries = begin_dialog.get("intent", {}).get("triggerQueries", []) or []
+        dialog_actions = begin_dialog.get("actions", []) or []
+        action_summary = _count_action_kinds(dialog_actions)
+        has_external_calls = bool(set(action_summary) & _EXTERNAL_ACTION_KINDS)
+
+    # KnowledgeSourceComponent: extract source config + trigger condition
+    source_kind = None
+    source_site = None
+    trigger_condition_raw = None
+    if kind == "KnowledgeSourceComponent":
+        ks_config = comp.get("configuration", {}) or {}
+        source = ks_config.get("source", {}) or {}
+        source_kind = source.get("kind")
+        source_site = source.get("siteName") or source.get("siteUrl")
+        tc = source.get("triggerCondition")
+        trigger_condition_raw = str(tc) if tc is not None else None
+
+    # CustomEntityComponent: entity kind + item count
+    entity_kind = None
+    entity_item_count = 0
+    if kind == "CustomEntityComponent":
+        entity_data = comp.get("entity", {}) or {}
+        entity_kind = entity_data.get("kind")
+        entity_item_count = len(entity_data.get("items", []) or [])
+
+    # FileAttachmentComponent: file type from extension
+    file_type = None
+    if kind == "FileAttachmentComponent" and display_name:
+        parts = display_name.rsplit(".", 1)
+        if len(parts) == 2:
+            file_type = parts[1].lower()
+
+    # GlobalVariableComponent: variable scope
+    variable_scope = None
+    if kind == "GlobalVariableComponent":
+        variable_data = comp.get("variable", {}) or {}
+        variable_scope = variable_data.get("scope")
+
+    summary = ComponentSummary(
+        kind=kind,
+        display_name=display_name,
+        schema_name=schema_name,
+        state=state,
+        trigger_kind=trigger_kind,
+        dialog_kind=dialog_kind,
+        action_kind=action_kind,
+        description=description,
+        model_description=model_description,
+        trigger_queries=trigger_queries,
+        action_summary=action_summary,
+        has_external_calls=has_external_calls,
+        source_kind=source_kind,
+        source_site=source_site,
+        tool_type=tool_type,
+        connection_reference=connection_reference,
+        operation_id=operation_id,
+        connection_mode=connection_mode,
+        external_agent_protocol=external_agent_protocol,
+        connected_bot_schema=connected_bot_schema,
+        agent_instructions=agent_instructions,
+        entity_kind=entity_kind,
+        entity_item_count=entity_item_count,
+        file_type=file_type,
+        variable_scope=variable_scope,
+        trigger_condition_raw=trigger_condition_raw,
     )
 
-    # Recognizer
-    recognizer = config.get("recognizer", {}) or {}
-    recognizer_kind = recognizer.get("kind", "Unknown")
+    return summary, marks_orchestrator
 
-    # Components + lookup table
-    components: list[ComponentSummary] = []
-    schema_to_display: dict[str, str] = {}
-    is_orchestrator = False
 
-    for comp in data.get("components", []) or []:
-        kind = comp.get("kind", "Unknown")
-        display_name = comp.get("displayName", "")
-        schema_name = comp.get("schemaName", "")
-        state = comp.get("state", "Active")
-        description = comp.get("description")
-
-        # Extract dialog metadata
-        dialog = comp.get("dialog", {}) or {}
-        dialog_kind = dialog.get("kind")
-        trigger_kind = None
-        action_kind = None
-
-        begin_dialog = dialog.get("beginDialog", {}) or {}
-        if begin_dialog:
-            trigger_kind = begin_dialog.get("kind")
-
-        # Tool classification for TaskDialog/AgentDialog
-        tool_type = None
-        connection_reference = None
-        operation_id = None
-        connection_mode = None
-        external_agent_protocol = None
-        connected_bot_schema = None
-        agent_instructions = None
-
-        if dialog_kind in ("TaskDialog", "AgentDialog"):
-            is_orchestrator = True
-            action = dialog.get("action", {}) or {}
-            action_kind = action.get("kind")
-            connection_reference = action.get("connectionReference")
-            operation_id = action.get("operationId")
-            conn_props = action.get("connectionProperties", {}) or {}
-            connection_mode = conn_props.get("mode")
-
-            if dialog_kind == "AgentDialog":
-                tool_type = "ChildAgent"
-                settings = dialog.get("settings", {}) or {}
-                agent_instructions = settings.get("instructions")
-            elif action_kind == "InvokeConnectorTaskAction":
-                tool_type = "ConnectorTool"
-            elif action_kind == "InvokeExternalAgentTaskAction":
-                op_details = action.get("operationDetails", {}) or {}
-                protocol_kind = op_details.get("kind")
-                external_agent_protocol = protocol_kind
-                operation_id = operation_id or op_details.get("operationId")
-                if protocol_kind == "AgentToAgentProtocolMetadata":
-                    tool_type = "A2AAgent"
-                elif protocol_kind == "ModelContextProtocolMetadata":
-                    tool_type = "MCPServer"
-                else:
-                    tool_type = "ExternalAgent"
-            elif action_kind == "InvokeConnectedAgentTaskAction":
-                tool_type = "ConnectedAgent"
-                connected_bot_schema = action.get("botSchemaName")
-            elif action_kind == "InvokeFlowAction":
-                tool_type = "FlowTool"
-            elif action_kind == "InvokeComputerUseAction":
-                tool_type = "CUATool"
-            elif dialog_kind == "PromptDialog":
-                tool_type = "AIPrompt"
-
-        # GptComponent fallback for display name
-        if kind == "GptComponent" and not display_name:
-            metadata = comp.get("metadata", {}) or {}
-            display_name = metadata.get("displayName", schema_name)
-
-        # DialogComponent: extract trigger queries, model description, action summary
-        model_description = None
-        trigger_queries: list[str] = []
-        action_summary: dict[str, int] = {}
-        has_external_calls = False
-        if kind == "DialogComponent":
-            model_description = dialog.get("modelDescription")
-            trigger_queries = begin_dialog.get("intent", {}).get("triggerQueries", []) or []
-            dialog_actions = begin_dialog.get("actions", []) or []
-            action_summary = _count_action_kinds(dialog_actions)
-            has_external_calls = bool(set(action_summary) & _EXTERNAL_ACTION_KINDS)
-
-        # KnowledgeSourceComponent: extract source config + trigger condition
-        source_kind = None
-        source_site = None
-        trigger_condition_raw = None
-        if kind == "KnowledgeSourceComponent":
-            ks_config = comp.get("configuration", {}) or {}
-            source = ks_config.get("source", {}) or {}
-            source_kind = source.get("kind")
-            source_site = source.get("siteName") or source.get("siteUrl")
-            tc = source.get("triggerCondition")
-            trigger_condition_raw = str(tc) if tc is not None else None
-
-        # CustomEntityComponent: entity kind + item count
-        entity_kind = None
-        entity_item_count = 0
-        if kind == "CustomEntityComponent":
-            entity_data = comp.get("entity", {}) or {}
-            entity_kind = entity_data.get("kind")
-            entity_item_count = len(entity_data.get("items", []) or [])
-
-        # FileAttachmentComponent: file type from extension
-        file_type = None
-        if kind == "FileAttachmentComponent" and display_name:
-            parts = display_name.rsplit(".", 1)
-            if len(parts) == 2:
-                file_type = parts[1].lower()
-
-        # GlobalVariableComponent: variable scope
-        variable_scope = None
-        if kind == "GlobalVariableComponent":
-            variable_data = comp.get("variable", {}) or {}
-            variable_scope = variable_data.get("scope")
-
-        components.append(
-            ComponentSummary(
-                kind=kind,
-                display_name=display_name,
-                schema_name=schema_name,
-                state=state,
-                trigger_kind=trigger_kind,
-                dialog_kind=dialog_kind,
-                action_kind=action_kind,
-                description=description,
-                model_description=model_description,
-                trigger_queries=trigger_queries,
-                action_summary=action_summary,
-                has_external_calls=has_external_calls,
-                source_kind=source_kind,
-                source_site=source_site,
-                tool_type=tool_type,
-                connection_reference=connection_reference,
-                operation_id=operation_id,
-                connection_mode=connection_mode,
-                external_agent_protocol=external_agent_protocol,
-                connected_bot_schema=connected_bot_schema,
-                agent_instructions=agent_instructions,
-                entity_kind=entity_kind,
-                entity_item_count=entity_item_count,
-                file_type=file_type,
-                variable_scope=variable_scope,
-                trigger_condition_raw=trigger_condition_raw,
-            )
-        )
-
-        if schema_name and display_name:
-            schema_to_display[schema_name] = display_name
-
-    # Display name: prefer GptComponent displayName, fallback to entity displayName, then schemaName
-    bot_display_name = entity.get("displayName", "")
-    if not bot_display_name:
-        gpt_comps = [c for c in components if c.kind == "GptComponent"]
-        if gpt_comps:
-            bot_display_name = gpt_comps[0].display_name
-    if not bot_display_name:
-        bot_display_name = entity.get("schemaName", "Unknown Bot")
-
-    # Second pass: extract GPT info and topic connections
+def _extract_topic_connections(
+    data: dict,
+    schema_to_display: dict[str, str],
+) -> tuple[GptInfo | None, list[TopicConnection]]:
+    """Second pass over components: extract GPT info and topic connections."""
     gpt_info: GptInfo | None = None
     topic_connections: list[TopicConnection] = []
 
@@ -354,30 +321,14 @@ def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
                 _extract_begin_dialogs(dialog_actions, comp_schema, comp_display, schema_to_display)
             )
 
-    # Extract environment variables and connectors from config
-    env_vars = config.get("environmentVariables", []) or []
-    connectors_raw = config.get("connectors", []) or []
+    return gpt_info, topic_connections
 
-    # Entity-level properties (Phase 1)
-    auth_mode = entity.get("authenticationMode", "Unknown")
-    auth_trigger = entity.get("authenticationTrigger", "Unknown")
-    access_control = entity.get("accessControlPolicy", "Unknown")
-    settings = config.get("settings", {}) or {}
-    gen_actions = settings.get("GenerativeActionsEnabled", False)
-    is_agent_connectable = config.get("isAgentConnectable", False)
-    is_lightweight_bot = config.get("isLightweightBot", False)
 
-    # Application Insights (Phase 1 A5)
-    app_insights_raw = config.get("applicationInsights", {}) or {}
-    app_insights = None
-    if app_insights_raw:
-        app_insights = AppInsightsConfig(
-            configured=True,
-            log_activities=app_insights_raw.get("logActivities", False),
-            log_sensitive_properties=app_insights_raw.get("logSensitiveProperties", False),
-        )
-
-    # Connection infrastructure (Phase 3)
+def _parse_connection_infrastructure(
+    data: dict,
+    components: list[ComponentSummary],
+) -> tuple[list[dict], list[dict]]:
+    """Parse connection references and connector definitions, enrich components with resolved names."""
     connection_refs_raw = data.get("connectionReferences", []) or []
     connection_references = []
     for ref in connection_refs_raw:
@@ -435,7 +386,45 @@ def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
         if comp_summary.connection_reference and comp_summary.connection_reference in ref_logical_to_connector:
             comp_summary.connector_display_name = ref_logical_to_connector[comp_summary.connection_reference]
 
-    profile = BotProfile(
+    return connection_references, connector_definitions
+
+
+def _build_profile(
+    entity: dict,
+    config: dict,
+    bot_display_name: str,
+    channels: list[str],
+    ai_settings: AISettings,
+    recognizer_kind: str,
+    components: list[ComponentSummary],
+    is_orchestrator: bool,
+    gpt_info: GptInfo | None,
+    topic_connections: list[TopicConnection],
+    connection_references: list[dict],
+    connector_definitions: list[dict],
+) -> BotProfile:
+    """Construct the final BotProfile from all parsed data."""
+    env_vars = config.get("environmentVariables", []) or []
+    connectors_raw = config.get("connectors", []) or []
+
+    auth_mode = entity.get("authenticationMode", "Unknown")
+    auth_trigger = entity.get("authenticationTrigger", "Unknown")
+    access_control = entity.get("accessControlPolicy", "Unknown")
+    settings = config.get("settings", {}) or {}
+    gen_actions = settings.get("GenerativeActionsEnabled", False)
+    is_agent_connectable = config.get("isAgentConnectable", False)
+    is_lightweight_bot = config.get("isLightweightBot", False)
+
+    app_insights_raw = config.get("applicationInsights", {}) or {}
+    app_insights = None
+    if app_insights_raw:
+        app_insights = AppInsightsConfig(
+            configured=True,
+            log_activities=app_insights_raw.get("logActivities", False),
+            log_sensitive_properties=app_insights_raw.get("logSensitiveProperties", False),
+        )
+
+    return BotProfile(
         schema_name=entity.get("schemaName", ""),
         bot_id=entity.get("cdsBotId", ""),
         display_name=bot_display_name,
@@ -455,6 +444,73 @@ def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
         is_agent_connectable=is_agent_connectable,
         is_lightweight_bot=is_lightweight_bot,
         app_insights=app_insights,
+        connection_references=connection_references,
+        connector_definitions=connector_definitions,
+    )
+
+
+def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
+    """Core parsing logic shared by file-based and Dataverse-based flows."""
+    entity = data.get("entity", {})
+    config = entity.get("configuration", {})
+
+    # Channels
+    channels_raw = config.get("channels", []) or []
+    channels = [ch.get("channelId", "") for ch in channels_raw if isinstance(ch, dict)]
+
+    # AI settings
+    ai_raw = config.get("aISettings", {}) or {}
+    ai_settings = AISettings(
+        use_model_knowledge=ai_raw.get("useModelKnowledge", False),
+        file_analysis=ai_raw.get("isFileAnalysisEnabled", False),
+        semantic_search=ai_raw.get("isSemanticSearchEnabled", False),
+        content_moderation=ai_raw.get("contentModeration", "Unknown"),
+        opt_in_latest_models=ai_raw.get("optInUseLatestModels", False),
+    )
+
+    # Recognizer
+    recognizer = config.get("recognizer", {}) or {}
+    recognizer_kind = recognizer.get("kind", "Unknown")
+
+    # Components + lookup table
+    components: list[ComponentSummary] = []
+    schema_to_display: dict[str, str] = {}
+    is_orchestrator = False
+
+    for comp in data.get("components", []) or []:
+        summary, marks_orchestrator = _parse_component(comp)
+        if marks_orchestrator:
+            is_orchestrator = True
+        components.append(summary)
+        if summary.schema_name and summary.display_name:
+            schema_to_display[summary.schema_name] = summary.display_name
+
+    # Display name: prefer GptComponent displayName, fallback to entity displayName, then schemaName
+    bot_display_name = entity.get("displayName", "")
+    if not bot_display_name:
+        gpt_comps = [c for c in components if c.kind == "GptComponent"]
+        if gpt_comps:
+            bot_display_name = gpt_comps[0].display_name
+    if not bot_display_name:
+        bot_display_name = entity.get("schemaName", "Unknown Bot")
+
+    # Second pass: extract GPT info and topic connections
+    gpt_info, topic_connections = _extract_topic_connections(data, schema_to_display)
+
+    # Connection infrastructure
+    connection_references, connector_definitions = _parse_connection_infrastructure(data, components)
+
+    profile = _build_profile(
+        entity=entity,
+        config=config,
+        bot_display_name=bot_display_name,
+        channels=channels,
+        ai_settings=ai_settings,
+        recognizer_kind=recognizer_kind,
+        components=components,
+        is_orchestrator=is_orchestrator,
+        gpt_info=gpt_info,
+        topic_connections=topic_connections,
         connection_references=connection_references,
         connector_definitions=connector_definitions,
     )
