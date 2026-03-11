@@ -137,6 +137,7 @@ class State(rx.State):
     # Upload
     is_processing: bool = False
     upload_error: str = ""
+    upload_stage: str = ""
     paste_json: str = ""
 
     # Report
@@ -468,6 +469,7 @@ class State(rx.State):
 
         self.is_processing = True
         self.upload_error = ""
+        self.upload_stage = "Detecting file format..."
         yield
 
         try:
@@ -475,17 +477,23 @@ class State(rx.State):
             exts = [Path(n).suffix.lower() for n in names]
 
             if len(files) == 1 and exts[0] == ".zip":
+                self.upload_stage = "Extracting and parsing bot export..."
+                yield
                 await self._process_bot_zip(files)
             elif len(files) == 2:
                 has_yaml = any(e in (".yml", ".yaml") for e in exts)
                 has_json = any(e == ".json" for e in exts)
                 if has_yaml and has_json:
+                    self.upload_stage = "Parsing bot configuration..."
+                    yield
                     await self._process_bot_files(files)
                 else:
                     self.upload_error = (
                         f"Two files uploaded but expected botContent.yml + dialog.json. Got: {', '.join(names)}"
                     )
             elif len(files) == 1 and exts[0] == ".json":
+                self.upload_stage = "Parsing transcript..."
+                yield
                 await self._process_transcript(files)
             else:
                 self.upload_error = (
@@ -499,6 +507,7 @@ class State(rx.State):
             self.upload_error = f"Processing failed: {e}"
         finally:
             self.is_processing = False
+            self.upload_stage = ""
             yield
             await self._refresh_community_count()
             if self.report_markdown:
@@ -519,6 +528,7 @@ class State(rx.State):
 
         self.is_processing = True
         self.upload_error = ""
+        self.upload_stage = "Parsing transcript..."
         yield
 
         try:
@@ -542,6 +552,7 @@ class State(rx.State):
             self.upload_error = f"Processing failed: {e}"
         finally:
             self.is_processing = False
+            self.upload_stage = ""
             yield
             await self._refresh_community_count()
             if self.report_markdown:
@@ -1157,19 +1168,31 @@ class State(rx.State):
 
     # --- Report handlers ---
 
+    @rx.event
     def download_report(self):
         filename = f"{self.report_title}.md" if self.report_title else "report.md"
-        return rx.download(data=self.report_markdown, filename=filename)
+        yield rx.download(data=self.report_markdown, filename=filename)
+        yield rx.toast(f"Report saved as {filename}", duration=3000)
 
+    @rx.event
     def download_report_html(self):
         from web.mermaid import build_standalone_html
 
         title = self.report_title or "report"
         html = build_standalone_html(self.report_markdown, title)
-        return rx.download(data=html, filename=f"{title}.html")
+        filename = f"{title}.html"
+        yield rx.download(data=html, filename=filename)
+        yield rx.toast(f"Report saved as {filename}", duration=3000)
 
+    @rx.event
     def download_report_pdf(self):
-        return rx.call_script("window.print()")
+        yield rx.call_script("window.print()")
+        yield rx.toast("Print dialog opened", duration=3000)
+
+    @rx.event
+    def copy_report_to_clipboard(self):
+        yield rx.set_clipboard(self.report_markdown)
+        yield rx.toast("Report copied to clipboard", duration=3000)
 
     def new_upload(self):
         self.report_markdown = ""
@@ -1213,10 +1236,12 @@ class State(rx.State):
         finally:
             self.is_linting = False
 
+    @rx.event
     def download_lint_report(self):
         title = self.report_title if self.report_title else "report"
         filename = f"{title}_lint.md"
-        return rx.download(data=self.lint_report_markdown, filename=filename)
+        yield rx.download(data=self.lint_report_markdown, filename=filename)
+        yield rx.toast(f"Lint report saved as {filename}", duration=3000)
 
     def clear_lint(self):
         self.lint_report_markdown = ""
@@ -1417,7 +1442,9 @@ class State(rx.State):
         if not self.sol_rename_result_bytes:
             return
         new_name = self.sol_rename_new_solution.strip() or "renamed_solution"
-        return rx.download(data=self.sol_rename_result_bytes, filename=f"{new_name}.zip")
+        filename = f"{new_name}.zip"
+        yield rx.download(data=self.sol_rename_result_bytes, filename=filename)
+        yield rx.toast(f"Downloaded {filename}", duration=3000)
 
     @rx.event
     def sol_clear(self):

@@ -314,6 +314,47 @@ def upload_form() -> rx.Component:
                 spacing="2",
                 align="center",
             ),
+            # Onboarding hints
+            rx.hstack(
+                rx.box(
+                    rx.hstack(
+                        rx.icon("package", size=16, color="var(--green-9)"),
+                        rx.vstack(
+                            rx.text("Bot Export (.zip)", size="2", font_weight="500", color="var(--gray-12)"),
+                            rx.text("Export from Copilot Studio", size="1", color="var(--gray-a9)"),
+                            spacing="1",
+                        ),
+                        spacing="3",
+                        align="center",
+                    ),
+                    padding="12px 16px",
+                    background="var(--gray-a2)",
+                    border="1px solid var(--gray-a4)",
+                    border_radius="10px",
+                    flex="1",
+                ),
+                rx.box(
+                    rx.hstack(
+                        rx.icon("database", size=16, color="var(--green-9)"),
+                        rx.vstack(
+                            rx.text("Dataverse Import", size="2", font_weight="500", color="var(--gray-12)"),
+                            rx.text("Connect for live analysis", size="1", color="var(--gray-a9)"),
+                            spacing="1",
+                        ),
+                        spacing="3",
+                        align="center",
+                    ),
+                    padding="12px 16px",
+                    background="var(--gray-a2)",
+                    border="1px solid var(--gray-a4)",
+                    border_radius="10px",
+                    flex="1",
+                    cursor="pointer",
+                    on_click=rx.redirect("/import"),
+                ),
+                spacing="3",
+                width="100%",
+            ),
             # Card
             rx.box(
                 rx.vstack(
@@ -375,7 +416,7 @@ def upload_form() -> rx.Component:
                             State.is_processing,
                             rx.hstack(
                                 rx.spinner(size="1"),
-                                rx.text("Analysing..."),
+                                rx.text(rx.cond(State.upload_stage != "", State.upload_stage, "Analysing...")),
                                 align="center",
                                 spacing="2",
                             ),
@@ -418,7 +459,7 @@ def upload_form() -> rx.Component:
                             State.is_processing,
                             rx.hstack(
                                 rx.spinner(size="1"),
-                                rx.text("Analysing..."),
+                                rx.text(rx.cond(State.upload_stage != "", State.upload_stage, "Analysing...")),
                                 align="center",
                                 spacing="2",
                             ),
@@ -526,6 +567,15 @@ def report_viewer() -> rx.Component:
                             on_click=State.download_report_pdf,
                         ),
                     ),
+                ),
+                rx.button(
+                    rx.icon("copy", size=14),
+                    rx.text("Copy"),
+                    variant="outline",
+                    size="2",
+                    color_scheme="gray",
+                    cursor="pointer",
+                    on_click=State.copy_report_to_clipboard,
                 ),
                 rx.cond(
                     State.can_lint,
@@ -1025,7 +1075,7 @@ def import_transcript_list() -> rx.Component:
                     State.dv_bot_analysing,
                     rx.hstack(
                         rx.spinner(size="1"),
-                        rx.text("Analysing..."),
+                        rx.text(rx.cond(State.upload_stage != "", State.upload_stage, "Analysing...")),
                         align="center",
                         spacing="2",
                     ),
@@ -1374,7 +1424,19 @@ def _sol_check_tab() -> rx.Component:
     return rx.vstack(
         rx.cond(
             State.sol_check_error != "",
-            rx.callout(State.sol_check_error, icon="triangle_alert", color_scheme="red", size="1", width="100%"),
+            rx.vstack(
+                rx.callout(State.sol_check_error, icon="triangle_alert", color_scheme="red", size="1", width="100%"),
+                rx.button(
+                    rx.hstack(rx.icon("rotate-ccw", size=14), rx.text("Retry"), align="center", spacing="2"),
+                    on_click=State.run_solution_check,
+                    size="2",
+                    variant="outline",
+                    color_scheme="red",
+                    cursor="pointer",
+                ),
+                spacing="2",
+                width="100%",
+            ),
         ),
         rx.cond(
             State.sol_is_checking,
@@ -1515,7 +1577,19 @@ def _sol_validate_tab() -> rx.Component:
     return rx.vstack(
         rx.cond(
             State.sol_validate_error != "",
-            rx.callout(State.sol_validate_error, icon="triangle_alert", color_scheme="red", size="1", width="100%"),
+            rx.vstack(
+                rx.callout(State.sol_validate_error, icon="triangle_alert", color_scheme="red", size="1", width="100%"),
+                rx.button(
+                    rx.hstack(rx.icon("rotate-ccw", size=14), rx.text("Retry"), align="center", spacing="2"),
+                    on_click=State.run_solution_validate,
+                    size="2",
+                    variant="outline",
+                    color_scheme="red",
+                    cursor="pointer",
+                ),
+                spacing="2",
+                width="100%",
+            ),
         ),
         rx.cond(
             State.sol_is_validating,
@@ -1576,7 +1650,19 @@ def _sol_deps_tab() -> rx.Component:
     return rx.vstack(
         rx.cond(
             State.sol_deps_error != "",
-            rx.callout(State.sol_deps_error, icon="triangle_alert", color_scheme="red", size="1", width="100%"),
+            rx.vstack(
+                rx.callout(State.sol_deps_error, icon="triangle_alert", color_scheme="red", size="1", width="100%"),
+                rx.button(
+                    rx.hstack(rx.icon("rotate-ccw", size=14), rx.text("Retry"), align="center", spacing="2"),
+                    on_click=State.run_deps_analysis,
+                    size="2",
+                    variant="outline",
+                    color_scheme="red",
+                    cursor="pointer",
+                ),
+                spacing="2",
+                width="100%",
+            ),
         ),
         rx.cond(
             State.sol_is_deps_analyzing,
@@ -1654,7 +1740,19 @@ def _sol_rename_tab() -> rx.Component:
         ),
         rx.cond(
             State.sol_rename_error != "",
-            rx.callout(State.sol_rename_error, icon="triangle_alert", color_scheme="red", size="1", width="100%"),
+            rx.vstack(
+                rx.callout(State.sol_rename_error, icon="triangle_alert", color_scheme="red", size="1", width="100%"),
+                rx.button(
+                    rx.hstack(rx.icon("rotate-ccw", size=14), rx.text("Retry"), align="center", spacing="2"),
+                    on_click=State.run_rename,
+                    size="2",
+                    variant="outline",
+                    color_scheme="red",
+                    cursor="pointer",
+                ),
+                spacing="2",
+                width="100%",
+            ),
         ),
         rx.button(
             rx.cond(
