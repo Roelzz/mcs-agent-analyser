@@ -1,3 +1,4 @@
+from web.components.batch import batch_form
 from web.components.common import dashboard_cards, login_form, navbar
 from web.components.compare import compare_form
 from web.components.dataverse import import_form
@@ -7,6 +8,7 @@ from web.components.solution_tools import solution_tools_form
 from web.components.upload import upload_form
 
 __all__ = [
+    "batch_form",
     "compare_form",
     "dashboard_cards",
     "import_form",
