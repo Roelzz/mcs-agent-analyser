@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import reflex as rx
 from loguru import logger
@@ -11,6 +12,7 @@ class RulesMixin(rx.State, mixin=True):
 
     custom_rules_yaml: str = ""
     custom_rules_parsed: list[dict] = []
+    _custom_rules_dicts: list[dict] = []  # full model_dump for checker integration
     rules_parse_error: str = ""
     rules_count: int = 0
 
@@ -23,7 +25,7 @@ class RulesMixin(rx.State, mixin=True):
         rules_file = os.getenv("CUSTOM_RULES_FILE", "")
         if rules_file:
             try:
-                text = open(rules_file, encoding="utf-8").read()
+                text = Path(rules_file).read_text(encoding="utf-8")
                 self.custom_rules_yaml = text
                 self._reparse_rules()
             except Exception as e:
@@ -51,6 +53,7 @@ class RulesMixin(rx.State, mixin=True):
     def clear_rules(self):
         self.custom_rules_yaml = ""
         self.custom_rules_parsed = []
+        self._custom_rules_dicts = []
         self.rules_parse_error = ""
         self.rules_count = 0
 
@@ -58,6 +61,7 @@ class RulesMixin(rx.State, mixin=True):
         """Parse the current YAML text and update parsed rules / error."""
         if not self.custom_rules_yaml.strip():
             self.custom_rules_parsed = []
+            self._custom_rules_dicts = []
             self.rules_parse_error = ""
             self.rules_count = 0
             return
@@ -72,19 +76,15 @@ class RulesMixin(rx.State, mixin=True):
                 }
                 for r in rules
             ]
+            self._custom_rules_dicts = [r.model_dump() for r in rules]
             self.rules_count = len(rules)
             self.rules_parse_error = ""
         except ValueError as e:
             self.rules_parse_error = str(e)
             self.custom_rules_parsed = []
+            self._custom_rules_dicts = []
             self.rules_count = 0
 
     def get_custom_rules(self) -> list[dict]:
-        """Parse custom_rules_yaml into dicts suitable for check_solution_zip."""
-        if not self.custom_rules_yaml.strip():
-            return []
-        try:
-            rules = load_rules_yaml(self.custom_rules_yaml)
-            return [r.model_dump() for r in rules]
-        except ValueError:
-            return []
+        """Return pre-parsed custom rules dicts for check_solution_zip."""
+        return self._custom_rules_dicts

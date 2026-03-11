@@ -130,7 +130,10 @@ def _apply_operator(actual: Any, op: str, expected: Any) -> bool:
         return True
     if op == "matches":
         if isinstance(actual, str) and isinstance(expected, str):
-            return re.search(expected, actual) is not None
+            try:
+                return re.search(expected, actual) is not None
+            except re.error:
+                return False
         return False
     # Numeric comparisons
     try:

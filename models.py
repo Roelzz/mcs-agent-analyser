@@ -228,12 +228,22 @@ class RuleCondition(BaseModel):
         return v
 
 
+_VALID_SEVERITIES = frozenset({"warning", "fail", "info", "pass"})
+
+
 class CustomRule(BaseModel):
     rule_id: str
     category: str = "Custom"
     severity: str  # warning, fail, info
     message: str
     condition: RuleCondition
+
+    @field_validator("severity")
+    @classmethod
+    def severity_must_be_valid(cls, v: str) -> str:
+        if v not in _VALID_SEVERITIES:
+            raise ValueError(f"Invalid severity '{v}'. Must be one of: {sorted(_VALID_SEVERITIES)}")
+        return v
 
 
 # --- Renamer models ---
