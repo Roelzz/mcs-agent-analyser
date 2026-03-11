@@ -7,22 +7,43 @@ from openai import AsyncOpenAI
 from models import BotProfile
 
 # (provider, model_id) — provider is "openai" or "anthropic"
+# Multiple hint formats per model: PascalCase, kebab-case, lowercase (matching validator.py convention).
 MODEL_HINT_MAP: dict[str, tuple[str, str]] = {
     # OpenAI — legacy
     "GPT41": ("openai", "gpt-4.1"),
+    "gpt-4.1": ("openai", "gpt-4.1"),
+    "gpt41": ("openai", "gpt-4.1"),
     "GPT4o": ("openai", "gpt-4.1"),
+    "gpt-4o": ("openai", "gpt-4.1"),
     "GPT4oMini": ("openai", "gpt-4.1-mini"),
+    "gpt-4o-mini": ("openai", "gpt-4.1-mini"),
     "GPT35Turbo": ("openai", "gpt-3.5-turbo"),
+    "gpt-3.5-turbo": ("openai", "gpt-3.5-turbo"),
     # OpenAI — current (from Copilot Studio model picker)
     "GPT5Chat": ("openai", "gpt-5"),
+    "gpt-5-chat": ("openai", "gpt-5"),
+    "gpt5chat": ("openai", "gpt-5"),
     "GPT5Auto": ("openai", "gpt-5"),
+    "gpt-5-auto": ("openai", "gpt-5"),
     "GPT5Reasoning": ("openai", "gpt-5"),
+    "gpt-5-reasoning": ("openai", "gpt-5"),
     "GPT53Chat": ("openai", "gpt-5"),
+    "gpt-5.3-chat": ("openai", "gpt-5"),
     "GPT54Reasoning": ("openai", "gpt-5"),
+    "gpt-5.4-reasoning": ("openai", "gpt-5"),
     # Anthropic
     "Sonnet45": ("anthropic", "claude-sonnet-4-5-20250514"),
+    "sonnet4-5": ("anthropic", "claude-sonnet-4-5-20250514"),
+    "sonnet45": ("anthropic", "claude-sonnet-4-5-20250514"),
+    "claude-sonnet-4-5": ("anthropic", "claude-sonnet-4-5-20250514"),
     "Sonnet46": ("anthropic", "claude-sonnet-4-6-20250514"),
+    "sonnet4-6": ("anthropic", "claude-sonnet-4-6-20250514"),
+    "sonnet46": ("anthropic", "claude-sonnet-4-6-20250514"),
+    "claude-sonnet-4-6": ("anthropic", "claude-sonnet-4-6-20250514"),
     "Opus46": ("anthropic", "claude-opus-4-6-20250514"),
+    "opus4-6": ("anthropic", "claude-opus-4-6-20250514"),
+    "opus46": ("anthropic", "claude-opus-4-6-20250514"),
+    "claude-opus-4-6": ("anthropic", "claude-opus-4-6-20250514"),
 }
 
 _FALLBACK_PROVIDER = "openai"
@@ -31,9 +52,15 @@ _FALLBACK_MODEL = "gpt-4.1"
 
 def resolve_model(hint: str | None) -> tuple[str, str, bool]:
     """Resolve a Copilot Studio model hint to (provider, model_id, was_fallback)."""
-    if hint and hint in MODEL_HINT_MAP:
-        provider, model_id = MODEL_HINT_MAP[hint]
-        return provider, model_id, False
+    if hint:
+        if hint in MODEL_HINT_MAP:
+            provider, model_id = MODEL_HINT_MAP[hint]
+            return provider, model_id, False
+        # Case-insensitive fallback
+        lower = hint.lower()
+        for key, value in MODEL_HINT_MAP.items():
+            if key.lower() == lower:
+                return value[0], value[1], False
     logger.warning(f"Unknown model hint '{hint}', falling back to {_FALLBACK_PROVIDER}/{_FALLBACK_MODEL}")
     return _FALLBACK_PROVIDER, _FALLBACK_MODEL, True
 

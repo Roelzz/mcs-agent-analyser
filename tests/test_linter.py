@@ -10,18 +10,30 @@ from models import BotProfile, ComponentSummary, GptInfo, TopicConnection
 
 
 def test_resolve_model_known_hints():
-    # OpenAI legacy
+    # OpenAI — PascalCase
     assert resolve_model("GPT41") == ("openai", "gpt-4.1", False)
     assert resolve_model("GPT4o") == ("openai", "gpt-4.1", False)
     assert resolve_model("GPT4oMini") == ("openai", "gpt-4.1-mini", False)
     assert resolve_model("GPT35Turbo") == ("openai", "gpt-3.5-turbo", False)
-    # OpenAI current
     assert resolve_model("GPT5Chat") == ("openai", "gpt-5", False)
     assert resolve_model("GPT5Auto") == ("openai", "gpt-5", False)
-    # Anthropic
+    # OpenAI — kebab-case (actual YAML values)
+    assert resolve_model("gpt-4.1") == ("openai", "gpt-4.1", False)
+    assert resolve_model("gpt-5-chat") == ("openai", "gpt-5", False)
+    # Anthropic — PascalCase
     assert resolve_model("Sonnet45") == ("anthropic", "claude-sonnet-4-5-20250514", False)
     assert resolve_model("Sonnet46") == ("anthropic", "claude-sonnet-4-6-20250514", False)
     assert resolve_model("Opus46") == ("anthropic", "claude-opus-4-6-20250514", False)
+    # Anthropic — kebab-case (actual YAML values)
+    assert resolve_model("sonnet4-5") == ("anthropic", "claude-sonnet-4-5-20250514", False)
+    assert resolve_model("sonnet4-6") == ("anthropic", "claude-sonnet-4-6-20250514", False)
+    assert resolve_model("opus4-6") == ("anthropic", "claude-opus-4-6-20250514", False)
+
+
+def test_resolve_model_case_insensitive():
+    assert resolve_model("gpt41") == ("openai", "gpt-4.1", False)
+    assert resolve_model("SONNET45") == ("anthropic", "claude-sonnet-4-5-20250514", False)
+    assert resolve_model("OPUS46") == ("anthropic", "claude-opus-4-6-20250514", False)
 
 
 def test_resolve_model_unknown_falls_back():
