@@ -62,6 +62,11 @@ from renderer import (
 from timeline import build_timeline, estimate_credits
 from transcript import parse_transcript_json
 
+import instruction_store
+from instruction_store import get_history, save_snapshot
+from models import InstructionDiff
+from renderer import render_instruction_drift
+
 BASE_DIR = Path(__file__).parent.parent
 
 
@@ -3279,3 +3284,129 @@ def test_compare_no_gpt_info():
     b = _make_bot("B", gpt_info=None)
     diff = compare_bots(a, b)
     assert diff.instruction_diff == ""
+
+
+# --- Instruction versioning tests ---
+
+
+def _make_profile(
+    bot_id: str = "",
+    schema_name: str = "test_bot",
+    display_name: str = "Test Bot",
+    instructions: str | None = None,
+    description: str | None = None,
+) -> BotProfile:
+    gpt = GptInfo(instructions=instructions, description=description) if instructions or description else None
+    return BotProfile(bot_id=bot_id, schema_name=schema_name, display_name=display_name, gpt_info=gpt)
+
+
+def test_instruction_snapshot_first(tmp_path, monkeypatch):
+    """First snapshot returns None (no previous)."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    profile = _make_profile(bot_id="bot1", instructions="Do stuff")
+    result = save_snapshot(profile)
+    assert result is None
+
+
+def test_instruction_snapshot_same(tmp_path, monkeypatch):
+    """Same instructions -> returns None (no change)."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    profile = _make_profile(bot_id="bot1", instructions="Do stuff")
+    save_snapshot(profile)
+    result = save_snapshot(profile)
+    assert result is None
+
+
+def test_instruction_snapshot_changed(tmp_path, monkeypatch):
+    """Changed instructions -> returns diff with instructions_changed=True."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="bot1", instructions="Do stuff"))
+    diff = save_snapshot(_make_profile(bot_id="bot1", instructions="Do other stuff"))
+    assert diff is not None
+    assert diff.instructions_changed is True
+    assert diff.unified_diff != ""
+
+
+def test_instruction_significant(tmp_path, monkeypatch):
+    """is_significant True when >20% changed."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="bot1", instructions="AAAA"))
+    diff = save_snapshot(_make_profile(bot_id="bot1", instructions="BBBB"))
+    assert diff is not None
+    assert diff.is_significant is True
+    assert diff.change_ratio > 0.2
+
+
+def test_instruction_change_ratio(tmp_path, monkeypatch):
+    """change_ratio correct calculation."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    original = "Hello world this is a test"
+    save_snapshot(_make_profile(bot_id="bot1", instructions=original))
+    # Small change
+    diff = save_snapshot(_make_profile(bot_id="bot1", instructions="Hello world this is a test!"))
+    assert diff is not None
+    assert 0.0 < diff.change_ratio < 0.2
+    assert diff.is_significant is False
+
+
+def test_instruction_get_history(tmp_path, monkeypatch):
+    """get_history returns ordered list."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="bot1", instructions="v1"))
+    save_snapshot(_make_profile(bot_id="bot1", instructions="v2"))
+    save_snapshot(_make_profile(bot_id="bot1", instructions="v3"))
+    history = get_history("bot1")
+    assert len(history) == 3
+    assert history[0].instructions == "v1"
+    assert history[2].instructions == "v3"
+
+
+def test_instruction_atomic_write(tmp_path, monkeypatch):
+    """File written correctly."""
+    versions_file = tmp_path / "sub" / "versions.json"
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", versions_file)
+    save_snapshot(_make_profile(bot_id="bot1", instructions="test"))
+    assert versions_file.exists()
+    import json
+
+    data = json.loads(versions_file.read_text())
+    assert "versions" in data
+    assert "bot1" in data["versions"]
+
+
+def test_instruction_identity_bot_id(tmp_path, monkeypatch):
+    """Bot identity uses bot_id when available."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="my-bot-id", schema_name="my_schema", instructions="test"))
+    history = get_history("my-bot-id")
+    assert len(history) == 1
+    assert history[0].bot_identity == "my-bot-id"
+
+
+def test_instruction_identity_schema_name(tmp_path, monkeypatch):
+    """Bot identity falls back to schema_name."""
+    monkeypatch.setattr(instruction_store, "_VERSIONS_FILE", tmp_path / "versions.json")
+    save_snapshot(_make_profile(bot_id="", schema_name="my_schema", instructions="test"))
+    history = get_history("my_schema")
+    assert len(history) == 1
+    assert history[0].bot_identity == "my_schema"
+
+
+def test_render_instruction_drift():
+    """Renders valid markdown with diff block."""
+    diff = InstructionDiff(
+        bot_identity="bot1",
+        from_timestamp="2026-01-01T00:00:00",
+        to_timestamp="2026-01-02T00:00:00",
+        instructions_changed=True,
+        description_changed=False,
+        unified_diff="--- previous\n+++ current\n-old line\n+new line",
+        change_ratio=0.5,
+        is_significant=True,
+    )
+    result = render_instruction_drift(diff)
+    assert "Instruction Drift Detected" in result
+    assert "50%" in result
+    assert "```diff" in result
+    assert "-old line" in result
+    assert "+new line" in result

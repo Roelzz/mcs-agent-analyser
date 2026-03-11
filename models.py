@@ -269,6 +269,29 @@ class BotDiffResult(BaseModel):
     summary_markdown: str = ""
 
 
+# --- Instruction versioning models ---
+
+
+class InstructionSnapshot(BaseModel):
+    bot_identity: str  # bot_id or schema_name
+    bot_name: str
+    timestamp: str  # ISO format
+    instructions: str | None = None
+    instructions_hash: str = ""  # sha256 hex
+    gpt_description: str | None = None
+
+
+class InstructionDiff(BaseModel):
+    bot_identity: str
+    from_timestamp: str
+    to_timestamp: str
+    instructions_changed: bool
+    description_changed: bool
+    unified_diff: str = ""
+    change_ratio: float = 0.0  # 0.0-1.0
+    is_significant: bool = False  # True if change_ratio > 0.2
+
+
 # --- Renamer models ---
 
 

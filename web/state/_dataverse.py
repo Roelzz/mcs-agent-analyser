@@ -8,9 +8,10 @@ from pathlib import Path
 import reflex as rx
 from loguru import logger
 
+from instruction_store import save_snapshot  # noqa: E402
 from models import BotProfile  # noqa: E402
 from parser import build_bot_dict, parse_bot_data  # noqa: E402
-from renderer import render_report, render_transcript_report  # noqa: E402
+from renderer import render_instruction_drift, render_report, render_transcript_report  # noqa: E402
 from timeline import build_timeline  # noqa: E402
 from transcript import parse_transcript_json  # noqa: E402
 
@@ -385,12 +386,17 @@ class DataverseMixin(rx.State, mixin=True):
                 if not self.bot_profile_json:  # type: ignore[attr-defined]
                     self.bot_profile_json = _load_bot_profile()  # type: ignore[attr-defined]
                 logger.debug(
-                    "bot_profile_json present: {} (len={})", bool(self.bot_profile_json), len(self.bot_profile_json)  # type: ignore[attr-defined]
+                    "bot_profile_json present: {} (len={})",
+                    bool(self.bot_profile_json),
+                    len(self.bot_profile_json),  # type: ignore[attr-defined]
                 )
                 if self.bot_profile_json:  # type: ignore[attr-defined]
                     profile = BotProfile.model_validate_json(self.bot_profile_json)  # type: ignore[attr-defined]
                     self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
                     self.report_title = profile.display_name  # type: ignore[attr-defined]
+                    instruction_diff = save_snapshot(profile)
+                    if instruction_diff and instruction_diff.is_significant:
+                        self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
                 else:
                     self.report_markdown = render_transcript_report(title, timeline, metadata)  # type: ignore[attr-defined]
                     self.report_title = title  # type: ignore[attr-defined]
@@ -462,12 +468,17 @@ class DataverseMixin(rx.State, mixin=True):
                 if not self.bot_profile_json:  # type: ignore[attr-defined]
                     self.bot_profile_json = _load_bot_profile()  # type: ignore[attr-defined]
                 logger.debug(
-                    "bot_profile_json present: {} (len={})", bool(self.bot_profile_json), len(self.bot_profile_json)  # type: ignore[attr-defined]
+                    "bot_profile_json present: {} (len={})",
+                    bool(self.bot_profile_json),
+                    len(self.bot_profile_json),  # type: ignore[attr-defined]
                 )
                 if self.bot_profile_json:  # type: ignore[attr-defined]
                     profile = BotProfile.model_validate_json(self.bot_profile_json)  # type: ignore[attr-defined]
                     self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
                     self.report_title = profile.display_name  # type: ignore[attr-defined]
+                    instruction_diff = save_snapshot(profile)
+                    if instruction_diff and instruction_diff.is_significant:
+                        self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
                 else:
                     self.report_markdown = render_transcript_report(title, timeline, metadata)  # type: ignore[attr-defined]
                     self.report_title = title  # type: ignore[attr-defined]
@@ -531,6 +542,10 @@ class DataverseMixin(rx.State, mixin=True):
             _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
             logger.debug("Stored bot_profile_json (len={})", len(self.bot_profile_json))  # type: ignore[attr-defined]
             self.lint_report_markdown = ""  # type: ignore[attr-defined]
+
+            instruction_diff = save_snapshot(profile)
+            if instruction_diff and instruction_diff.is_significant:
+                self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
 
         except RuntimeError as e:
             self.dv_bot_analyse_error = str(e)

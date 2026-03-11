@@ -6,8 +6,9 @@ from pathlib import Path
 import reflex as rx
 from loguru import logger
 
+from instruction_store import save_snapshot  # noqa: E402
 from parser import parse_dialog_json, parse_yaml  # noqa: E402
-from renderer import render_report, render_transcript_report  # noqa: E402
+from renderer import render_instruction_drift, render_report, render_transcript_report  # noqa: E402
 from timeline import build_timeline  # noqa: E402
 from transcript import parse_transcript_json  # noqa: E402
 from utils import safe_extractall  # noqa: E402
@@ -166,6 +167,10 @@ class UploadMixin(rx.State, mixin=True):
             self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
             _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
 
+            instruction_diff = save_snapshot(profile)
+            if instruction_diff and instruction_diff.is_significant:
+                self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
+
     async def _process_bot_files(self, files: list[rx.UploadFile]):
         if len(files) != 2:
             self.upload_error = "Upload exactly 2 files: botContent.yml and dialog.json."
@@ -199,6 +204,10 @@ class UploadMixin(rx.State, mixin=True):
             self.report_source = "upload"  # type: ignore[attr-defined]
             self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
             _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
+
+            instruction_diff = save_snapshot(profile)
+            if instruction_diff and instruction_diff.is_significant:
+                self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
 
     async def _process_transcript(self, files: list[rx.UploadFile]):
         if len(files) != 1:

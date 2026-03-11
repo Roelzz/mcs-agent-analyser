@@ -34,6 +34,7 @@ from .profile import (
 )
 from .report import (
     render_credit_estimate,
+    render_instruction_drift,
     render_report,
     render_tldr,
     render_transcript_report,
@@ -70,6 +71,7 @@ __all__ = [
     "render_errors",
     "render_event_log",
     "render_gantt_chart",
+    "render_instruction_drift",
     "render_integration_map",
     "render_knowledge_coverage",
     "render_knowledge_inventory",
