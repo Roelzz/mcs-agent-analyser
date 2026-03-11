@@ -37,9 +37,11 @@ class LintMixin(rx.State, mixin=True):
 
     @rx.event
     async def run_lint(self):
-        api_key = os.getenv("OPENAI_API_KEY", "")
-        if not api_key:
-            self.lint_error = "OPENAI_API_KEY not set. Add it to your .env file."
+        openai_key = os.getenv("OPENAI_API_KEY", "")
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+
+        if not openai_key and not anthropic_key:
+            self.lint_error = "No API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY in .env."
             return
 
         if not self.bot_profile_json:
@@ -53,7 +55,11 @@ class LintMixin(rx.State, mixin=True):
 
         try:
             profile = BotProfile.model_validate_json(self.bot_profile_json)
-            report, model_used = await _run_lint(profile, api_key)
+            report, model_used = await _run_lint(
+                profile,
+                openai_api_key=openai_key,
+                anthropic_api_key=anthropic_key,
+            )
             self.lint_report_markdown = report
             logger.info(f"Lint complete using {model_used}")
         except Exception as e:

@@ -10,20 +10,30 @@ from models import BotProfile, ComponentSummary, GptInfo, TopicConnection
 
 
 def test_resolve_model_known_hints():
-    assert resolve_model("GPT41") == ("gpt-4.1", False)
-    assert resolve_model("GPT4o") == ("gpt-4.1", False)
-    assert resolve_model("GPT4oMini") == ("gpt-4.1-mini", False)
-    assert resolve_model("GPT35Turbo") == ("gpt-3.5-turbo", False)
+    # OpenAI legacy
+    assert resolve_model("GPT41") == ("openai", "gpt-4.1", False)
+    assert resolve_model("GPT4o") == ("openai", "gpt-4.1", False)
+    assert resolve_model("GPT4oMini") == ("openai", "gpt-4.1-mini", False)
+    assert resolve_model("GPT35Turbo") == ("openai", "gpt-3.5-turbo", False)
+    # OpenAI current
+    assert resolve_model("GPT5Chat") == ("openai", "gpt-5", False)
+    assert resolve_model("GPT5Auto") == ("openai", "gpt-5", False)
+    # Anthropic
+    assert resolve_model("Sonnet45") == ("anthropic", "claude-sonnet-4-5-20250514", False)
+    assert resolve_model("Sonnet46") == ("anthropic", "claude-sonnet-4-6-20250514", False)
+    assert resolve_model("Opus46") == ("anthropic", "claude-opus-4-6-20250514", False)
 
 
 def test_resolve_model_unknown_falls_back():
-    model_id, was_fallback = resolve_model("SomeNewModel")
+    provider, model_id, was_fallback = resolve_model("SomeNewModel")
+    assert provider == "openai"
     assert model_id == "gpt-4.1"
     assert was_fallback is True
 
 
 def test_resolve_model_none():
-    model_id, was_fallback = resolve_model(None)
+    provider, model_id, was_fallback = resolve_model(None)
+    assert provider == "openai"
     assert model_id == "gpt-4.1"
     assert was_fallback is True
 
@@ -82,11 +92,11 @@ def test_build_component_payload_no_gpt_info():
     assert payload["topic_connections"] == []
 
 
-# --- run_lint mock test ---
+# --- run_lint mock tests ---
 
 
 @pytest.mark.anyio
-async def test_run_lint_mock():
+async def test_run_lint_mock_openai():
     profile = BotProfile(
         display_name="TestBot",
         gpt_info=GptInfo(model_hint="GPT41", instructions="Be helpful."),
@@ -105,7 +115,7 @@ async def test_run_lint_mock():
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
     with patch("linter.AsyncOpenAI", return_value=mock_client):
-        report, model_used = await run_lint(profile, "fake-key")
+        report, model_used = await run_lint(profile, openai_api_key="fake-key")
 
     assert model_used == "gpt-4.1"
     assert "gpt-4.1" in report
@@ -114,3 +124,53 @@ async def test_run_lint_mock():
     call_kwargs = mock_client.chat.completions.create.call_args.kwargs
     assert call_kwargs["model"] == "gpt-4.1"
     assert call_kwargs["temperature"] == 0.3
+
+
+@pytest.mark.anyio
+async def test_run_lint_mock_anthropic():
+    profile = BotProfile(
+        display_name="TestBot",
+        gpt_info=GptInfo(model_hint="Sonnet46", instructions="Be helpful."),
+    )
+
+    mock_content_block = MagicMock()
+    mock_content_block.text = "## 1. Instruction Clarity\n✅ Pass\nLooks good."
+
+    mock_response = MagicMock()
+    mock_response.content = [mock_content_block]
+
+    mock_client = AsyncMock()
+    mock_client.messages.create = AsyncMock(return_value=mock_response)
+
+    with patch("linter.AsyncAnthropic", return_value=mock_client):
+        report, model_used = await run_lint(profile, anthropic_api_key="fake-key")
+
+    assert model_used == "claude-sonnet-4-6-20250514"
+    assert "claude-sonnet-4-6-20250514" in report
+    assert "Instruction Clarity" in report
+    mock_client.messages.create.assert_called_once()
+    call_kwargs = mock_client.messages.create.call_args.kwargs
+    assert call_kwargs["model"] == "claude-sonnet-4-6-20250514"
+    assert "system" in call_kwargs
+    assert len(call_kwargs["system"]) > 0
+    assert call_kwargs["temperature"] == 0.3
+
+
+@pytest.mark.anyio
+async def test_run_lint_missing_openai_key():
+    profile = BotProfile(
+        display_name="TestBot",
+        gpt_info=GptInfo(model_hint="GPT41", instructions="Be helpful."),
+    )
+    with pytest.raises(ValueError, match="OPENAI_API_KEY is not set"):
+        await run_lint(profile, openai_api_key="", anthropic_api_key="fake-key")
+
+
+@pytest.mark.anyio
+async def test_run_lint_missing_anthropic_key():
+    profile = BotProfile(
+        display_name="TestBot",
+        gpt_info=GptInfo(model_hint="Sonnet46", instructions="Be helpful."),
+    )
+    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY is not set"):
+        await run_lint(profile, openai_api_key="fake-key", anthropic_api_key="")

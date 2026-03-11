@@ -1,30 +1,41 @@
+import json
+
+from anthropic import AsyncAnthropic
 from loguru import logger
 from openai import AsyncOpenAI
 
 from models import BotProfile
 
-# Map Copilot Studio model hints to OpenAI model IDs.
-# Easy to expand — one line per new hint as we discover them from bot exports.
-MODEL_HINT_MAP: dict[str, str] = {
-    "GPT41": "gpt-4.1",
-    "GPT4o": "gpt-4.1",
-    "GPT4oMini": "gpt-4.1-mini",
-    "GPT35Turbo": "gpt-3.5-turbo",
+# (provider, model_id) — provider is "openai" or "anthropic"
+MODEL_HINT_MAP: dict[str, tuple[str, str]] = {
+    # OpenAI — legacy
+    "GPT41": ("openai", "gpt-4.1"),
+    "GPT4o": ("openai", "gpt-4.1"),
+    "GPT4oMini": ("openai", "gpt-4.1-mini"),
+    "GPT35Turbo": ("openai", "gpt-3.5-turbo"),
+    # OpenAI — current (from Copilot Studio model picker)
+    "GPT5Chat": ("openai", "gpt-5"),
+    "GPT5Auto": ("openai", "gpt-5"),
+    "GPT5Reasoning": ("openai", "gpt-5"),
+    "GPT53Chat": ("openai", "gpt-5"),
+    "GPT54Reasoning": ("openai", "gpt-5"),
+    # Anthropic
+    "Sonnet45": ("anthropic", "claude-sonnet-4-5-20250514"),
+    "Sonnet46": ("anthropic", "claude-sonnet-4-6-20250514"),
+    "Opus46": ("anthropic", "claude-opus-4-6-20250514"),
 }
 
-# Fallback model when hint is unknown or None.
+_FALLBACK_PROVIDER = "openai"
 _FALLBACK_MODEL = "gpt-4.1"
 
 
-def resolve_model(hint: str | None) -> tuple[str, bool]:
-    """Resolve a Copilot Studio model hint to an OpenAI model ID.
-
-    Returns (model_id, was_fallback).
-    """
+def resolve_model(hint: str | None) -> tuple[str, str, bool]:
+    """Resolve a Copilot Studio model hint to (provider, model_id, was_fallback)."""
     if hint and hint in MODEL_HINT_MAP:
-        return MODEL_HINT_MAP[hint], False
-    logger.warning(f"Unknown model hint '{hint}', falling back to {_FALLBACK_MODEL}")
-    return _FALLBACK_MODEL, True
+        provider, model_id = MODEL_HINT_MAP[hint]
+        return provider, model_id, False
+    logger.warning(f"Unknown model hint '{hint}', falling back to {_FALLBACK_PROVIDER}/{_FALLBACK_MODEL}")
+    return _FALLBACK_PROVIDER, _FALLBACK_MODEL, True
 
 
 LINT_SYSTEM_PROMPT = """\
@@ -112,24 +123,9 @@ def build_component_payload(profile: BotProfile) -> dict:
     return payload
 
 
-async def run_lint(profile: BotProfile, api_key: str) -> tuple[str, str]:
-    """Run the instruction lint against the OpenAI API.
-
-    Returns (markdown_report, model_used).
-    """
-    hint = profile.gpt_info.model_hint if profile.gpt_info else None
-    model_id, was_fallback = resolve_model(hint)
-
-    payload = build_component_payload(profile)
-
-    import json
-
-    user_content = json.dumps(payload, indent=2, default=str)
-
+async def _lint_openai(api_key: str, model_id: str, user_content: str) -> str:
+    """Run lint via OpenAI API."""
     client = AsyncOpenAI(api_key=api_key)
-
-    logger.info(f"Running lint with model {model_id} (fallback={was_fallback})")
-
     response = await client.chat.completions.create(
         model=model_id,
         temperature=0.3,
@@ -138,8 +134,49 @@ async def run_lint(profile: BotProfile, api_key: str) -> tuple[str, str]:
             {"role": "user", "content": user_content},
         ],
     )
+    return response.choices[0].message.content or ""
 
-    report = response.choices[0].message.content or ""
+
+async def _lint_anthropic(api_key: str, model_id: str, user_content: str) -> str:
+    """Run lint via Anthropic API."""
+    client = AsyncAnthropic(api_key=api_key)
+    response = await client.messages.create(
+        model=model_id,
+        max_tokens=4096,
+        temperature=0.3,
+        system=LINT_SYSTEM_PROMPT,
+        messages=[
+            {"role": "user", "content": user_content},
+        ],
+    )
+    return response.content[0].text
+
+
+async def run_lint(
+    profile: BotProfile,
+    openai_api_key: str = "",
+    anthropic_api_key: str = "",
+) -> tuple[str, str]:
+    """Run the instruction lint against the resolved provider's API.
+
+    Returns (markdown_report, model_used).
+    """
+    hint = profile.gpt_info.model_hint if profile.gpt_info else None
+    provider, model_id, was_fallback = resolve_model(hint)
+
+    payload = build_component_payload(profile)
+    user_content = json.dumps(payload, indent=2, default=str)
+
+    logger.info(f"Running lint with {provider}/{model_id} (fallback={was_fallback})")
+
+    if provider == "anthropic":
+        if not anthropic_api_key:
+            raise ValueError(f"Bot uses Anthropic model '{model_id}' but ANTHROPIC_API_KEY is not set.")
+        report = await _lint_anthropic(anthropic_api_key, model_id, user_content)
+    else:
+        if not openai_api_key:
+            raise ValueError(f"Bot uses OpenAI model '{model_id}' but OPENAI_API_KEY is not set.")
+        report = await _lint_openai(openai_api_key, model_id, user_content)
 
     fallback_note = " (fallback — unknown model hint)" if was_fallback else ""
     header = f"> Lint performed by `{model_id}`{fallback_note}\n\n"
