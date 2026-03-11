@@ -11,6 +11,7 @@ from loguru import logger
 from instruction_store import save_snapshot  # noqa: E402
 from models import BotProfile  # noqa: E402
 from parser import build_bot_dict, parse_bot_data  # noqa: E402
+from batch_analytics import aggregate_timelines, render_batch_report  # noqa: E402
 from renderer import render_instruction_drift, render_report, render_transcript_report  # noqa: E402
 from timeline import build_timeline  # noqa: E402
 from transcript import parse_transcript_json  # noqa: E402
@@ -57,6 +58,10 @@ class DataverseMixin(rx.State, mixin=True):
     dv_single_fetch_error: str = ""
     dv_single_fetching: bool = False
 
+    # Dataverse Import — batch analysis
+    dv_batch_processing: bool = False
+    dv_batch_error: str = ""
+
     # Setters
     @rx.event
     def set_dv_org_url(self, value: str):
@@ -101,7 +106,31 @@ class DataverseMixin(rx.State, mixin=True):
     def dv_show_device_code(self) -> bool:
         return bool(self.dv_device_code) and self.dv_is_authenticating
 
+    @rx.var
+    def dv_selected_count(self) -> int:
+        return sum(1 for t in self.dv_transcripts if t.get("selected"))
+
+    @rx.var
+    def dv_has_selection(self) -> bool:
+        return any(t.get("selected") for t in self.dv_transcripts)
+
+    @rx.var
+    def dv_all_selected(self) -> bool:
+        return bool(self.dv_transcripts) and all(t.get("selected") for t in self.dv_transcripts)
+
     # --- Dataverse Import handlers ---
+
+    @rx.event
+    def dv_toggle_select(self, transcript_id: str):
+        self.dv_transcripts = [
+            {**t, "selected": not t["selected"]} if t["id"] == transcript_id else t
+            for t in self.dv_transcripts
+        ]
+
+    @rx.event
+    def dv_toggle_select_all(self):
+        all_selected = all(t.get("selected") for t in self.dv_transcripts)
+        self.dv_transcripts = [{**t, "selected": not all_selected} for t in self.dv_transcripts]
 
     @rx.event
     def dv_autofill_from_session_details(self):
@@ -313,9 +342,11 @@ class DataverseMixin(rx.State, mixin=True):
                 summaries.append(
                     {
                         "id": tid,
+                        "short_id": tid[:8] + "..." if len(tid) > 8 else tid,
                         "created_on": created[:10] if len(created) >= 10 else created,
                         "preview": preview,
                         "activity_count": len(activities),
+                        "selected": False,
                     }
                 )
                 contents[tid] = content_raw
@@ -584,6 +615,61 @@ class DataverseMixin(rx.State, mixin=True):
             yield rx.redirect("/analysis")
 
     @rx.event
+    async def dv_run_batch_analysis(self):
+        """Run batch analytics on selected Dataverse transcripts."""
+        selected = [t for t in self.dv_transcripts if t.get("selected")]
+        if not selected:
+            self.dv_batch_error = "No transcripts selected."
+            return
+
+        self.dv_batch_processing = True
+        self.dv_batch_error = ""
+        yield
+
+        try:
+            timelines = []
+            metadata_list = []
+
+            for t in selected:
+                content_raw = self.dv_transcript_contents.get(t["id"], "")
+                if not content_raw:
+                    continue
+
+                parsed = json.loads(content_raw) if isinstance(content_raw, str) else content_raw
+                if isinstance(parsed, list):
+                    parsed = {"activities": parsed}
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    json_path = Path(tmpdir) / "transcript.json"
+                    json_path.write_text(json.dumps(parsed))
+
+                    try:
+                        activities, metadata = parse_transcript_json(json_path)
+                        timeline = build_timeline(activities, self.dv_schema_lookup)
+                        timelines.append(timeline)
+                        metadata_list.append(metadata)
+                    except (json.JSONDecodeError, KeyError, ValueError) as e:
+                        logger.warning(f"Skipping transcript {t['id']}: {e}")
+
+            if not timelines:
+                self.dv_batch_error = "No valid transcripts found in selection."
+                return
+
+            summary = aggregate_timelines(timelines, metadata_list)
+            self.batch_report_md = render_batch_report(summary)  # type: ignore[attr-defined]
+            self.batch_count = len(timelines)  # type: ignore[attr-defined]
+            logger.info(f"Dataverse batch analysis complete: {len(timelines)} transcripts")
+
+        except Exception as e:
+            logger.error(f"Dataverse batch analysis failed: {e}")
+            self.dv_batch_error = f"Batch analysis failed: {e}"
+        finally:
+            self.dv_batch_processing = False
+            yield
+            if self.batch_report_md:  # type: ignore[attr-defined]
+                yield rx.redirect("/batch")
+
+    @rx.event
     def dv_disconnect(self):
         self.dv_token = ""
         self.dv_is_connected = False
@@ -600,6 +686,7 @@ class DataverseMixin(rx.State, mixin=True):
         self.dv_single_fetching = False
         self.dv_bot_analysing = False
         self.dv_bot_analyse_error = ""
+        self.dv_batch_error = ""
 
     @rx.event
     def dv_back_to_list(self):

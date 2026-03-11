@@ -317,12 +317,25 @@ def import_connection_form() -> rx.Component:
 
 def _transcript_row(transcript: dict) -> rx.Component:
     return rx.hstack(
+        rx.checkbox(
+            checked=transcript["selected"],
+            on_change=lambda _val: State.dv_toggle_select(transcript["id"]),
+            size="1",
+            color_scheme="green",
+        ),
         rx.text(
             transcript["created_on"],
             size="2",
             font_family=_MONO,
             color="var(--gray-11)",
             min_width="90px",
+        ),
+        rx.text(
+            transcript["short_id"],
+            size="1",
+            font_family=_MONO,
+            color="var(--gray-a8)",
+            min_width="75px",
         ),
         rx.text(
             transcript["preview"],
@@ -583,19 +596,91 @@ def import_transcript_list() -> rx.Component:
                 padding="24px",
             ),
         ),
+        # Batch error
+        rx.cond(
+            State.dv_batch_error != "",
+            rx.callout(
+                State.dv_batch_error,
+                icon="triangle_alert",
+                color_scheme="red",
+                size="1",
+                width="100%",
+            ),
+        ),
+        # Batch processing spinner
+        rx.cond(
+            State.dv_batch_processing,
+            rx.center(
+                rx.hstack(
+                    rx.spinner(size="2"),
+                    rx.text("Running batch analysis...", size="2", color="var(--gray-a9)"),
+                    spacing="2",
+                    align="center",
+                ),
+                width="100%",
+                padding="24px",
+            ),
+        ),
         # Transcript list
         rx.cond(
             State.dv_has_transcripts,
             rx.box(
                 # Header row
                 rx.hstack(
+                    rx.checkbox(
+                        checked=State.dv_all_selected,
+                        on_change=lambda _val: State.dv_toggle_select_all(),
+                        size="1",
+                        color_scheme="green",
+                    ),
                     rx.text("Date", size="1", color="var(--gray-a8)", font_weight="500", min_width="90px"),
+                    rx.text("ID", size="1", color="var(--gray-a8)", font_weight="500", min_width="75px"),
                     rx.text("Preview", size="1", color="var(--gray-a8)", font_weight="500", flex="1"),
                     rx.text("Acts", size="1", color="var(--gray-a8)", font_weight="500"),
                     rx.box(width="28px"),  # spacer for action column
                     width="100%",
                     padding="4px 12px",
                     spacing="3",
+                ),
+                # Batch action bar
+                rx.cond(
+                    State.dv_has_selection,
+                    rx.hstack(
+                        rx.text(
+                            State.dv_selected_count.to(str) + " selected",
+                            size="2",
+                            font_weight="500",
+                            color="var(--green-11)",
+                        ),
+                        rx.spacer(),
+                        rx.button(
+                            rx.cond(
+                                State.dv_batch_processing,
+                                rx.hstack(
+                                    rx.spinner(size="1"),
+                                    rx.text("Processing..."),
+                                    align="center",
+                                    spacing="2",
+                                ),
+                                rx.hstack(
+                                    rx.icon("bar-chart-3", size=14),
+                                    rx.text("Run Batch Analysis"),
+                                    align="center",
+                                    spacing="2",
+                                ),
+                            ),
+                            on_click=State.dv_run_batch_analysis,
+                            size="2",
+                            color_scheme="green",
+                            disabled=State.dv_batch_processing,
+                            cursor="pointer",
+                        ),
+                        width="100%",
+                        padding="8px 12px",
+                        align="center",
+                        background="var(--green-a2)",
+                        border_bottom="1px solid var(--gray-a3)",
+                    ),
                 ),
                 rx.foreach(State.dv_transcripts, _transcript_row),
                 width="100%",

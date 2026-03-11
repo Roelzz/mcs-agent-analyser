@@ -3617,3 +3617,52 @@ def test_batch_avg_elapsed():
     ]
     summary = aggregate_timelines(timelines)
     assert summary.avg_elapsed_ms == pytest.approx(300.0)
+
+
+def test_dv_batch_analysis_pipeline():
+    """Dataverse batch pipeline: parse multiple transcripts, aggregate, render report."""
+    import json
+    import tempfile
+
+    # 3 minimal transcript JSONs with different user messages
+    transcripts = [
+        {
+            "activities": [
+                {
+                    "type": "message",
+                    "from": {"role": "user"},
+                    "text": f"Hello from conversation {i}",
+                    "timestamp": f"2025-01-0{i + 1}T10:00:00Z",
+                },
+                {
+                    "type": "message",
+                    "from": {"role": "bot"},
+                    "text": f"Response {i}",
+                    "timestamp": f"2025-01-0{i + 1}T10:00:01Z",
+                },
+            ]
+        }
+        for i in range(3)
+    ]
+
+    timelines = []
+    metadata_list = []
+
+    for i, transcript_data in enumerate(transcripts):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            json_path = Path(tmpdir) / f"transcript_{i}.json"
+            json_path.write_text(json.dumps(transcript_data))
+
+            activities, metadata = parse_transcript_json(json_path)
+            timeline = build_timeline(activities, {})
+            timelines.append(timeline)
+            metadata_list.append(metadata)
+
+    assert len(timelines) == 3
+
+    summary = aggregate_timelines(timelines, metadata_list)
+    assert summary.conversation_count == 3
+
+    report = render_batch_report(summary)
+    assert "## Overview" in report
+    assert "3" in report
