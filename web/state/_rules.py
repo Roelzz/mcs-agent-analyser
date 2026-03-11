@@ -87,4 +87,23 @@ class RulesMixin(rx.State, mixin=True):
 
     def get_custom_rules(self) -> list[dict]:
         """Return pre-parsed custom rules dicts for check_solution_zip."""
+        if not self._custom_rules_dicts and not self.custom_rules_yaml:
+            rules_path = os.getenv("CUSTOM_RULES_FILE", "")
+            if rules_path:
+                path = Path(rules_path)
+                if path.is_file():
+                    try:
+                        self.custom_rules_yaml = path.read_text(encoding="utf-8")
+                        self._reparse_rules()
+                        logger.info(
+                            "Auto-loaded {} custom rules from {}",
+                            len(self._custom_rules_dicts),
+                            rules_path,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to auto-load custom rules from {}: {}",
+                            rules_path,
+                            e,
+                        )
         return self._custom_rules_dicts

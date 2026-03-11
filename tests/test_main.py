@@ -3179,6 +3179,64 @@ def test_load_default_rules_yaml():
         assert rule.condition.operator
 
 
+def test_default_rules_auto_load(monkeypatch, tmp_path):
+    """get_custom_rules() auto-loads from CUSTOM_RULES_FILE when rules are empty."""
+    from web.state._rules import RulesMixin
+
+    rules_path = Path(__file__).parent.parent / "data" / "default_rules.yaml"
+    yaml_text = rules_path.read_text()
+
+    # Write rules to a temp file
+    tmp_rules = tmp_path / "rules.yaml"
+    tmp_rules.write_text(yaml_text)
+    monkeypatch.setenv("CUSTOM_RULES_FILE", str(tmp_rules))
+
+    # Create a fresh mixin instance attributes on a simple namespace
+    class FakeState:
+        custom_rules_yaml: str = ""
+        custom_rules_parsed: list[dict] = []
+        _custom_rules_dicts: list[dict] = []
+        rules_parse_error: str = ""
+        rules_count: int = 0
+
+    obj = FakeState()
+    # Bind the methods
+    obj._reparse_rules = RulesMixin._reparse_rules.__get__(obj)
+    obj.get_custom_rules = RulesMixin.get_custom_rules.__get__(obj)
+
+    rules = obj.get_custom_rules()
+    assert len(rules) == 18
+    assert all(r["rule_id"].startswith("BP") for r in rules)
+    # Second call should not re-read (rules already loaded)
+    rules2 = obj.get_custom_rules()
+    assert rules2 == rules
+
+
+def test_default_rules_no_auto_load_when_user_has_rules(monkeypatch, tmp_path):
+    """get_custom_rules() does NOT auto-load if user already has rules set."""
+    from web.state._rules import RulesMixin
+
+    rules_path = Path(__file__).parent.parent / "data" / "default_rules.yaml"
+    tmp_rules = tmp_path / "rules.yaml"
+    tmp_rules.write_text(rules_path.read_text())
+    monkeypatch.setenv("CUSTOM_RULES_FILE", str(tmp_rules))
+
+    class FakeState:
+        custom_rules_yaml: str = "# user edited"
+        custom_rules_parsed: list[dict] = []
+        _custom_rules_dicts: list[dict] = []
+        rules_parse_error: str = ""
+        rules_count: int = 0
+
+    obj = FakeState()
+    obj._reparse_rules = RulesMixin._reparse_rules.__get__(obj)
+    obj.get_custom_rules = RulesMixin.get_custom_rules.__get__(obj)
+
+    # Should NOT auto-load because custom_rules_yaml is non-empty
+    rules = obj.get_custom_rules()
+    assert rules == []
+
+
 # --- Bot Comparison / Diff tests ---
 
 
