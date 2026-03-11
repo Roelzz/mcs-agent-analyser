@@ -246,6 +246,29 @@ class CustomRule(BaseModel):
         return v
 
 
+# --- Bot comparison models ---
+
+
+class ComponentChange(BaseModel):
+    schema_name: str
+    display_name: str
+    field: str
+    value_a: str
+    value_b: str
+
+
+class BotDiffResult(BaseModel):
+    bot_a_name: str
+    bot_b_name: str
+    added_components: list[str] = Field(default_factory=list)
+    removed_components: list[str] = Field(default_factory=list)
+    changed_components: list[ComponentChange] = Field(default_factory=list)
+    instruction_diff: str = ""
+    connection_changes: list[str] = Field(default_factory=list)
+    settings_changes: list[str] = Field(default_factory=list)
+    summary_markdown: str = ""
+
+
 # --- Renamer models ---
 
 

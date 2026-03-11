@@ -102,6 +102,7 @@ from web.state._counter import CounterMixin  # noqa: E402
 from web.state._dataverse import DataverseMixin  # noqa: E402
 from web.state._solution import SolutionMixin  # noqa: E402
 from web.state._rules import RulesMixin  # noqa: E402
+from web.state._compare import ComparisonMixin  # noqa: E402
 
 
 class State(
@@ -113,6 +114,7 @@ class State(
     DataverseMixin,
     SolutionMixin,
     RulesMixin,
+    ComparisonMixin,
     rx.State,
 ):
     """Combined auth, upload, and report state."""

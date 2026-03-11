@@ -3,9 +3,13 @@ from pathlib import Path
 import pytest
 
 from custom_rules import _apply_operator, _resolve_field, evaluate_rules, load_rules_yaml
+from diff import compare_bots, render_diff_report
 from models import (
+    AISettings,
     AppInsightsConfig,
+    BotDiffResult,
     BotProfile,
+    ComponentChange,
     ComponentSummary,
     ConversationTimeline,
     CreditEstimate,
@@ -16,6 +20,7 @@ from models import (
     RuleCondition,
     SearchResult,
     TimelineEvent,
+    TopicConnection,
 )
 from parser import (
     _count_action_kinds,
@@ -3149,3 +3154,128 @@ def test_evaluate_rules_empty_list():
     profile = BotProfile()
     results = evaluate_rules([], profile)
     assert results == []
+
+
+# --- Bot Comparison / Diff tests ---
+
+
+def _make_bot(name: str = "TestBot", components: list[ComponentSummary] | None = None, **kwargs) -> BotProfile:
+    return BotProfile(display_name=name, components=components or [], **kwargs)
+
+
+def test_compare_identical_bots():
+    """Identical bots produce empty diff."""
+    comp = ComponentSummary(kind="Topic", display_name="Greeting", schema_name="cr_greeting")
+    a = _make_bot("Bot", components=[comp])
+    b = _make_bot("Bot", components=[comp])
+    diff = compare_bots(a, b)
+    assert diff.added_components == []
+    assert diff.removed_components == []
+    assert diff.changed_components == []
+    assert diff.instruction_diff == ""
+    assert diff.connection_changes == []
+    assert diff.settings_changes == []
+
+
+def test_compare_added_component():
+    """Bot B has extra component -> in added_components."""
+    a = _make_bot("A")
+    b = _make_bot("B", components=[ComponentSummary(kind="Topic", display_name="New", schema_name="cr_new")])
+    diff = compare_bots(a, b)
+    assert "cr_new" in diff.added_components
+    assert diff.removed_components == []
+
+
+def test_compare_removed_component():
+    """Bot A has component not in B -> in removed_components."""
+    a = _make_bot("A", components=[ComponentSummary(kind="Topic", display_name="Old", schema_name="cr_old")])
+    b = _make_bot("B")
+    diff = compare_bots(a, b)
+    assert "cr_old" in diff.removed_components
+    assert diff.added_components == []
+
+
+def test_compare_changed_component():
+    """Same schema_name, different field -> in changed_components."""
+    ca = ComponentSummary(kind="Topic", display_name="Greet", schema_name="cr_greet", state="Active")
+    cb = ComponentSummary(kind="Topic", display_name="Greet", schema_name="cr_greet", state="Disabled")
+    diff = compare_bots(_make_bot("A", components=[ca]), _make_bot("B", components=[cb]))
+    assert len(diff.changed_components) == 1
+    assert diff.changed_components[0].field == "state"
+    assert diff.changed_components[0].value_a == "Active"
+    assert diff.changed_components[0].value_b == "Disabled"
+
+
+def test_compare_instruction_diff():
+    """Different instructions -> instruction_diff not empty."""
+    a = _make_bot("A", gpt_info=GptInfo(instructions="You are helpful."))
+    b = _make_bot("B", gpt_info=GptInfo(instructions="You are concise."))
+    diff = compare_bots(a, b)
+    assert diff.instruction_diff != ""
+    assert "helpful" in diff.instruction_diff
+    assert "concise" in diff.instruction_diff
+
+
+def test_compare_connection_added():
+    """Connection in B not in A -> in connection_changes."""
+    conn = TopicConnection(source_schema="src", source_display="Src", target_schema="tgt", target_display="Tgt")
+    a = _make_bot("A")
+    b = _make_bot("B", topic_connections=[conn])
+    diff = compare_bots(a, b)
+    assert any("+ src -> tgt" in c for c in diff.connection_changes)
+
+
+def test_compare_settings_changed():
+    """Different ai_settings -> in settings_changes."""
+    a = _make_bot("A", ai_settings=AISettings(use_model_knowledge=False))
+    b = _make_bot("B", ai_settings=AISettings(use_model_knowledge=True))
+    diff = compare_bots(a, b)
+    assert any("use_model_knowledge" in s for s in diff.settings_changes)
+
+
+def test_render_diff_report():
+    """render_diff_report produces valid markdown with expected sections."""
+    diff = BotDiffResult(
+        bot_a_name="A",
+        bot_b_name="B",
+        added_components=["cr_new"],
+        removed_components=["cr_old"],
+        changed_components=[
+            ComponentChange(schema_name="cr_x", display_name="X", field="state", value_a="Active", value_b="Disabled")
+        ],
+        instruction_diff="--- a\n+++ b\n-old\n+new",
+        connection_changes=["+ src -> tgt"],
+        settings_changes=["is_orchestrator: False -> True"],
+        summary_markdown="## Comparison: A vs B\n\n| Metric | Count |\n| --- | --- |",
+    )
+    md = render_diff_report(diff)
+    assert "## Comparison" in md
+    assert "Component Changes" in md
+    assert "Instruction Diff" in md
+    assert "Connection Changes" in md
+    assert "Settings Changes" in md
+    assert "cr_new" in md
+    assert "cr_old" in md
+
+
+def test_compare_empty_components():
+    """One bot with no components, other with some -> all shown as added/removed."""
+    comps = [
+        ComponentSummary(kind="Topic", display_name="A", schema_name="cr_a"),
+        ComponentSummary(kind="Topic", display_name="B", schema_name="cr_b"),
+    ]
+    diff = compare_bots(_make_bot("Empty"), _make_bot("Full", components=comps))
+    assert sorted(diff.added_components) == ["cr_a", "cr_b"]
+    assert diff.removed_components == []
+
+    diff2 = compare_bots(_make_bot("Full", components=comps), _make_bot("Empty"))
+    assert diff2.added_components == []
+    assert sorted(diff2.removed_components) == ["cr_a", "cr_b"]
+
+
+def test_compare_no_gpt_info():
+    """Both bots with no gpt_info -> instruction_diff empty."""
+    a = _make_bot("A", gpt_info=None)
+    b = _make_bot("B", gpt_info=None)
+    diff = compare_bots(a, b)
+    assert diff.instruction_diff == ""

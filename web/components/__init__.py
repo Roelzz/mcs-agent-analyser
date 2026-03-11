@@ -1,4 +1,5 @@
 from web.components.common import dashboard_cards, login_form, navbar
+from web.components.compare import compare_form
 from web.components.dataverse import import_form
 from web.components.report import report_viewer
 from web.components.rules import rules_editor
@@ -6,6 +7,7 @@ from web.components.solution_tools import solution_tools_form
 from web.components.upload import upload_form
 
 __all__ = [
+    "compare_form",
     "dashboard_cards",
     "import_form",
     "login_form",
