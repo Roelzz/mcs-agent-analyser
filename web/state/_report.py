@@ -1,4 +1,5 @@
 import reflex as rx
+from loguru import logger
 
 from web.mermaid import split_markdown_mermaid
 
@@ -10,10 +11,15 @@ class ReportMixin(rx.State, mixin=True):
     report_markdown: str = ""
     report_title: str = ""
     report_source: str = ""  # "upload" | "import" | ""
+    report_custom_findings: list[dict] = []
 
     @rx.var
     def has_report(self) -> bool:
         return bool(self.report_markdown)
+
+    @rx.var
+    def has_custom_findings(self) -> bool:
+        return len(self.report_custom_findings) > 0
 
     @rx.var
     def report_segments(self) -> list[dict[str, str]]:
@@ -21,6 +27,24 @@ class ReportMixin(rx.State, mixin=True):
             return []
         segments = split_markdown_mermaid(self.report_markdown)
         return [{"type": t, "content": c} for t, c in segments]
+
+    def _evaluate_custom_rules(self, profile: object) -> None:
+        """Evaluate custom rules against a BotProfile and store findings."""
+        from custom_rules import evaluate_rules
+        from models import CustomRule
+
+        rule_dicts = self.get_custom_rules()  # type: ignore[attr-defined]
+        if not rule_dicts:
+            self.report_custom_findings = []
+            return
+        try:
+            parsed = [CustomRule(**r) for r in rule_dicts]
+            results = evaluate_rules(parsed, profile)
+            self.report_custom_findings = results
+            logger.debug("Custom rules evaluated: {} findings from {} rules", len(results), len(parsed))
+        except Exception as e:
+            logger.warning("Custom rule evaluation failed: {}", e)
+            self.report_custom_findings = []
 
     # --- Report handlers ---
 

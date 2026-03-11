@@ -3237,62 +3237,50 @@ def test_default_rules_no_auto_load_when_user_has_rules(monkeypatch, tmp_path):
     assert rules == []
 
 
-# --- Custom rules in quick wins / report ---
+# --- Custom rules evaluation for report ---
 
 
-def test_render_quick_wins_with_custom_rules():
-    """Custom rules that trigger appear under 'Custom Rules' subsection."""
+def test_evaluate_custom_rules_returns_findings():
+    """evaluate_rules returns structured findings for triggered rules."""
     profile = BotProfile(
         display_name="TestBot",
-        components=[
-            ComponentSummary(
-                kind="DialogComponent",
-                display_name="Greeting",
-                schema_name="cr_greeting",
-                trigger_kind="OnUnknownIntent",
-            ),
-        ],
+        components=[],
         authentication_mode="None",
     )
     rules = [
-        {
-            "rule_id": "BP-TEST-TRIGGER",
-            "category": "security",
-            "severity": "warning",
-            "message": "Auth should not be None",
-            "condition": {"field": "authentication_mode", "operator": "eq", "value": "None"},
-        },
-        {
-            "rule_id": "BP-TEST-SKIP",
-            "category": "security",
-            "severity": "fail",
-            "message": "Should not fire",
-            "condition": {"field": "authentication_mode", "operator": "eq", "value": "OAuth"},
-        },
+        CustomRule(
+            rule_id="BP-TEST-TRIGGER",
+            category="security",
+            severity="warning",
+            message="Auth should not be None",
+            condition=RuleCondition(field="authentication_mode", operator="eq", value="None"),
+        ),
+        CustomRule(
+            rule_id="BP-TEST-SKIP",
+            category="security",
+            severity="fail",
+            message="Should not fire",
+            condition=RuleCondition(field="authentication_mode", operator="eq", value="OAuth"),
+        ),
     ]
-    output = render_quick_wins(profile, custom_rules=rules)
-    # Sections are separated
-    assert "### Built-in Checks" in output
-    assert "### Custom Rules" in output
-    # Triggered rule present under Custom Rules
-    assert "[BP-TEST-TRIGGER]" in output
-    assert "Auth should not be None" in output
-    # Non-triggered rule absent
-    assert "BP-TEST-SKIP" not in output
+    results = evaluate_rules(rules, profile)
+    # Only the triggered rule should appear
+    assert len(results) == 1
+    assert results[0]["rule_id"] == "BP-TEST-TRIGGER"
+    assert results[0]["severity"] == "warning"
+    assert results[0]["category"] == "security"
+    assert results[0]["detail"] == "Auth should not be None"
 
 
-def test_render_quick_wins_custom_rules_none():
-    """custom_rules=None is backwards-compatible, no crash."""
-    profile = BotProfile(
-        display_name="TestBot",
-        components=[],
-    )
-    output = render_quick_wins(profile, custom_rules=None)
-    assert isinstance(output, str)
+def test_evaluate_custom_rules_empty_list():
+    """Empty rules list returns empty findings."""
+    profile = BotProfile(display_name="TestBot", components=[])
+    results = evaluate_rules([], profile)
+    assert results == []
 
 
-def test_render_quick_wins_only_custom_rules():
-    """When no built-in findings exist, only Custom Rules subsection appears."""
+def test_render_quick_wins_no_custom_rules_in_markdown():
+    """render_quick_wins() only contains built-in checks, not custom rules."""
     profile = BotProfile(
         display_name="TestBot",
         components=[
@@ -3300,61 +3288,23 @@ def test_render_quick_wins_only_custom_rules():
                 kind="DialogComponent",
                 display_name="Greeting",
                 schema_name="cr_greeting",
-                trigger_kind="OnError",
-                description="Handles errors properly",
-            ),
-            ComponentSummary(
-                kind="DialogComponent",
-                display_name="Unknown",
-                schema_name="cr_unknown",
                 trigger_kind="OnUnknownIntent",
-                description="Handles unknown intents",
-            ),
-            ComponentSummary(
-                kind="DialogComponent",
-                display_name="Escalate",
-                schema_name="cr_escalate",
-                trigger_kind="OnEscalate",
-                description="Handles escalation events",
             ),
         ],
-        generative_actions_enabled=True,
     )
-    rules = [
-        {
-            "rule_id": "BP-GEN",
-            "category": "design",
-            "severity": "info",
-            "message": "Generative actions enabled",
-            "condition": {"field": "generative_actions_enabled", "operator": "eq", "value": True},
-        },
-    ]
-    output = render_quick_wins(profile, custom_rules=rules)
-    assert "### Custom Rules" in output
-    assert "### Built-in Checks" not in output
-    assert "[BP-GEN]" in output
+    output = render_quick_wins(profile)
+    # Built-in findings present
+    assert "Quick Wins" in output
+    # No custom rules section in markdown
+    assert "Custom Rules" not in output
 
 
-def test_render_report_includes_custom_rules():
-    """render_report() passes custom rules through to quick wins section."""
-    profile = BotProfile(
-        display_name="TestBot",
-        components=[],
-        generative_actions_enabled=True,
-    )
-    rules = [
-        {
-            "rule_id": "BP-GEN-CHECK",
-            "category": "design",
-            "severity": "info",
-            "message": "Generative actions are enabled",
-            "condition": {"field": "generative_actions_enabled", "operator": "eq", "value": True},
-        },
-    ]
-    md = render_report(profile, custom_rules=rules)
-    assert "### Custom Rules" in md
-    assert "[BP-GEN-CHECK]" in md
-    assert "Generative actions are enabled" in md
+def test_render_report_no_custom_rules_param():
+    """render_report() signature has no custom_rules parameter."""
+    import inspect
+
+    sig = inspect.signature(render_report)
+    assert "custom_rules" not in sig.parameters
 
 
 # --- Bot Comparison / Diff tests ---

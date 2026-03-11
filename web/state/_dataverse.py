@@ -420,17 +420,18 @@ class DataverseMixin(rx.State, mixin=True):
                     bool(self.bot_profile_json),
                     len(self.bot_profile_json),  # type: ignore[attr-defined]
                 )
-                custom = self.get_custom_rules() or None  # type: ignore[attr-defined]
                 if self.bot_profile_json:  # type: ignore[attr-defined]
                     profile = BotProfile.model_validate_json(self.bot_profile_json)  # type: ignore[attr-defined]
-                    self.report_markdown = render_report(profile, timeline, custom_rules=custom)  # type: ignore[attr-defined]
+                    self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
                     self.report_title = profile.display_name  # type: ignore[attr-defined]
+                    self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
                     instruction_diff = save_snapshot(profile)
                     if instruction_diff and instruction_diff.is_significant:
                         self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
                 else:
                     self.report_markdown = render_transcript_report(title, timeline, metadata)  # type: ignore[attr-defined]
                     self.report_title = title  # type: ignore[attr-defined]
+                    self.report_custom_findings = []  # type: ignore[attr-defined]
                 self.report_source = "import"  # type: ignore[attr-defined]
                 self.lint_report_markdown = ""  # type: ignore[attr-defined]
 
@@ -503,17 +504,18 @@ class DataverseMixin(rx.State, mixin=True):
                     bool(self.bot_profile_json),
                     len(self.bot_profile_json),  # type: ignore[attr-defined]
                 )
-                custom = self.get_custom_rules() or None  # type: ignore[attr-defined]
                 if self.bot_profile_json:  # type: ignore[attr-defined]
                     profile = BotProfile.model_validate_json(self.bot_profile_json)  # type: ignore[attr-defined]
-                    self.report_markdown = render_report(profile, timeline, custom_rules=custom)  # type: ignore[attr-defined]
+                    self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
                     self.report_title = profile.display_name  # type: ignore[attr-defined]
+                    self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
                     instruction_diff = save_snapshot(profile)
                     if instruction_diff and instruction_diff.is_significant:
                         self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
                 else:
                     self.report_markdown = render_transcript_report(title, timeline, metadata)  # type: ignore[attr-defined]
                     self.report_title = title  # type: ignore[attr-defined]
+                    self.report_custom_findings = []  # type: ignore[attr-defined]
                 self.report_source = "import"  # type: ignore[attr-defined]
                 self.lint_report_markdown = ""  # type: ignore[attr-defined]
 
@@ -567,12 +569,12 @@ class DataverseMixin(rx.State, mixin=True):
                 len(profile.components),
             )
 
-            custom = self.get_custom_rules() or None  # type: ignore[attr-defined]
-            self.report_markdown = render_report(profile, custom_rules=custom)  # type: ignore[attr-defined]
+            self.report_markdown = render_report(profile)  # type: ignore[attr-defined]
             self.report_title = profile.display_name  # type: ignore[attr-defined]
             self.report_source = "import"  # type: ignore[attr-defined]
             self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
             _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
+            self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
             logger.debug("Stored bot_profile_json (len={})", len(self.bot_profile_json))  # type: ignore[attr-defined]
             self.lint_report_markdown = ""  # type: ignore[attr-defined]
 
