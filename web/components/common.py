@@ -147,6 +147,7 @@ def navbar() -> rx.Component:
             _nav_link("upload", "Upload", "/upload"),
             _nav_link("database", "Dataverse", "/import"),
             _nav_link("wrench", "Solution Tools", "/tools"),
+            _nav_link("shield-check", "Rules", "/rules"),
             rx.cond(
                 State.has_report,
                 _nav_link("file-text", "Report", "/analysis"),

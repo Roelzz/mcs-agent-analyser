@@ -2,15 +2,18 @@ from pathlib import Path
 
 import pytest
 
+from custom_rules import _apply_operator, _resolve_field, evaluate_rules, load_rules_yaml
 from models import (
     AppInsightsConfig,
     BotProfile,
     ComponentSummary,
     ConversationTimeline,
     CreditEstimate,
+    CustomRule,
     EventType,
     GptInfo,
     KnowledgeSearchInfo,
+    RuleCondition,
     SearchResult,
     TimelineEvent,
 )
@@ -2658,7 +2661,9 @@ def test_validate_connections_clean():
         connection_references=[
             {"connectionReferenceLogicalName": "ref-1", "connectorId": "conn-1", "displayName": "Ref 1"}
         ],
-        components=[ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", connection_reference="ref-1")],
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", connection_reference="ref-1")
+        ],
     )
     issues = validate_connections(profile)
     assert issues == []
@@ -2709,10 +2714,18 @@ def test_validate_connections_unused_ref():
 def test_detect_trigger_overlaps_no_overlap():
     """Completely different trigger queries produce no overlaps."""
     components = [
-        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
-                         trigger_queries=["how to reset password", "forgot my password", "password help"]),
-        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
-                         trigger_queries=["track my order", "where is my shipment", "delivery status"]),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T1",
+            schema_name="s1",
+            trigger_queries=["how to reset password", "forgot my password", "password help"],
+        ),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T2",
+            schema_name="s2",
+            trigger_queries=["track my order", "where is my shipment", "delivery status"],
+        ),
     ]
     overlaps = detect_trigger_overlaps(components)
     assert overlaps == []
@@ -2721,10 +2734,18 @@ def test_detect_trigger_overlaps_no_overlap():
 def test_detect_trigger_overlaps_high_overlap():
     """Nearly identical trigger queries should be flagged."""
     components = [
-        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
-                         trigger_queries=["how to reset my password", "I forgot my password"]),
-        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
-                         trigger_queries=["reset my password please", "forgot password help"]),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T1",
+            schema_name="s1",
+            trigger_queries=["how to reset my password", "I forgot my password"],
+        ),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T2",
+            schema_name="s2",
+            trigger_queries=["reset my password please", "forgot password help"],
+        ),
     ]
     overlaps = detect_trigger_overlaps(components)
     assert len(overlaps) > 0
@@ -2734,10 +2755,8 @@ def test_detect_trigger_overlaps_high_overlap():
 def test_detect_trigger_overlaps_skips_short():
     """Topics with fewer than 3 tokens are skipped."""
     components = [
-        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
-                         trigger_queries=["hi", "hello"]),
-        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
-                         trigger_queries=["hi", "hello"]),
+        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", trigger_queries=["hi", "hello"]),
+        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2", trigger_queries=["hi", "hello"]),
     ]
     overlaps = detect_trigger_overlaps(components)
     assert overlaps == []
@@ -2776,8 +2795,13 @@ def test_render_quick_wins_no_trigger_queries():
     """User topics with no trigger queries should be flagged."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="DialogComponent", display_name="NoTrigger", schema_name="s1",
-                             trigger_kind="OnIntent", trigger_queries=[]),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="NoTrigger",
+                schema_name="s1",
+                trigger_kind="OnIntent",
+                trigger_queries=[],
+            ),
         ],
     )
     result = render_quick_wins(profile)
@@ -2808,12 +2832,27 @@ def test_render_quick_wins_empty_when_clean():
     """A well-configured profile should produce empty quick wins."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="DialogComponent", display_name="Error", schema_name="s1",
-                             trigger_kind="OnError", description="Handles all errors gracefully"),
-            ComponentSummary(kind="DialogComponent", display_name="Fallback", schema_name="s2",
-                             trigger_kind="OnUnknownIntent", description="Handles unmatched intents"),
-            ComponentSummary(kind="DialogComponent", display_name="Escalate", schema_name="s3",
-                             trigger_kind="OnEscalate", description="Escalates to human agent"),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Error",
+                schema_name="s1",
+                trigger_kind="OnError",
+                description="Handles all errors gracefully",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Fallback",
+                schema_name="s2",
+                trigger_kind="OnUnknownIntent",
+                description="Handles unmatched intents",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Escalate",
+                schema_name="s3",
+                trigger_kind="OnEscalate",
+                description="Escalates to human agent",
+            ),
         ],
     )
     result = render_quick_wins(profile)
@@ -2834,11 +2873,21 @@ def test_render_knowledge_coverage_with_sources():
     """Knowledge sources render a table."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="KnowledgeSourceComponent", display_name="SharePoint FAQ",
-                             schema_name="ks1", source_kind="SharePoint", state="Active",
-                             trigger_condition_raw="true"),
-            ComponentSummary(kind="FileAttachmentComponent", display_name="guide.pdf",
-                             schema_name="fa1", file_type="pdf", state="Active"),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="SharePoint FAQ",
+                schema_name="ks1",
+                source_kind="SharePoint",
+                state="Active",
+                trigger_condition_raw="true",
+            ),
+            ComponentSummary(
+                kind="FileAttachmentComponent",
+                display_name="guide.pdf",
+                schema_name="fa1",
+                file_type="pdf",
+                state="Active",
+            ),
         ],
     )
     result = render_knowledge_coverage(profile)
@@ -2851,8 +2900,13 @@ def test_render_knowledge_coverage_inactive_flagged():
     """Inactive knowledge sources should have a note."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="KnowledgeSourceComponent", display_name="Old KB",
-                             schema_name="ks1", source_kind="Web", state="Inactive"),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="Old KB",
+                schema_name="ks1",
+                source_kind="Web",
+                state="Inactive",
+            ),
         ],
     )
     result = render_knowledge_coverage(profile)
@@ -2888,7 +2942,9 @@ def test_topic_graph_system_topic_not_orphaned():
 
     profile = BotProfile(
         topic_connections=[
-            TopicConnection(source_schema="s1", source_display="OnError", target_schema="s2", target_display="HandleError"),
+            TopicConnection(
+                source_schema="s1", source_display="OnError", target_schema="s2", target_display="HandleError"
+            ),
         ],
         components=[
             ComponentSummary(kind="DialogComponent", display_name="OnError", schema_name="s1", trigger_kind="OnError"),
@@ -2932,13 +2988,164 @@ def test_render_report_includes_knowledge_coverage():
     """render_report should include Knowledge Coverage section."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="KnowledgeSourceComponent", display_name="KB1",
-                             schema_name="ks1", source_kind="Web", state="Active"),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="KB1",
+                schema_name="ks1",
+                source_kind="Web",
+                state="Active",
+            ),
             # Add system topics so quick wins section doesn't dominate
             ComponentSummary(kind="DialogComponent", display_name="Error", schema_name="s1", trigger_kind="OnError"),
-            ComponentSummary(kind="DialogComponent", display_name="Fallback", schema_name="s2", trigger_kind="OnUnknownIntent"),
-            ComponentSummary(kind="DialogComponent", display_name="Escalate", schema_name="s3", trigger_kind="OnEscalate"),
+            ComponentSummary(
+                kind="DialogComponent", display_name="Fallback", schema_name="s2", trigger_kind="OnUnknownIntent"
+            ),
+            ComponentSummary(
+                kind="DialogComponent", display_name="Escalate", schema_name="s3", trigger_kind="OnEscalate"
+            ),
         ],
     )
     result = render_report(profile)
     assert "## Knowledge Source Coverage" in result
+
+
+# --- Custom Rule Engine tests ---
+
+
+def test_load_rules_yaml_valid():
+    """Load valid YAML -> correct CustomRule list."""
+    yaml_text = """
+rules:
+  - rule_id: CUSTOM001
+    severity: warning
+    category: Security
+    message: "App Insights must be configured"
+    condition:
+      field: "app_insights"
+      operator: not_exists
+  - rule_id: CUSTOM002
+    severity: fail
+    category: Agent
+    message: "Must have components"
+    condition:
+      field: "components"
+      operator: exists
+"""
+    rules = load_rules_yaml(yaml_text)
+    assert len(rules) == 2
+    assert rules[0].rule_id == "CUSTOM001"
+    assert rules[0].severity == "warning"
+    assert rules[0].condition.operator == "not_exists"
+    assert rules[1].rule_id == "CUSTOM002"
+    assert rules[1].category == "Agent"
+
+
+def test_load_rules_yaml_invalid_operator():
+    """Load YAML with invalid operator -> ValueError."""
+    yaml_text = """
+rules:
+  - rule_id: BAD001
+    severity: warning
+    category: Custom
+    message: "bad"
+    condition:
+      field: "app_insights"
+      operator: invalid_op
+"""
+    with pytest.raises(ValueError, match="Invalid operator"):
+        load_rules_yaml(yaml_text)
+
+
+def test_resolve_field_dotted_path():
+    """Resolve dotted path 'gpt_info.instructions' on BotProfile."""
+    profile = BotProfile(gpt_info=GptInfo(display_name="Test", instructions="Do stuff"))
+    values = _resolve_field(profile, "gpt_info.instructions")
+    assert values == ["Do stuff"]
+
+
+def test_resolve_field_components_array():
+    """Resolve components[].tool_type -> iterates all components."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="A", schema_name="a", tool_type="Connector"),
+            ComponentSummary(kind="DialogComponent", display_name="B", schema_name="b", tool_type="Flow"),
+            ComponentSummary(kind="DialogComponent", display_name="C", schema_name="c", tool_type=None),
+        ]
+    )
+    values = _resolve_field(profile, "components[].tool_type")
+    assert values == ["Connector", "Flow", None]
+
+
+def test_operator_eq():
+    """eq operator matches equal values."""
+    assert _apply_operator("hello", "eq", "hello") is True
+    assert _apply_operator("hello", "eq", "world") is False
+    assert _apply_operator(42, "eq", 42) is True
+
+
+def test_operator_ne():
+    """ne operator matches unequal values."""
+    assert _apply_operator("hello", "ne", "world") is True
+    assert _apply_operator("hello", "ne", "hello") is False
+
+
+def test_operator_contains():
+    """contains operator checks substring or list membership."""
+    assert _apply_operator("hello world", "contains", "world") is True
+    assert _apply_operator("hello world", "contains", "xyz") is False
+    assert _apply_operator(["a", "b"], "contains", "b") is True
+
+
+def test_operator_not_contains():
+    """not_contains operator checks absence."""
+    assert _apply_operator("hello world", "not_contains", "xyz") is True
+    assert _apply_operator("hello world", "not_contains", "world") is False
+
+
+def test_operator_matches():
+    """matches operator uses regex search."""
+    assert _apply_operator("error-code-42", "matches", r"error-code-\d+") is True
+    assert _apply_operator("no-match", "matches", r"error-code-\d+") is False
+
+
+def test_operator_exists():
+    """exists operator checks value is not None."""
+    assert _apply_operator("something", "exists", None) is True
+    assert _apply_operator(None, "exists", None) is False
+    assert _apply_operator(0, "exists", None) is True
+
+
+def test_operator_not_exists():
+    """not_exists operator checks value is None."""
+    assert _apply_operator(None, "not_exists", None) is True
+    assert _apply_operator("something", "not_exists", None) is False
+
+
+def test_evaluate_rules_against_profile():
+    """Evaluate rule against profile -> correct result dict."""
+    profile = BotProfile(
+        app_insights=AppInsightsConfig(configured=False),
+    )
+    rules = [
+        CustomRule(
+            rule_id="TEST001",
+            severity="warning",
+            category="Security",
+            message="App Insights not configured",
+            condition=RuleCondition(field="app_insights.configured", operator="eq", value=False),
+        )
+    ]
+    results = evaluate_rules(rules, profile)
+    assert len(results) == 1
+    assert results[0]["rule_id"] == "TEST001"
+    assert results[0]["severity"] == "warning"
+    assert results[0]["category"] == "Security"
+    assert results[0]["detail"] == "App Insights not configured"
+    assert results[0]["title"] == "TEST001"
+
+
+def test_evaluate_rules_empty_list():
+    """Empty rules list -> no extra results."""
+    profile = BotProfile()
+    results = evaluate_rules([], profile)
+    assert results == []

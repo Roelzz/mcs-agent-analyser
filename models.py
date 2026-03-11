@@ -208,6 +208,34 @@ class CreditEstimate(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+# --- Custom rule engine models ---
+
+_VALID_OPERATORS = frozenset(
+    {"eq", "ne", "gt", "lt", "gte", "lte", "contains", "not_contains", "matches", "exists", "not_exists"}
+)
+
+
+class RuleCondition(BaseModel):
+    field: str  # dotted path: "app_insights.configured", "components[].tool_type"
+    operator: str  # eq, ne, gt, lt, gte, lte, contains, not_contains, matches, exists, not_exists
+    value: str | int | float | bool | None = None
+
+    @field_validator("operator")
+    @classmethod
+    def operator_must_be_valid(cls, v: str) -> str:
+        if v not in _VALID_OPERATORS:
+            raise ValueError(f"Invalid operator '{v}'. Must be one of: {sorted(_VALID_OPERATORS)}")
+        return v
+
+
+class CustomRule(BaseModel):
+    rule_id: str
+    category: str = "Custom"
+    severity: str  # warning, fail, info
+    message: str
+    condition: RuleCondition
+
+
 # --- Renamer models ---
 
 

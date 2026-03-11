@@ -20,7 +20,7 @@ from .solution_xml import _check_solution_xml
 from .topics import _check_topics
 
 
-def check_solution_zip(zip_bytes: bytes) -> dict:
+def check_solution_zip(zip_bytes: bytes, *, custom_rules: list[dict] | None = None) -> dict:
     """Run all solution checks against a Power Platform solution ZIP.
 
     Args:
@@ -142,6 +142,32 @@ def check_solution_zip(zip_bytes: bytes) -> dict:
                     "Agent, topic, knowledge, and security checks are skipped.",
                 )
             )
+
+        # ── Custom rules ────────────────────────────────────────────────
+        if custom_rules and schema and _YAML_AVAILABLE:
+            try:
+                from custom_rules import evaluate_rules
+                from models import CustomRule
+                from parser import parse_yaml
+
+                # Find botContent YAML files and parse into a BotProfile
+                bot_content_files = list((work_dir / "bots" / schema).glob("**/botContent.yml"))
+                if not bot_content_files:
+                    bot_content_files = list((work_dir / "bots" / schema).glob("**/*.yml"))
+                if bot_content_files:
+                    profile, _ = parse_yaml(bot_content_files[0])
+                    parsed_rules = [CustomRule(**r) for r in custom_rules]
+                    results.extend(evaluate_rules(parsed_rules, profile))
+            except Exception as e:
+                results.append(
+                    {
+                        "rule_id": "CUSTOM_ERR",
+                        "category": "Custom",
+                        "title": "Custom rule evaluation error",
+                        "severity": "warning",
+                        "detail": str(e),
+                    }
+                )
 
     pass_count = sum(1 for r in results if r["severity"] == "pass")
     warn_count = sum(1 for r in results if r["severity"] == "warning")
