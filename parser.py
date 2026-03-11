@@ -473,6 +473,101 @@ def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
     return profile, schema_to_display
 
 
+def validate_connections(profile: BotProfile) -> list[dict]:
+    """Cross-reference connection_references against connector_definitions and component usage."""
+    issues: list[dict] = []
+
+    # Build sets
+    connector_ids = {cd.get("connectorId", "") for cd in profile.connector_definitions if cd.get("connectorId")}
+    ref_logical_names: list[str] = []
+    ref_connector_map: dict[str, str] = {}
+    for ref in profile.connection_references:
+        logical = ref.get("connectionReferenceLogicalName", "")
+        cid = ref.get("connectorId", "")
+        if logical:
+            ref_logical_names.append(logical)
+            ref_connector_map[logical] = cid
+
+    # Connection refs actually used by components
+    used_refs = {c.connection_reference for c in profile.components if c.connection_reference}
+
+    # Flag: missing connectors — connection ref points to unknown connector ID
+    for logical, cid in ref_connector_map.items():
+        if cid and cid not in connector_ids:
+            issues.append({
+                "severity": "warning",
+                "message": f"Missing connector definition for connection reference '{logical}'",
+                "detail": f"Connection reference '{logical}' points to connector ID '{cid}' which has no matching connector definition.",
+            })
+
+    # Flag: duplicate references — same logical name appears twice
+    seen: set[str] = set()
+    for name in ref_logical_names:
+        if name in seen:
+            issues.append({
+                "severity": "warning",
+                "message": f"Duplicate connection reference: '{name}'",
+                "detail": f"The logical name '{name}' appears more than once in connection references.",
+            })
+        seen.add(name)
+
+    # Flag: orphaned connectors — connector definition not referenced by any connection ref
+    referenced_connector_ids = set(ref_connector_map.values())
+    for cd in profile.connector_definitions:
+        cid = cd.get("connectorId", "")
+        if cid and cid not in referenced_connector_ids:
+            display = cd.get("displayName", cid)
+            issues.append({
+                "severity": "info",
+                "message": f"Orphaned connector definition: '{display}'",
+                "detail": f"Connector '{display}' (ID: {cid}) is defined but not referenced by any connection reference.",
+            })
+
+    # Flag: unused refs — connection ref not used by any component
+    ref_set = set(ref_logical_names)
+    for logical in ref_set - used_refs:
+        issues.append({
+            "severity": "info",
+            "message": f"Unused connection reference: '{logical}'",
+            "detail": f"Connection reference '{logical}' is defined but not used by any component.",
+        })
+
+    return issues
+
+
+def detect_trigger_overlaps(components: list[ComponentSummary]) -> list[dict]:
+    """Compare trigger queries across topics using normalized token overlap."""
+    # Filter DialogComponents with non-empty trigger_queries
+    topic_tokens: list[tuple[str, set[str]]] = []
+    for comp in components:
+        if comp.kind != "DialogComponent" or not comp.trigger_queries:
+            continue
+        tokens = set(" ".join(comp.trigger_queries).lower().split())
+        if len(tokens) < 3:
+            continue
+        topic_tokens.append((comp.display_name, tokens))
+
+    overlaps: list[dict] = []
+    for i, (name_a, tokens_a) in enumerate(topic_tokens):
+        for j in range(i + 1, len(topic_tokens)):
+            name_b, tokens_b = topic_tokens[j]
+            shared = tokens_a & tokens_b
+            min_len = min(len(tokens_a), len(tokens_b))
+            if min_len == 0:
+                continue
+            overlap_pct = len(shared) / min_len
+            if overlap_pct > 0.5:
+                overlaps.append({
+                    "topic_a": name_a,
+                    "topic_b": name_b,
+                    "overlap_pct": round(overlap_pct * 100, 1),
+                    "shared_tokens": sorted(shared),
+                })
+
+    overlaps.sort(key=lambda x: x["overlap_pct"], reverse=True)
+    return overlaps
+
+
 def parse_dialog_json(path: Path) -> list[dict]:
     """Parse dialog.json and return activities sorted by position."""
     with open(path, encoding="utf-8") as f:

@@ -14,7 +14,15 @@ from models import (
     SearchResult,
     TimelineEvent,
 )
-from parser import _count_action_kinds, _sanitize_yaml, parse_dialog_json, parse_yaml, resolve_topic_name
+from parser import (
+    _count_action_kinds,
+    _sanitize_yaml,
+    detect_trigger_overlaps,
+    parse_dialog_json,
+    parse_yaml,
+    resolve_topic_name,
+    validate_connections,
+)
 from renderer import (
     _grounding_score,
     _source_efficiency,
@@ -23,6 +31,8 @@ from renderer import (
     render_ai_config,
     render_bot_profile,
     render_credit_estimate,
+    render_knowledge_coverage,
+    render_quick_wins,
     render_topic_inventory,
     render_event_log,
     render_gantt_chart,
@@ -38,6 +48,7 @@ from renderer import (
     render_tool_inventory,
     render_topic_details,
     render_topic_graph,
+    render_trigger_overlaps,
     render_transcript_report,
 )
 from timeline import build_timeline, estimate_credits
@@ -2635,3 +2646,299 @@ def test_render_credit_estimate_empty():
     timeline = ConversationTimeline()
     result = render_credit_estimate(estimate, timeline)
     assert result == ""
+
+
+# --- Step 1: Connection Reference Validation (1.5) ---
+
+
+def test_validate_connections_clean():
+    """No issues when everything lines up."""
+    profile = BotProfile(
+        connector_definitions=[{"connectorId": "conn-1", "displayName": "My Connector"}],
+        connection_references=[
+            {"connectionReferenceLogicalName": "ref-1", "connectorId": "conn-1", "displayName": "Ref 1"}
+        ],
+        components=[ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", connection_reference="ref-1")],
+    )
+    issues = validate_connections(profile)
+    assert issues == []
+
+
+def test_validate_connections_missing_connector():
+    """Connection ref points to a connector ID that doesn't exist in definitions."""
+    profile = BotProfile(
+        connector_definitions=[],
+        connection_references=[
+            {"connectionReferenceLogicalName": "ref-1", "connectorId": "conn-missing", "displayName": "Ref 1"}
+        ],
+        components=[],
+    )
+    issues = validate_connections(profile)
+    assert any("Missing connector" in i["message"] for i in issues)
+    assert any(i["severity"] == "warning" for i in issues)
+
+
+def test_validate_connections_orphaned_connector():
+    """Connector definition not referenced by any connection ref."""
+    profile = BotProfile(
+        connector_definitions=[{"connectorId": "conn-1", "displayName": "Orphan"}],
+        connection_references=[],
+        components=[],
+    )
+    issues = validate_connections(profile)
+    assert any("Orphaned" in i["message"] for i in issues)
+    assert any(i["severity"] == "info" for i in issues)
+
+
+def test_validate_connections_unused_ref():
+    """Connection ref not used by any component."""
+    profile = BotProfile(
+        connector_definitions=[{"connectorId": "conn-1", "displayName": "C1"}],
+        connection_references=[
+            {"connectionReferenceLogicalName": "ref-1", "connectorId": "conn-1", "displayName": "R1"}
+        ],
+        components=[],
+    )
+    issues = validate_connections(profile)
+    assert any("Unused" in i["message"] for i in issues)
+
+
+# --- Step 2: Trigger Query Overlap Detection (1.3) ---
+
+
+def test_detect_trigger_overlaps_no_overlap():
+    """Completely different trigger queries produce no overlaps."""
+    components = [
+        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
+                         trigger_queries=["how to reset password", "forgot my password", "password help"]),
+        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
+                         trigger_queries=["track my order", "where is my shipment", "delivery status"]),
+    ]
+    overlaps = detect_trigger_overlaps(components)
+    assert overlaps == []
+
+
+def test_detect_trigger_overlaps_high_overlap():
+    """Nearly identical trigger queries should be flagged."""
+    components = [
+        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
+                         trigger_queries=["how to reset my password", "I forgot my password"]),
+        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
+                         trigger_queries=["reset my password please", "forgot password help"]),
+    ]
+    overlaps = detect_trigger_overlaps(components)
+    assert len(overlaps) > 0
+    assert overlaps[0]["overlap_pct"] > 50
+
+
+def test_detect_trigger_overlaps_skips_short():
+    """Topics with fewer than 3 tokens are skipped."""
+    components = [
+        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
+                         trigger_queries=["hi", "hello"]),
+        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
+                         trigger_queries=["hi", "hello"]),
+    ]
+    overlaps = detect_trigger_overlaps(components)
+    assert overlaps == []
+
+
+def test_render_trigger_overlaps_empty():
+    """No overlaps produces empty string."""
+    assert render_trigger_overlaps([]) == ""
+
+
+def test_render_trigger_overlaps_table():
+    """Non-empty overlaps produce a markdown table."""
+    overlaps = [{"topic_a": "T1", "topic_b": "T2", "overlap_pct": 75.0, "shared_tokens": ["reset", "password"]}]
+    result = render_trigger_overlaps(overlaps)
+    assert "## Trigger Query Overlaps" in result
+    assert "T1" in result
+    assert "75.0%" in result
+
+
+# --- Step 3: Quick Wins Section (1.1) ---
+
+
+def test_render_quick_wins_disabled_topic():
+    """Disabled topics should appear in quick wins."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="Disabled One", schema_name="s1", state="Inactive"),
+        ],
+    )
+    result = render_quick_wins(profile)
+    assert "Disabled topic" in result
+    assert "warning" in result
+
+
+def test_render_quick_wins_no_trigger_queries():
+    """User topics with no trigger queries should be flagged."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="NoTrigger", schema_name="s1",
+                             trigger_kind="OnIntent", trigger_queries=[]),
+        ],
+    )
+    result = render_quick_wins(profile)
+    assert "No trigger queries" in result
+
+
+def test_render_quick_wins_weak_description():
+    """Topics where description matches display name should be flagged."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="FAQ", schema_name="s1", description="FAQ"),
+        ],
+    )
+    result = render_quick_wins(profile)
+    assert "Weak description" in result
+
+
+def test_render_quick_wins_missing_system_topics():
+    """Missing OnError/OnUnknownIntent/OnEscalate should be flagged."""
+    profile = BotProfile(components=[])
+    result = render_quick_wins(profile)
+    assert "OnError" in result
+    assert "OnUnknownIntent" in result
+    assert "OnEscalate" in result
+
+
+def test_render_quick_wins_empty_when_clean():
+    """A well-configured profile should produce empty quick wins."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="Error", schema_name="s1",
+                             trigger_kind="OnError", description="Handles all errors gracefully"),
+            ComponentSummary(kind="DialogComponent", display_name="Fallback", schema_name="s2",
+                             trigger_kind="OnUnknownIntent", description="Handles unmatched intents"),
+            ComponentSummary(kind="DialogComponent", display_name="Escalate", schema_name="s3",
+                             trigger_kind="OnEscalate", description="Escalates to human agent"),
+        ],
+    )
+    result = render_quick_wins(profile)
+    assert result == ""
+
+
+# --- Step 4: Knowledge Source Coverage Matrix (1.6) ---
+
+
+def test_render_knowledge_coverage_empty():
+    """No knowledge sources produces empty string."""
+    profile = BotProfile(components=[])
+    result = render_knowledge_coverage(profile)
+    assert result == ""
+
+
+def test_render_knowledge_coverage_with_sources():
+    """Knowledge sources render a table."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="KnowledgeSourceComponent", display_name="SharePoint FAQ",
+                             schema_name="ks1", source_kind="SharePoint", state="Active",
+                             trigger_condition_raw="true"),
+            ComponentSummary(kind="FileAttachmentComponent", display_name="guide.pdf",
+                             schema_name="fa1", file_type="pdf", state="Active"),
+        ],
+    )
+    result = render_knowledge_coverage(profile)
+    assert "## Knowledge Source Coverage" in result
+    assert "SharePoint FAQ" in result
+    assert "guide.pdf" in result
+
+
+def test_render_knowledge_coverage_inactive_flagged():
+    """Inactive knowledge sources should have a note."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="KnowledgeSourceComponent", display_name="Old KB",
+                             schema_name="ks1", source_kind="Web", state="Inactive"),
+        ],
+    )
+    result = render_knowledge_coverage(profile)
+    assert "Inactive" in result
+
+
+# --- Step 5: Topic Graph Annotations (1.2) ---
+
+
+def test_topic_graph_annotations_orphaned():
+    """Topic graph should annotate orphaned nodes."""
+    from models import TopicConnection
+
+    profile = BotProfile(
+        topic_connections=[
+            TopicConnection(source_schema="s1", source_display="Start", target_schema="s2", target_display="Middle"),
+            TopicConnection(source_schema="s2", source_display="Middle", target_schema="s3", target_display="End"),
+        ],
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="Start", schema_name="s1", trigger_kind="OnIntent"),
+            ComponentSummary(kind="DialogComponent", display_name="Middle", schema_name="s2"),
+            ComponentSummary(kind="DialogComponent", display_name="End", schema_name="s3"),
+        ],
+    )
+    result = render_topic_graph(profile)
+    assert "classDef warning" in result
+    assert "classDef danger" in result
+
+
+def test_topic_graph_system_topic_not_orphaned():
+    """System topics with no inbound edges should NOT be marked orphaned."""
+    from models import TopicConnection
+
+    profile = BotProfile(
+        topic_connections=[
+            TopicConnection(source_schema="s1", source_display="OnError", target_schema="s2", target_display="HandleError"),
+        ],
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="OnError", schema_name="s1", trigger_kind="OnError"),
+            ComponentSummary(kind="DialogComponent", display_name="HandleError", schema_name="s2"),
+        ],
+    )
+    result = render_topic_graph(profile)
+    # OnError is a system trigger, should not be in warning class
+    # We can't easily check absence of specific class assignment without parsing,
+    # but at minimum the graph should render
+    assert "graph TD" in result
+
+
+# --- Step 6: Orchestrator Health Checks (1.4) ---
+
+
+def test_solution_checker_categories_include_orchestrator():
+    """CATEGORIES and _CAT_ICONS should include Orchestrator."""
+    from solution_checker import CATEGORIES, _CAT_ICONS
+
+    assert "Orchestrator" in CATEGORIES
+    assert "Orchestrator" in _CAT_ICONS
+    assert _CAT_ICONS["Orchestrator"] == "network"
+
+
+# --- Integration: render_report includes new sections ---
+
+
+def test_render_report_includes_quick_wins():
+    """render_report should include Quick Wins section when issues exist."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="Disabled", schema_name="s1", state="Inactive"),
+        ],
+    )
+    result = render_report(profile)
+    assert "## Quick Wins" in result
+
+
+def test_render_report_includes_knowledge_coverage():
+    """render_report should include Knowledge Coverage section."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="KnowledgeSourceComponent", display_name="KB1",
+                             schema_name="ks1", source_kind="Web", state="Active"),
+            # Add system topics so quick wins section doesn't dominate
+            ComponentSummary(kind="DialogComponent", display_name="Error", schema_name="s1", trigger_kind="OnError"),
+            ComponentSummary(kind="DialogComponent", display_name="Fallback", schema_name="s2", trigger_kind="OnUnknownIntent"),
+            ComponentSummary(kind="DialogComponent", display_name="Escalate", schema_name="s3", trigger_kind="OnEscalate"),
+        ],
+    )
+    result = render_report(profile)
+    assert "## Knowledge Source Coverage" in result

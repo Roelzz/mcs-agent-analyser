@@ -705,7 +705,74 @@ def render_topic_graph(profile: BotProfile) -> str:
         edges = [(s, t, c) for s, t, c in edges if s in keep and t in keep]
         truncated = True
 
+    # Build schema_to_component lookup for annotation checks
+    schema_to_component: dict[str, ComponentSummary] = {}
+    display_to_schema: dict[str, str] = {}
+    for comp in profile.components:
+        if comp.schema_name:
+            schema_to_component[comp.schema_name] = comp
+        if comp.display_name:
+            display_to_schema[comp.display_name] = comp.schema_name
+
+    # Build inbound/outbound maps from edges
+    inbound: dict[str, set[str]] = {nid: set() for nid in nodes}
+    outbound: dict[str, set[str]] = {nid: set() for nid in nodes}
+    for src, tgt, _ in edges:
+        outbound.setdefault(src, set()).add(tgt)
+        inbound.setdefault(tgt, set()).add(src)
+
+    # Detect orphaned topics (no inbound edges, excluding system/automation entry points)
+    orphaned_nodes: set[str] = set()
+    for nid, display in nodes.items():
+        if inbound.get(nid):
+            continue
+        schema = display_to_schema.get(display, "")
+        comp = schema_to_component.get(schema)
+        if comp and comp.trigger_kind and comp.trigger_kind in (_SYSTEM_TRIGGERS | _AUTOMATION_TRIGGERS):
+            continue
+        orphaned_nodes.add(nid)
+
+    # Detect dead ends (no outbound edges and no EndConversation/TransferToAgent)
+    dead_end_nodes: set[str] = set()
+    for nid, display in nodes.items():
+        if outbound.get(nid):
+            continue
+        schema = display_to_schema.get(display, "")
+        comp = schema_to_component.get(schema)
+        if comp and comp.action_summary:
+            has_terminal = any(
+                k in comp.action_summary
+                for k in ("EndConversation", "TransferToAgent", "EscalateToAgent")
+            )
+            if has_terminal:
+                continue
+        dead_end_nodes.add(nid)
+
+    # Detect cycles via DFS
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = {nid: WHITE for nid in nodes}
+    cycle_nodes: set[str] = set()
+    adj: dict[str, list[str]] = {nid: [] for nid in nodes}
+    for src, tgt, _ in edges:
+        adj[src].append(tgt)
+
+    def _dfs(node: str) -> None:
+        color[node] = GRAY
+        for neighbor in adj.get(node, []):
+            if color.get(neighbor) == GRAY:
+                cycle_nodes.add(node)
+                cycle_nodes.add(neighbor)
+            elif color.get(neighbor) == WHITE:
+                _dfs(neighbor)
+        color[node] = BLACK
+
+    for nid in nodes:
+        if color.get(nid) == WHITE:
+            _dfs(nid)
+
     lines = ["## Topic Connection Graph\n", "```mermaid", '%%{init: {"useMaxWidth": false}}%%', "graph TD"]
+    lines.append("    classDef warning fill:#fef3cd,stroke:#856404,color:#856404")
+    lines.append("    classDef danger fill:#f8d7da,stroke:#842029,color:#842029")
 
     if truncated:
         lines.append(f"    %% Diagram truncated to {max_nodes} most-connected nodes")
@@ -721,7 +788,28 @@ def render_topic_graph(profile: BotProfile) -> str:
         else:
             lines.append(f"    {src} --> {tgt}")
 
+    for nid in orphaned_nodes | dead_end_nodes:
+        if nid in nodes:
+            lines.append(f"    class {nid} warning")
+    for nid in cycle_nodes:
+        if nid in nodes:
+            lines.append(f"    class {nid} danger")
+
     lines.append("```")
+
+    # Legend
+    has_annotations = orphaned_nodes or dead_end_nodes or cycle_nodes
+    if has_annotations:
+        lines.append("")
+        legend_parts: list[str] = []
+        if orphaned_nodes:
+            legend_parts.append(f"**Yellow:** orphaned topics ({len(orphaned_nodes)}) or dead ends ({len(dead_end_nodes)})")
+        elif dead_end_nodes:
+            legend_parts.append(f"**Yellow:** dead-end topics ({len(dead_end_nodes)})")
+        if cycle_nodes:
+            legend_parts.append(f"**Red:** cycle detected ({len(cycle_nodes)} nodes)")
+        lines.append("*Legend: " + " · ".join(legend_parts) + "*")
+
     lines.append("")
 
     result = "\n".join(lines)
@@ -1440,6 +1528,150 @@ def render_knowledge_inventory(profile: BotProfile) -> str:
     return "\n".join(lines)
 
 
+def render_quick_wins(profile: BotProfile) -> str:
+    """Surface actionable issues the user would miss reading raw config."""
+    from parser import validate_connections
+
+    findings: list[str] = []
+    n = 0
+
+    # 1. Disabled topics
+    for comp in profile.components:
+        if comp.kind == "DialogComponent" and comp.state != "Active":
+            n += 1
+            findings.append(
+                f"{n}. **warning** — Disabled topic: \"{comp.display_name}\" — "
+                "Topic is inactive. Enable or remove to reduce clutter."
+            )
+
+    # 2. No trigger queries (user topics only)
+    for comp in profile.components:
+        if (
+            comp.kind == "DialogComponent"
+            and not comp.trigger_queries
+            and comp.trigger_kind
+            and comp.trigger_kind not in _SYSTEM_TRIGGERS
+            and comp.trigger_kind not in _AUTOMATION_TRIGGERS
+        ):
+            n += 1
+            findings.append(
+                f"{n}. **warning** — No trigger queries: \"{comp.display_name}\" — "
+                "User topic has no trigger phrases. It may never be matched by the recognizer."
+            )
+
+    # 3. Weak descriptions
+    for comp in profile.components:
+        if comp.kind == "DialogComponent":
+            desc = comp.description
+            if desc is None or len(desc) < 10 or desc.strip() == comp.display_name.strip():
+                reason = "missing" if desc is None else (
+                    "too short" if len(desc) < 10 else "matches display name"
+                )
+                n += 1
+                findings.append(
+                    f"{n}. **info** — Weak description: \"{comp.display_name}\" — "
+                    f"Description is {reason}."
+                )
+
+    # 4. Missing system topics
+    trigger_kinds = {c.trigger_kind for c in profile.components if c.trigger_kind}
+    for trigger in ("OnError", "OnUnknownIntent", "OnEscalate"):
+        if trigger not in trigger_kinds:
+            n += 1
+            findings.append(
+                f"{n}. **warning** — Missing system topic: {trigger} — "
+                "No handler for this lifecycle event."
+            )
+
+    # 5. Unused global variables (heuristic)
+    global_vars = [c for c in profile.components if c.kind == "GlobalVariableComponent"]
+    other_schemas = set()
+    for c in profile.components:
+        if c.kind != "GlobalVariableComponent":
+            if c.description:
+                other_schemas.add(c.description)
+            if c.schema_name:
+                other_schemas.add(c.schema_name)
+    all_text = " ".join(other_schemas)
+    for gv in global_vars:
+        if gv.schema_name and gv.schema_name not in all_text:
+            n += 1
+            findings.append(
+                f"{n}. **info** — Possibly unused variable: \"{gv.display_name}\" — "
+                "Schema name not found in other component references (heuristic)."
+            )
+
+    # 6. Connection reference issues
+    conn_issues = validate_connections(profile)
+    for issue in conn_issues:
+        n += 1
+        findings.append(f"{n}. **{issue['severity']}** — {issue['message']}")
+
+    if not findings:
+        return ""
+
+    lines = ["## Quick Wins\n"]
+    lines.extend(findings)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_trigger_overlaps(overlaps: list[dict]) -> str:
+    """Render trigger query overlap warnings as markdown table."""
+    if not overlaps:
+        return ""
+
+    lines = [
+        "## Trigger Query Overlaps\n",
+        "Topics with >50% token overlap in trigger phrases may cause disambiguation issues.\n",
+        "| Topic A | Topic B | Overlap | Shared Tokens |",
+        "|---------|---------|---------|---------------|",
+    ]
+    for o in overlaps:
+        shared = ", ".join(o["shared_tokens"][:8])
+        if len(o["shared_tokens"]) > 8:
+            shared += f" (+{len(o['shared_tokens']) - 8} more)"
+        lines.append(f"| {o['topic_a']} | {o['topic_b']} | {o['overlap_pct']}% | {shared} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_knowledge_coverage(profile: BotProfile) -> str:
+    """Render knowledge source status and coverage overview."""
+    ks_comps = [
+        c for c in profile.components
+        if c.kind in ("KnowledgeSourceComponent", "FileAttachmentComponent")
+    ]
+    if not ks_comps:
+        return ""
+
+    lines = [
+        "## Knowledge Source Coverage\n",
+        "| Name | Type | State | Trigger Condition | Notes |",
+        "|------|------|-------|-------------------|-------|",
+    ]
+
+    for comp in ks_comps:
+        name = comp.display_name or comp.schema_name
+        source_type = comp.source_kind or comp.file_type or comp.kind.replace("Component", "")
+        state = comp.state
+        trigger = comp.trigger_condition_raw or "—"
+
+        notes_parts: list[str] = []
+        if state != "Active":
+            notes_parts.append("Inactive")
+        if trigger in ("false", "False"):
+            notes_parts.append("Trigger disabled")
+        elif trigger in ("—", "None"):
+            notes_parts.append("Always-on")
+        notes = "; ".join(notes_parts) if notes_parts else "—"
+
+        lines.append(f"| {name} | {source_type} | {state} | {trigger} | {notes} |")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
 def render_credit_estimate(estimate: CreditEstimate, timeline: ConversationTimeline) -> str:
     """Render credit estimation section with summary, breakdown table, and Mermaid diagram."""
     if not estimate or not estimate.line_items:
@@ -1656,6 +1888,18 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline | None = N
     # 2. TL;DR
     sections.append(render_tldr(profile, timeline, credit_estimate))
 
+    # 2.5 Quick Wins
+    quick_wins = render_quick_wins(profile)
+    if quick_wins:
+        sections.append(quick_wins)
+
+    # 2.6 Trigger Overlaps
+    from parser import detect_trigger_overlaps
+    overlaps = detect_trigger_overlaps(profile.components)
+    trigger_overlap_section = render_trigger_overlaps(overlaps)
+    if trigger_overlap_section:
+        sections.append(trigger_overlap_section)
+
     # 3. AI Config (includes system instructions)
     ai_config = render_ai_config(profile)
     if ai_config:
@@ -1712,6 +1956,11 @@ def render_report(profile: BotProfile, timeline: ConversationTimeline | None = N
     ka = render_knowledge_inventory(profile)
     if ka:
         sections.append(ka)
+
+    # 14.5 Knowledge Coverage
+    kcm = render_knowledge_coverage(profile)
+    if kcm:
+        sections.append(kcm)
 
     # --- Deep dive (runtime trace detail) ---
 
