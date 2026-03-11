@@ -31,19 +31,19 @@ MODEL_HINT_MAP: dict[str, tuple[str, str]] = {
     "gpt-5.3-chat": ("openai", "gpt-5"),
     "GPT54Reasoning": ("openai", "gpt-5"),
     "gpt-5.4-reasoning": ("openai", "gpt-5"),
-    # Anthropic
-    "Sonnet45": ("anthropic", "claude-sonnet-4-5-20250514"),
-    "sonnet4-5": ("anthropic", "claude-sonnet-4-5-20250514"),
-    "sonnet45": ("anthropic", "claude-sonnet-4-5-20250514"),
-    "claude-sonnet-4-5": ("anthropic", "claude-sonnet-4-5-20250514"),
-    "Sonnet46": ("anthropic", "claude-sonnet-4-6-20250514"),
-    "sonnet4-6": ("anthropic", "claude-sonnet-4-6-20250514"),
-    "sonnet46": ("anthropic", "claude-sonnet-4-6-20250514"),
-    "claude-sonnet-4-6": ("anthropic", "claude-sonnet-4-6-20250514"),
-    "Opus46": ("anthropic", "claude-opus-4-6-20250514"),
-    "opus4-6": ("anthropic", "claude-opus-4-6-20250514"),
-    "opus46": ("anthropic", "claude-opus-4-6-20250514"),
-    "claude-opus-4-6": ("anthropic", "claude-opus-4-6-20250514"),
+    # Anthropic (using aliases — no date suffix needed)
+    "Sonnet45": ("anthropic", "claude-sonnet-4-5"),
+    "sonnet4-5": ("anthropic", "claude-sonnet-4-5"),
+    "sonnet45": ("anthropic", "claude-sonnet-4-5"),
+    "claude-sonnet-4-5": ("anthropic", "claude-sonnet-4-5"),
+    "Sonnet46": ("anthropic", "claude-sonnet-4-6"),
+    "sonnet4-6": ("anthropic", "claude-sonnet-4-6"),
+    "sonnet46": ("anthropic", "claude-sonnet-4-6"),
+    "claude-sonnet-4-6": ("anthropic", "claude-sonnet-4-6"),
+    "Opus46": ("anthropic", "claude-opus-4-6"),
+    "opus4-6": ("anthropic", "claude-opus-4-6"),
+    "opus46": ("anthropic", "claude-opus-4-6"),
+    "claude-opus-4-6": ("anthropic", "claude-opus-4-6"),
 }
 
 _FALLBACK_PROVIDER = "openai"

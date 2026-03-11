@@ -21,19 +21,19 @@ def test_resolve_model_known_hints():
     assert resolve_model("gpt-4.1") == ("openai", "gpt-4.1", False)
     assert resolve_model("gpt-5-chat") == ("openai", "gpt-5", False)
     # Anthropic — PascalCase
-    assert resolve_model("Sonnet45") == ("anthropic", "claude-sonnet-4-5-20250514", False)
-    assert resolve_model("Sonnet46") == ("anthropic", "claude-sonnet-4-6-20250514", False)
-    assert resolve_model("Opus46") == ("anthropic", "claude-opus-4-6-20250514", False)
+    assert resolve_model("Sonnet45") == ("anthropic", "claude-sonnet-4-5", False)
+    assert resolve_model("Sonnet46") == ("anthropic", "claude-sonnet-4-6", False)
+    assert resolve_model("Opus46") == ("anthropic", "claude-opus-4-6", False)
     # Anthropic — kebab-case (actual YAML values)
-    assert resolve_model("sonnet4-5") == ("anthropic", "claude-sonnet-4-5-20250514", False)
-    assert resolve_model("sonnet4-6") == ("anthropic", "claude-sonnet-4-6-20250514", False)
-    assert resolve_model("opus4-6") == ("anthropic", "claude-opus-4-6-20250514", False)
+    assert resolve_model("sonnet4-5") == ("anthropic", "claude-sonnet-4-5", False)
+    assert resolve_model("sonnet4-6") == ("anthropic", "claude-sonnet-4-6", False)
+    assert resolve_model("opus4-6") == ("anthropic", "claude-opus-4-6", False)
 
 
 def test_resolve_model_case_insensitive():
     assert resolve_model("gpt41") == ("openai", "gpt-4.1", False)
-    assert resolve_model("SONNET45") == ("anthropic", "claude-sonnet-4-5-20250514", False)
-    assert resolve_model("OPUS46") == ("anthropic", "claude-opus-4-6-20250514", False)
+    assert resolve_model("SONNET45") == ("anthropic", "claude-sonnet-4-5", False)
+    assert resolve_model("OPUS46") == ("anthropic", "claude-opus-4-6", False)
 
 
 def test_resolve_model_unknown_falls_back():
@@ -157,12 +157,12 @@ async def test_run_lint_mock_anthropic():
     with patch("linter.AsyncAnthropic", return_value=mock_client):
         report, model_used = await run_lint(profile, anthropic_api_key="fake-key")
 
-    assert model_used == "claude-sonnet-4-6-20250514"
-    assert "claude-sonnet-4-6-20250514" in report
+    assert model_used == "claude-sonnet-4-6"
+    assert "claude-sonnet-4-6" in report
     assert "Instruction Clarity" in report
     mock_client.messages.create.assert_called_once()
     call_kwargs = mock_client.messages.create.call_args.kwargs
-    assert call_kwargs["model"] == "claude-sonnet-4-6-20250514"
+    assert call_kwargs["model"] == "claude-sonnet-4-6"
     assert "system" in call_kwargs
     assert len(call_kwargs["system"]) > 0
     assert call_kwargs["temperature"] == 0.3
