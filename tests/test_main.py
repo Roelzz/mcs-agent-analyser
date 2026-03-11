@@ -3212,6 +3212,28 @@ def test_default_rules_auto_load(monkeypatch, tmp_path):
     assert rules2 == rules
 
 
+def test_default_rules_auto_load_fallback_no_env(monkeypatch):
+    """get_custom_rules() falls back to data/default_rules.yaml when no env var is set."""
+    from web.state._rules import RulesMixin
+
+    monkeypatch.delenv("CUSTOM_RULES_FILE", raising=False)
+
+    class FakeState:
+        custom_rules_yaml: str = ""
+        custom_rules_parsed: list[dict] = []
+        _custom_rules_dicts: list[dict] = []
+        rules_parse_error: str = ""
+        rules_count: int = 0
+
+    obj = FakeState()
+    obj._reparse_rules = RulesMixin._reparse_rules.__get__(obj)
+    obj.get_custom_rules = RulesMixin.get_custom_rules.__get__(obj)
+
+    rules = obj.get_custom_rules()
+    assert len(rules) == 18
+    assert all(r["rule_id"].startswith("BP") for r in rules)
+
+
 def test_default_rules_no_auto_load_when_user_has_rules(monkeypatch, tmp_path):
     """get_custom_rules() does NOT auto-load if user already has rules set."""
     from web.state._rules import RulesMixin
