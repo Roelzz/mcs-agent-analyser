@@ -3237,6 +3237,78 @@ def test_default_rules_no_auto_load_when_user_has_rules(monkeypatch, tmp_path):
     assert rules == []
 
 
+# --- Custom rules in quick wins / report ---
+
+
+def test_render_quick_wins_with_custom_rules():
+    """Custom rules that trigger appear in quick wins; non-triggering rules are absent."""
+    profile = BotProfile(
+        display_name="TestBot",
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Greeting",
+                schema_name="cr_greeting",
+                trigger_kind="OnUnknownIntent",
+            ),
+        ],
+        authentication_mode="None",
+    )
+    rules = [
+        {
+            "rule_id": "BP-TEST-TRIGGER",
+            "category": "security",
+            "severity": "warning",
+            "message": "Auth should not be None",
+            "condition": {"field": "authentication_mode", "operator": "eq", "value": "None"},
+        },
+        {
+            "rule_id": "BP-TEST-SKIP",
+            "category": "security",
+            "severity": "fail",
+            "message": "Should not fire",
+            "condition": {"field": "authentication_mode", "operator": "eq", "value": "OAuth"},
+        },
+    ]
+    output = render_quick_wins(profile, custom_rules=rules)
+    assert "[BP-TEST-TRIGGER]" in output
+    assert "Auth should not be None" in output
+    assert "BP-TEST-SKIP" not in output
+
+
+def test_render_quick_wins_custom_rules_none():
+    """custom_rules=None is backwards-compatible, no crash."""
+    profile = BotProfile(
+        display_name="TestBot",
+        components=[],
+    )
+    # Should not raise
+    output = render_quick_wins(profile, custom_rules=None)
+    # Empty profile with no issues → empty string
+    assert isinstance(output, str)
+
+
+def test_render_report_includes_custom_rules():
+    """render_report() passes custom rules through to quick wins section."""
+    profile = BotProfile(
+        display_name="TestBot",
+        components=[],
+        generative_actions_enabled=True,
+    )
+    rules = [
+        {
+            "rule_id": "BP-GEN-CHECK",
+            "category": "design",
+            "severity": "info",
+            "message": "Generative actions are enabled",
+            "condition": {"field": "generative_actions_enabled", "operator": "eq", "value": True},
+        },
+    ]
+    md = render_report(profile, custom_rules=rules)
+    assert "[BP-GEN-CHECK]" in md
+    assert "Generative actions are enabled" in md
+
+
 # --- Bot Comparison / Diff tests ---
 
 

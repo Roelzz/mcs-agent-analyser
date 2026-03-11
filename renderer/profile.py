@@ -441,7 +441,7 @@ def render_knowledge_inventory(profile: BotProfile) -> str:
     return "\n".join(lines)
 
 
-def render_quick_wins(profile: BotProfile) -> str:
+def render_quick_wins(profile: BotProfile, custom_rules: list[dict] | None = None) -> str:
     """Surface actionable issues the user would miss reading raw config."""
     from parser import validate_connections
 
@@ -513,6 +513,19 @@ def render_quick_wins(profile: BotProfile) -> str:
     for issue in conn_issues:
         n += 1
         findings.append(f"{n}. **{issue['severity']}** — {issue['message']}")
+
+    # 7. Custom rules (YAML-defined, user-configurable)
+    if custom_rules:
+        from custom_rules import evaluate_rules
+        from models import CustomRule
+
+        parsed = [CustomRule(**r) for r in custom_rules]
+        rule_results = evaluate_rules(parsed, profile)
+        for result in rule_results:
+            n += 1
+            findings.append(
+                f"{n}. **{result['severity']}** — [{result['rule_id']}] {result['detail']}"
+            )
 
     if not findings:
         return ""

@@ -52,6 +52,7 @@ def render_report(
     profile: BotProfile,
     timeline: ConversationTimeline | None = None,
     instruction_diff: InstructionDiff | None = None,
+    custom_rules: list[dict] | None = None,
 ) -> str:
     """Render complete Markdown report.
 
@@ -91,7 +92,7 @@ def render_report(
         sections.append(render_instruction_drift(instruction_diff))
 
     # 2.5 Quick Wins
-    quick_wins = render_quick_wins(profile)
+    quick_wins = render_quick_wins(profile, custom_rules=custom_rules)
     if quick_wins:
         sections.append(quick_wins)
 

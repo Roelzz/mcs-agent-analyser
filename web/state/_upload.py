@@ -161,7 +161,8 @@ class UploadMixin(rx.State, mixin=True):
             profile, schema_lookup = parse_yaml(yaml_files[0])
             activities = parse_dialog_json(json_files[0])
             timeline = build_timeline(activities, schema_lookup)
-            self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
+            custom = self.get_custom_rules() or None  # type: ignore[attr-defined]
+            self.report_markdown = render_report(profile, timeline, custom_rules=custom)  # type: ignore[attr-defined]
             self.report_title = profile.display_name  # type: ignore[attr-defined]
             self.report_source = "upload"  # type: ignore[attr-defined]
             self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
@@ -199,7 +200,8 @@ class UploadMixin(rx.State, mixin=True):
             profile, schema_lookup = parse_yaml(yml_path)
             activities = parse_dialog_json(json_path)
             timeline = build_timeline(activities, schema_lookup)
-            self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
+            custom = self.get_custom_rules() or None  # type: ignore[attr-defined]
+            self.report_markdown = render_report(profile, timeline, custom_rules=custom)  # type: ignore[attr-defined]
             self.report_title = profile.display_name  # type: ignore[attr-defined]
             self.report_source = "upload"  # type: ignore[attr-defined]
             self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]

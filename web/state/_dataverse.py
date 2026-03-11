@@ -420,9 +420,10 @@ class DataverseMixin(rx.State, mixin=True):
                     bool(self.bot_profile_json),
                     len(self.bot_profile_json),  # type: ignore[attr-defined]
                 )
+                custom = self.get_custom_rules() or None  # type: ignore[attr-defined]
                 if self.bot_profile_json:  # type: ignore[attr-defined]
                     profile = BotProfile.model_validate_json(self.bot_profile_json)  # type: ignore[attr-defined]
-                    self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
+                    self.report_markdown = render_report(profile, timeline, custom_rules=custom)  # type: ignore[attr-defined]
                     self.report_title = profile.display_name  # type: ignore[attr-defined]
                     instruction_diff = save_snapshot(profile)
                     if instruction_diff and instruction_diff.is_significant:
@@ -502,9 +503,10 @@ class DataverseMixin(rx.State, mixin=True):
                     bool(self.bot_profile_json),
                     len(self.bot_profile_json),  # type: ignore[attr-defined]
                 )
+                custom = self.get_custom_rules() or None  # type: ignore[attr-defined]
                 if self.bot_profile_json:  # type: ignore[attr-defined]
                     profile = BotProfile.model_validate_json(self.bot_profile_json)  # type: ignore[attr-defined]
-                    self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
+                    self.report_markdown = render_report(profile, timeline, custom_rules=custom)  # type: ignore[attr-defined]
                     self.report_title = profile.display_name  # type: ignore[attr-defined]
                     instruction_diff = save_snapshot(profile)
                     if instruction_diff and instruction_diff.is_significant:
@@ -565,7 +567,8 @@ class DataverseMixin(rx.State, mixin=True):
                 len(profile.components),
             )
 
-            self.report_markdown = render_report(profile)  # type: ignore[attr-defined]
+            custom = self.get_custom_rules() or None  # type: ignore[attr-defined]
+            self.report_markdown = render_report(profile, custom_rules=custom)  # type: ignore[attr-defined]
             self.report_title = profile.display_name  # type: ignore[attr-defined]
             self.report_source = "import"  # type: ignore[attr-defined]
             self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
