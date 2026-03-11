@@ -4,6 +4,7 @@ import pytest
 
 from models import (
     AppInsightsConfig,
+    BatchAnalyticsSummary,
     BotProfile,
     ComponentSummary,
     ConversationTimeline,
@@ -14,6 +15,7 @@ from models import (
     SearchResult,
     TimelineEvent,
 )
+from batch_analytics import aggregate_timelines, render_batch_report
 from parser import (
     _count_action_kinds,
     detect_trigger_overlaps,
@@ -2658,7 +2660,9 @@ def test_validate_connections_clean():
         connection_references=[
             {"connectionReferenceLogicalName": "ref-1", "connectorId": "conn-1", "displayName": "Ref 1"}
         ],
-        components=[ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", connection_reference="ref-1")],
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", connection_reference="ref-1")
+        ],
     )
     issues = validate_connections(profile)
     assert issues == []
@@ -2709,10 +2713,18 @@ def test_validate_connections_unused_ref():
 def test_detect_trigger_overlaps_no_overlap():
     """Completely different trigger queries produce no overlaps."""
     components = [
-        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
-                         trigger_queries=["how to reset password", "forgot my password", "password help"]),
-        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
-                         trigger_queries=["track my order", "where is my shipment", "delivery status"]),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T1",
+            schema_name="s1",
+            trigger_queries=["how to reset password", "forgot my password", "password help"],
+        ),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T2",
+            schema_name="s2",
+            trigger_queries=["track my order", "where is my shipment", "delivery status"],
+        ),
     ]
     overlaps = detect_trigger_overlaps(components)
     assert overlaps == []
@@ -2721,10 +2733,18 @@ def test_detect_trigger_overlaps_no_overlap():
 def test_detect_trigger_overlaps_high_overlap():
     """Nearly identical trigger queries should be flagged."""
     components = [
-        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
-                         trigger_queries=["how to reset my password", "I forgot my password"]),
-        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
-                         trigger_queries=["reset my password please", "forgot password help"]),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T1",
+            schema_name="s1",
+            trigger_queries=["how to reset my password", "I forgot my password"],
+        ),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T2",
+            schema_name="s2",
+            trigger_queries=["reset my password please", "forgot password help"],
+        ),
     ]
     overlaps = detect_trigger_overlaps(components)
     assert len(overlaps) > 0
@@ -2734,10 +2754,8 @@ def test_detect_trigger_overlaps_high_overlap():
 def test_detect_trigger_overlaps_skips_short():
     """Topics with fewer than 3 tokens are skipped."""
     components = [
-        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1",
-                         trigger_queries=["hi", "hello"]),
-        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2",
-                         trigger_queries=["hi", "hello"]),
+        ComponentSummary(kind="DialogComponent", display_name="T1", schema_name="s1", trigger_queries=["hi", "hello"]),
+        ComponentSummary(kind="DialogComponent", display_name="T2", schema_name="s2", trigger_queries=["hi", "hello"]),
     ]
     overlaps = detect_trigger_overlaps(components)
     assert overlaps == []
@@ -2776,8 +2794,13 @@ def test_render_quick_wins_no_trigger_queries():
     """User topics with no trigger queries should be flagged."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="DialogComponent", display_name="NoTrigger", schema_name="s1",
-                             trigger_kind="OnIntent", trigger_queries=[]),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="NoTrigger",
+                schema_name="s1",
+                trigger_kind="OnIntent",
+                trigger_queries=[],
+            ),
         ],
     )
     result = render_quick_wins(profile)
@@ -2808,12 +2831,27 @@ def test_render_quick_wins_empty_when_clean():
     """A well-configured profile should produce empty quick wins."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="DialogComponent", display_name="Error", schema_name="s1",
-                             trigger_kind="OnError", description="Handles all errors gracefully"),
-            ComponentSummary(kind="DialogComponent", display_name="Fallback", schema_name="s2",
-                             trigger_kind="OnUnknownIntent", description="Handles unmatched intents"),
-            ComponentSummary(kind="DialogComponent", display_name="Escalate", schema_name="s3",
-                             trigger_kind="OnEscalate", description="Escalates to human agent"),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Error",
+                schema_name="s1",
+                trigger_kind="OnError",
+                description="Handles all errors gracefully",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Fallback",
+                schema_name="s2",
+                trigger_kind="OnUnknownIntent",
+                description="Handles unmatched intents",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Escalate",
+                schema_name="s3",
+                trigger_kind="OnEscalate",
+                description="Escalates to human agent",
+            ),
         ],
     )
     result = render_quick_wins(profile)
@@ -2834,11 +2872,21 @@ def test_render_knowledge_coverage_with_sources():
     """Knowledge sources render a table."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="KnowledgeSourceComponent", display_name="SharePoint FAQ",
-                             schema_name="ks1", source_kind="SharePoint", state="Active",
-                             trigger_condition_raw="true"),
-            ComponentSummary(kind="FileAttachmentComponent", display_name="guide.pdf",
-                             schema_name="fa1", file_type="pdf", state="Active"),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="SharePoint FAQ",
+                schema_name="ks1",
+                source_kind="SharePoint",
+                state="Active",
+                trigger_condition_raw="true",
+            ),
+            ComponentSummary(
+                kind="FileAttachmentComponent",
+                display_name="guide.pdf",
+                schema_name="fa1",
+                file_type="pdf",
+                state="Active",
+            ),
         ],
     )
     result = render_knowledge_coverage(profile)
@@ -2851,8 +2899,13 @@ def test_render_knowledge_coverage_inactive_flagged():
     """Inactive knowledge sources should have a note."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="KnowledgeSourceComponent", display_name="Old KB",
-                             schema_name="ks1", source_kind="Web", state="Inactive"),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="Old KB",
+                schema_name="ks1",
+                source_kind="Web",
+                state="Inactive",
+            ),
         ],
     )
     result = render_knowledge_coverage(profile)
@@ -2888,7 +2941,9 @@ def test_topic_graph_system_topic_not_orphaned():
 
     profile = BotProfile(
         topic_connections=[
-            TopicConnection(source_schema="s1", source_display="OnError", target_schema="s2", target_display="HandleError"),
+            TopicConnection(
+                source_schema="s1", source_display="OnError", target_schema="s2", target_display="HandleError"
+            ),
         ],
         components=[
             ComponentSummary(kind="DialogComponent", display_name="OnError", schema_name="s1", trigger_kind="OnError"),
@@ -2932,13 +2987,227 @@ def test_render_report_includes_knowledge_coverage():
     """render_report should include Knowledge Coverage section."""
     profile = BotProfile(
         components=[
-            ComponentSummary(kind="KnowledgeSourceComponent", display_name="KB1",
-                             schema_name="ks1", source_kind="Web", state="Active"),
+            ComponentSummary(
+                kind="KnowledgeSourceComponent",
+                display_name="KB1",
+                schema_name="ks1",
+                source_kind="Web",
+                state="Active",
+            ),
             # Add system topics so quick wins section doesn't dominate
             ComponentSummary(kind="DialogComponent", display_name="Error", schema_name="s1", trigger_kind="OnError"),
-            ComponentSummary(kind="DialogComponent", display_name="Fallback", schema_name="s2", trigger_kind="OnUnknownIntent"),
-            ComponentSummary(kind="DialogComponent", display_name="Escalate", schema_name="s3", trigger_kind="OnEscalate"),
+            ComponentSummary(
+                kind="DialogComponent", display_name="Fallback", schema_name="s2", trigger_kind="OnUnknownIntent"
+            ),
+            ComponentSummary(
+                kind="DialogComponent", display_name="Escalate", schema_name="s3", trigger_kind="OnEscalate"
+            ),
         ],
     )
     result = render_report(profile)
     assert "## Knowledge Source Coverage" in result
+
+
+# --- Batch analytics tests ---
+
+
+def test_batch_single_timeline():
+    """Single timeline produces correct summary with count=1."""
+    timeline = ConversationTimeline(
+        conversation_id="conv-1",
+        total_elapsed_ms=500.0,
+        events=[
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hello"),
+        ],
+    )
+    summary = aggregate_timelines([timeline])
+    assert summary.conversation_count == 1
+    assert summary.avg_elapsed_ms == 500.0
+    assert summary.success_count == 1
+
+
+def test_batch_multiple_timelines():
+    """Multiple timelines aggregate correctly."""
+    t1 = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=200.0,
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="hi")],
+    )
+    t2 = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=400.0,
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="hi")],
+    )
+    summary = aggregate_timelines([t1, t2])
+    assert summary.conversation_count == 2
+    assert summary.avg_elapsed_ms == 300.0
+    assert summary.success_count == 2
+    assert summary.failure_count == 0
+
+
+def test_batch_success_rate():
+    """Success rate calculated correctly with metadata."""
+    t1 = ConversationTimeline(conversation_id="c1", total_elapsed_ms=100.0)
+    t2 = ConversationTimeline(conversation_id="c2", total_elapsed_ms=100.0)
+    meta = [
+        {"session_info": {"outcome": "Resolved"}},
+        {"session_info": {"outcome": "Abandoned"}},
+    ]
+    summary = aggregate_timelines([t1, t2], meta)
+    assert summary.success_count == 1
+    assert summary.failure_count == 1
+    assert summary.success_rate == pytest.approx(0.5)
+
+
+def test_batch_success_heuristic():
+    """Without metadata, success = no errors + has bot message."""
+    t_success = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="ok")],
+    )
+    t_fail = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=100.0,
+        errors=["something broke"],
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="ok")],
+    )
+    summary = aggregate_timelines([t_success, t_fail])
+    assert summary.success_count == 1
+    assert summary.failure_count == 1
+
+
+def test_batch_escalation_detection():
+    """STEP_TRIGGERED with 'Escalate' topic detected as escalation."""
+    timeline = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="Escalate to Agent",
+                summary="escalation",
+            ),
+        ],
+    )
+    summary = aggregate_timelines([timeline])
+    assert summary.escalation_count == 1
+
+
+def test_batch_topic_usage():
+    """Topic usage counted across conversations."""
+    t1 = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        events=[
+            TimelineEvent(event_type=EventType.STEP_TRIGGERED, topic_name="Greeting", summary="greet"),
+            TimelineEvent(event_type=EventType.STEP_TRIGGERED, topic_name="Farewell", summary="bye"),
+        ],
+    )
+    t2 = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=100.0,
+        events=[
+            TimelineEvent(event_type=EventType.STEP_TRIGGERED, topic_name="Greeting", summary="greet"),
+        ],
+    )
+    summary = aggregate_timelines([t1, t2])
+    topic_map = {t.topic_name: t.invocation_count for t in summary.topic_usage}
+    assert topic_map["Greeting"] == 2
+    assert topic_map["Farewell"] == 1
+
+
+def test_batch_failure_mode_grouping():
+    """Errors grouped by normalized pattern (GUIDs stripped)."""
+    t1 = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        errors=["Failed for resource 1a2b3c4d5e6f7890"],
+    )
+    t2 = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=100.0,
+        errors=["Failed for resource 9f8e7d6c5b4a3210"],
+    )
+    summary = aggregate_timelines([t1, t2])
+    assert len(summary.failure_modes) == 1
+    assert summary.failure_modes[0].count == 2
+    assert len(summary.failure_modes[0].example_conversation_ids) == 2
+
+
+def test_batch_empty_list():
+    """Empty timeline list returns zeroed summary."""
+    summary = aggregate_timelines([])
+    assert summary.conversation_count == 0
+    assert summary.avg_elapsed_ms == 0.0
+    assert summary.success_rate == 0.0
+
+
+def test_batch_render_report():
+    """render_batch_report produces valid markdown with expected sections."""
+    summary = BatchAnalyticsSummary(
+        conversation_count=5,
+        avg_elapsed_ms=250.0,
+        success_count=3,
+        failure_count=2,
+        escalation_count=1,
+        success_rate=0.6,
+        escalation_rate=0.2,
+    )
+    report = render_batch_report(summary)
+    assert "# Batch Analytics Report" in report
+    assert "## Overview" in report
+    assert "## Conversation Outcomes" in report
+    assert "```mermaid" in report
+    assert "pie title" in report
+
+
+def test_batch_mixed_outcomes():
+    """Mixed success/failure conversations counted correctly."""
+    timelines = [
+        ConversationTimeline(
+            conversation_id=f"c{i}",
+            total_elapsed_ms=100.0,
+            events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="ok")],
+        )
+        for i in range(3)
+    ]
+    # Third timeline has errors -> failure
+    timelines[2].errors = ["boom"]
+    summary = aggregate_timelines(timelines)
+    assert summary.success_count == 2
+    assert summary.failure_count == 1
+
+
+def test_batch_escalation_rate():
+    """escalation_rate = escalation_count / conversation_count."""
+    t1 = ConversationTimeline(
+        conversation_id="c1",
+        total_elapsed_ms=100.0,
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="Transfer to Human",
+                summary="transfer",
+            ),
+        ],
+    )
+    t2 = ConversationTimeline(
+        conversation_id="c2",
+        total_elapsed_ms=100.0,
+        events=[TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="hi")],
+    )
+    summary = aggregate_timelines([t1, t2])
+    assert summary.escalation_rate == pytest.approx(0.5)
+    assert summary.escalation_count == 1
+
+
+def test_batch_avg_elapsed():
+    """avg_elapsed_ms calculated correctly."""
+    timelines = [
+        ConversationTimeline(conversation_id="c1", total_elapsed_ms=100.0),
+        ConversationTimeline(conversation_id="c2", total_elapsed_ms=300.0),
+        ConversationTimeline(conversation_id="c3", total_elapsed_ms=500.0),
+    ]
+    summary = aggregate_timelines(timelines)
+    assert summary.avg_elapsed_ms == pytest.approx(300.0)

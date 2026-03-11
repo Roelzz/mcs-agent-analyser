@@ -208,6 +208,36 @@ class CreditEstimate(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+# --- Batch analytics models ---
+
+
+class TopicUsage(BaseModel):
+    topic_name: str
+    invocation_count: int = 0
+    avg_duration_ms: float = 0.0
+    error_count: int = 0
+
+
+class FailureMode(BaseModel):
+    error_pattern: str
+    count: int = 0
+    example_conversation_ids: list[str] = Field(default_factory=list)
+
+
+class BatchAnalyticsSummary(BaseModel):
+    conversation_count: int = 0
+    avg_elapsed_ms: float = 0.0
+    success_count: int = 0
+    failure_count: int = 0
+    escalation_count: int = 0
+    success_rate: float = 0.0
+    escalation_rate: float = 0.0
+    topic_usage: list[TopicUsage] = Field(default_factory=list)
+    failure_modes: list[FailureMode] = Field(default_factory=list)
+    total_credits_estimated: float = 0.0
+    avg_credits_per_conversation: float = 0.0
+
+
 # --- Renamer models ---
 
 
