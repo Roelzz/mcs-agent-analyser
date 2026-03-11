@@ -28,6 +28,7 @@ from web.mermaid import split_markdown_mermaid  # noqa: E402
 
 from linter import run_lint as _run_lint  # noqa: E402
 from models import BotProfile  # noqa: E402
+from renamer import safe_extractall  # noqa: E402
 from solution_checker import check_solution_zip  # noqa: E402
 from validator import validate_zip_bytes  # noqa: E402
 from deps_analyzer import analyze_deps_zip_bytes  # noqa: E402
@@ -576,7 +577,7 @@ class State(rx.State):
 
             extract_dir = Path(tmpdir) / "extracted"
             with zipfile.ZipFile(zip_path) as zf:
-                zf.extractall(extract_dir)
+                safe_extractall(zf, extract_dir)
 
             yaml_files = list(extract_dir.rglob("botContent.yml"))
             json_files = list(extract_dir.rglob("dialog.json"))
