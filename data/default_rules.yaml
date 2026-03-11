@@ -1,0 +1,174 @@
+# Default best-practice rules for Copilot Studio bot analysis.
+# These complement the built-in solution checker rules (SOL/AGT/TOP/KNO/SEC/ORCH)
+# without duplicating them.
+#
+# Prefix: BP (Best Practice)
+# Severities: fail (must fix), warning (should fix), info (review)
+
+rules:
+  # ── Architecture ──────────────────────────────────────────────
+
+  - rule_id: BP001
+    severity: warning
+    category: Architecture
+    message: "No conversation starters defined — users won't see suggested prompts when opening the bot"
+    condition:
+      field: "gpt_info.conversation_starters"
+      operator: eq
+      value: []
+
+  - rule_id: BP002
+    severity: warning
+    category: Architecture
+    message: "No system instructions configured — the bot has no behavioural guidance"
+    condition:
+      field: "gpt_info.instructions"
+      operator: not_exists
+
+  - rule_id: BP003
+    severity: warning
+    category: Architecture
+    message: "No explicit model hint configured — the bot relies on platform defaults which may change"
+    condition:
+      field: "gpt_info.model_hint"
+      operator: not_exists
+
+  - rule_id: BP004
+    severity: warning
+    category: Architecture
+    message: "Authentication mode is Unknown — authentication has not been explicitly configured"
+    condition:
+      field: "authentication_mode"
+      operator: eq
+      value: "Unknown"
+
+  - rule_id: BP005
+    severity: info
+    category: Architecture
+    message: "No GPT description set — consider adding a description for discoverability"
+    condition:
+      field: "gpt_info.description"
+      operator: not_exists
+
+  - rule_id: BP017
+    severity: warning
+    category: Architecture
+    message: "Instructions lack constraint/boundary language (e.g. 'do not') — consider adding explicit boundaries"
+    condition:
+      field: "gpt_info.instructions"
+      operator: not_contains
+      value: "do not"
+
+  - rule_id: BP018
+    severity: info
+    category: Architecture
+    message: "No escalation or handoff guidance found in instructions — consider defining when to escalate to a human"
+    condition:
+      field: "gpt_info.instructions"
+      operator: not_contains
+      value: "escalat"
+
+  # ── Security ──────────────────────────────────────────────────
+
+  - rule_id: BP006
+    severity: fail
+    category: Security
+    message: "Content moderation is Unknown — moderation has not been configured at all"
+    condition:
+      field: "ai_settings.content_moderation"
+      operator: eq
+      value: "Unknown"
+
+  - rule_id: BP007
+    severity: fail
+    category: Security
+    message: "Sensitive properties are being logged to Application Insights — PII may leak into telemetry"
+    condition:
+      field: "app_insights.log_sensitive_properties"
+      operator: eq
+      value: true
+
+  - rule_id: BP008
+    severity: warning
+    category: Security
+    message: "Access control policy is Unknown — access control has not been explicitly configured"
+    condition:
+      field: "access_control_policy"
+      operator: eq
+      value: "Unknown"
+
+  - rule_id: BP009
+    severity: warning
+    category: Security
+    message: "Instructions do not mention data handling or privacy — consider adding data governance guidance"
+    condition:
+      field: "gpt_info.instructions"
+      operator: not_contains
+      value: "data"
+
+  # ── Knowledge ─────────────────────────────────────────────────
+
+  - rule_id: BP011
+    severity: info
+    category: Knowledge
+    message: "Code interpreter is enabled — increases cost and attack surface, ensure this is intentional"
+    condition:
+      field: "gpt_info.code_interpreter"
+      operator: eq
+      value: true
+
+  - rule_id: BP012
+    severity: info
+    category: Knowledge
+    message: "Web browsing is enabled — bot may use unverified external sources, ensure this is intentional"
+    condition:
+      field: "gpt_info.web_browsing"
+      operator: eq
+      value: true
+
+  # ── Operations ────────────────────────────────────────────────
+
+  - rule_id: BP010
+    severity: info
+    category: Operations
+    message: "Automatic model updates are enabled — may cause unexpected behaviour changes in production"
+    condition:
+      field: "ai_settings.opt_in_latest_models"
+      operator: eq
+      value: true
+
+  - rule_id: BP013
+    severity: warning
+    category: Operations
+    message: "No Application Insights configured — bot activity and errors will not be tracked"
+    condition:
+      field: "app_insights"
+      operator: not_exists
+
+  - rule_id: BP014
+    severity: warning
+    category: Operations
+    message: "Activity logging is disabled in Application Insights — conversation tracking is off"
+    condition:
+      field: "app_insights.log_activities"
+      operator: eq
+      value: false
+
+  - rule_id: BP015
+    severity: warning
+    category: Operations
+    message: "No deployment channels configured — the bot is not published to any channel"
+    condition:
+      field: "channels"
+      operator: eq
+      value: []
+
+  - rule_id: BP016
+    severity: info
+    category: Operations
+    message: "No knowledge sources configured — the bot relies entirely on its base model"
+    condition:
+      field: "knowledge_sources"
+      operator: eq
+      value: []
+

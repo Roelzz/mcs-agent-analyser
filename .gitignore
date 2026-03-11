@@ -40,4 +40,8 @@ botContent*/
 Transcripts/
 
 # Persistent app data
-data/
+data/*
+!data/default_rules.yaml
+
+# Local docs / plans
+docs/
