@@ -77,7 +77,13 @@ class ReportMixin(rx.State, mixin=True):
     @rx.event
     def download_report(self):
         filename = f"{self.report_title}.md" if self.report_title else "report.md"
-        yield rx.download(data=self.report_markdown, filename=filename)
+        content = self.report_markdown
+
+        # Include lint report if available
+        if getattr(self, "lint_report_markdown", ""):
+            content += "\n\n---\n\n# Instruction Lint Report\n\n" + self.lint_report_markdown
+
+        yield rx.download(data=content, filename=filename)
         yield rx.toast(f"Report saved as {filename}", duration=3000)
 
     @rx.event
@@ -85,7 +91,11 @@ class ReportMixin(rx.State, mixin=True):
         from web.mermaid import build_standalone_html
 
         title = self.report_title or "report"
-        html = build_standalone_html(self.report_markdown, title)
+        content = self.report_markdown
+        if getattr(self, "lint_report_markdown", ""):
+            content += "\n\n---\n\n# Instruction Lint Report\n\n" + self.lint_report_markdown
+
+        html = build_standalone_html(content, title)
         filename = f"{title}.html"
         yield rx.download(data=html, filename=filename)
         yield rx.toast(f"Report saved as {filename}", duration=3000)
