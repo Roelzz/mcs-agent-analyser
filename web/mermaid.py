@@ -213,3 +213,65 @@ def render_segment(segment: dict) -> rx.Component:
         ),
         rx.markdown(segment["content"]),
     )
+
+
+def md_to_segments(md: str) -> list[dict]:
+    """Split markdown into text/mermaid segments as dicts for dynamic view."""
+    if not md:
+        return []
+    segments: list[dict] = []
+    remaining = md
+    fence_open = "```mermaid"
+    fence_close = "```"
+    while remaining:
+        start = remaining.find(fence_open)
+        if start == -1:
+            segments.append({"type": "text", "content": remaining})
+            break
+        if start > 0:
+            segments.append({"type": "text", "content": remaining[:start]})
+        rest = remaining[start + len(fence_open) :]
+        end = rest.find(fence_close)
+        if end == -1:
+            segments.append({"type": "text", "content": fence_open + rest})
+            break
+        mermaid_src = rest[:end].strip()
+        segments.append({"type": "mermaid", "content": mermaid_src})
+        remaining = rest[end + len(fence_close) :]
+    return segments
+
+
+def render_segment_styled(segment: dict) -> rx.Component:
+    """Render a segment with green-themed styling for the dynamic view."""
+    return rx.cond(
+        segment["type"] == "mermaid",
+        rx.box(
+            rx.el.pre(segment["content"], class_name="mermaid"),
+            width="100%",
+            overflow_x="auto",
+            padding="22px",
+            background="var(--green-a2)",
+            border="1px solid var(--green-a4)",
+            border_radius="14px",
+            margin_y="4px",
+        ),
+        rx.box(
+            rx.markdown(
+                segment["content"],
+                component_map={
+                    "h1": lambda text: rx.heading(text, size="6", margin_bottom="10px", color="var(--gray-12)"),
+                    "h2": lambda text: rx.heading(
+                        text, size="4", margin_top="18px", margin_bottom="8px", color="var(--gray-12)"
+                    ),
+                    "h3": lambda text: rx.heading(
+                        text, size="3", margin_top="14px", margin_bottom="6px", color="var(--gray-11)"
+                    ),
+                    "p": lambda text: rx.text(text, font_size="13px", color="var(--gray-11)", line_height="1.65"),
+                    "code": lambda text: rx.code(text, font_size="12px", background="var(--green-a3)"),
+                },
+            ),
+            width="100%",
+            overflow_x="auto",
+            padding="2px 2px 6px",
+        ),
+    )

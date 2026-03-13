@@ -72,7 +72,7 @@ def report_viewer() -> rx.Component:
         rx.hstack(
             rx.vstack(
                 rx.text(
-                    "Analysis Report",
+                    "Document Analysis",
                     size="1",
                     font_family=_MONO,
                     color="var(--green-11)",

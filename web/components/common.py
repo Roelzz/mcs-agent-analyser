@@ -152,7 +152,10 @@ def navbar() -> rx.Component:
             _nav_link("bar-chart-3", "Batch", "/batch"),
             rx.cond(
                 State.has_report,
-                _nav_link("file-text", "Report", "/analysis"),
+                rx.fragment(
+                    _nav_link("activity", "Dynamic", "/analysis/dynamic"),
+                    _nav_link("file-text", "Document", "/analysis/document"),
+                ),
             ),
             spacing="4",
             align="center",

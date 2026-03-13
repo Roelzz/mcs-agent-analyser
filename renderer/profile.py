@@ -708,6 +708,90 @@ def render_integration_map(profile: BotProfile) -> str:
     return "\n".join(lines)
 
 
+def detect_topic_graph_anomalies(profile: BotProfile) -> dict[str, int]:
+    """Detect orphaned topics, dead ends, and cycles in the topic graph.
+
+    Returns dict with keys: orphaned, dead_ends, cycles (counts).
+    """
+    if not profile.topic_connections:
+        return {"orphaned": 0, "dead_ends": 0, "cycles": 0}
+
+    nodes: dict[str, str] = {}
+    edges: list[tuple[str, str]] = []
+    seen_edges: set[tuple[str, str]] = set()
+
+    for conn in profile.topic_connections:
+        src_id = _make_participant_id(conn.source_display)
+        tgt_id = _make_participant_id(conn.target_display)
+        nodes[src_id] = conn.source_display
+        nodes[tgt_id] = conn.target_display
+        edge_key = (src_id, tgt_id)
+        if edge_key not in seen_edges:
+            seen_edges.add(edge_key)
+            edges.append(edge_key)
+
+    schema_to_component: dict[str, ComponentSummary] = {}
+    display_to_schema: dict[str, str] = {}
+    for comp in profile.components:
+        if comp.schema_name:
+            schema_to_component[comp.schema_name] = comp
+        if comp.display_name:
+            display_to_schema[comp.display_name] = comp.schema_name
+
+    inbound: dict[str, set[str]] = {nid: set() for nid in nodes}
+    outbound: dict[str, set[str]] = {nid: set() for nid in nodes}
+    for src, tgt in edges:
+        outbound.setdefault(src, set()).add(tgt)
+        inbound.setdefault(tgt, set()).add(src)
+
+    orphaned = 0
+    for nid, display in nodes.items():
+        if inbound.get(nid):
+            continue
+        schema = display_to_schema.get(display, "")
+        comp = schema_to_component.get(schema)
+        if comp and comp.trigger_kind and comp.trigger_kind in (_SYSTEM_TRIGGERS | _AUTOMATION_TRIGGERS):
+            continue
+        orphaned += 1
+
+    dead_ends = 0
+    for nid, display in nodes.items():
+        if outbound.get(nid):
+            continue
+        schema = display_to_schema.get(display, "")
+        comp = schema_to_component.get(schema)
+        if comp and comp.action_summary:
+            has_terminal = any(
+                k in comp.action_summary for k in ("EndConversation", "TransferToAgent", "EscalateToAgent")
+            )
+            if has_terminal:
+                continue
+        dead_ends += 1
+
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = {nid: WHITE for nid in nodes}
+    cycle_nodes: set[str] = set()
+    adj: dict[str, list[str]] = {nid: [] for nid in nodes}
+    for src, tgt in edges:
+        adj[src].append(tgt)
+
+    def _dfs(node: str) -> None:
+        color[node] = GRAY
+        for neighbor in adj.get(node, []):
+            if color.get(neighbor) == GRAY:
+                cycle_nodes.add(node)
+                cycle_nodes.add(neighbor)
+            elif color.get(neighbor) == WHITE:
+                _dfs(neighbor)
+        color[node] = BLACK
+
+    for nid in nodes:
+        if color.get(nid) == WHITE:
+            _dfs(nid)
+
+    return {"orphaned": orphaned, "dead_ends": dead_ends, "cycles": len(cycle_nodes)}
+
+
 def render_topic_graph(profile: BotProfile) -> str:
     """Render Mermaid flowchart of topic-to-topic connections via BeginDialog."""
     if not profile.topic_connections:
