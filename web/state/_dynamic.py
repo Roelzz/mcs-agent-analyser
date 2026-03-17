@@ -102,6 +102,8 @@ class DynamicMixin(rx.State, mixin=True):
 
     # ── Routing tab ───────────────────────────────────────────────────────────
     mcs_routing_lifecycles: list[dict] = []
+    mcs_routing_decisions: list[dict] = []
+    mcs_routing_plan_evolution: list[dict] = []
 
     # ── Model tab ────────────────────────────────────────────────────────────
     mcs_model_kpis: list[dict] = []

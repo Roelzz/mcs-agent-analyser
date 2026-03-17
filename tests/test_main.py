@@ -62,6 +62,12 @@ from renderer import (
     render_trigger_overlaps,
     render_transcript_report,
 )
+from renderer.sections import (
+    build_orchestrator_decision_timeline,
+    build_plan_evolution,
+    build_topic_lifecycles,
+    build_trigger_match_items,
+)
 from timeline import build_timeline, estimate_credits
 from transcript import parse_transcript_json
 
@@ -3955,3 +3961,243 @@ def test_dv_batch_analysis_pipeline():
     report = render_batch_report(summary)
     assert "## Overview" in report
     assert "3" in report
+
+
+# --- Orchestrator routing tests ---
+
+
+def _make_orchestrator_timeline() -> ConversationTimeline:
+    """Build a timeline with orchestrator events for routing tests."""
+    events = [
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:00Z",
+            position=1,
+            event_type=EventType.USER_MESSAGE,
+            summary='User: "How do I reset my password?"',
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:01Z",
+            position=2,
+            event_type=EventType.PLAN_RECEIVED_DEBUG,
+            summary='Ask: "password reset procedure"',
+            plan_identifier="plan-1",
+            orchestrator_ask="password reset procedure",
+            is_final_plan=True,
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:01Z",
+            position=3,
+            event_type=EventType.PLAN_RECEIVED,
+            summary="Plan: [PasswordReset, KnowledgeSearch]",
+            plan_identifier="plan-1",
+            is_final_plan=False,
+            plan_steps=["PasswordReset", "KnowledgeSearch"],
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:02Z",
+            position=4,
+            event_type=EventType.STEP_TRIGGERED,
+            topic_name="PasswordReset",
+            summary="Step start: PasswordReset (CustomTopic)",
+            state="inProgress",
+            step_id="step-1",
+            plan_identifier="plan-1",
+            thought="User wants to reset their password",
+            has_recommendations=True,
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:04Z",
+            position=5,
+            event_type=EventType.STEP_FINISHED,
+            topic_name="PasswordReset",
+            summary="Step end: PasswordReset [completed] (2000ms)",
+            state="completed",
+            step_id="step-1",
+            plan_identifier="plan-1",
+            has_recommendations=True,
+            plan_used_outputs="Used outputs from: KnowledgeSearch",
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:05Z",
+            position=6,
+            event_type=EventType.PLAN_FINISHED,
+            summary="Plan finished (cancelled=False)",
+            plan_identifier="plan-1",
+        ),
+    ]
+    return ConversationTimeline(events=events)
+
+
+def test_timeline_event_new_fields():
+    """Verify new fields on TimelineEvent model."""
+    ev = TimelineEvent(
+        is_final_plan=True,
+        has_recommendations=True,
+        plan_used_outputs="Used outputs from: step_a",
+        orchestrator_ask="password reset",
+        plan_steps=["StepA", "StepB"],
+    )
+    assert ev.is_final_plan is True
+    assert ev.has_recommendations is True
+    assert ev.plan_used_outputs == "Used outputs from: step_a"
+    assert ev.orchestrator_ask == "password reset"
+    assert ev.plan_steps == ["StepA", "StepB"]
+
+
+def test_timeline_event_new_fields_defaults():
+    """Verify new fields default to None/empty."""
+    ev = TimelineEvent()
+    assert ev.is_final_plan is None
+    assert ev.has_recommendations is None
+    assert ev.plan_used_outputs is None
+    assert ev.orchestrator_ask is None
+    assert ev.plan_steps == []
+
+
+def test_build_orchestrator_decision_timeline_grouping():
+    """Verify decision timeline groups events correctly and extracts fields."""
+    tl = _make_orchestrator_timeline()
+    items = build_orchestrator_decision_timeline(tl)
+
+    kinds = [item["kind"] for item in items]
+    assert "user_message" in kinds
+    assert "interpreted" in kinds
+    assert "plan" in kinds
+    assert "step" in kinds
+    assert "plan_finished" in kinds
+
+    # User message should be first
+    assert items[0]["kind"] == "user_message"
+    assert "password" in items[0]["text"]
+
+    # Interpreted should show different ask
+    interpreted = [i for i in items if i["kind"] == "interpreted"]
+    assert len(interpreted) == 1
+    assert interpreted[0]["ask"] == "password reset procedure"
+
+
+def test_build_orchestrator_decision_timeline_no_interpretation_when_same():
+    """When orchestrator ask matches user text, no 'interpreted' item should appear."""
+    events = [
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:00Z",
+            position=1,
+            event_type=EventType.USER_MESSAGE,
+            summary="User: reset password",
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:01Z",
+            position=2,
+            event_type=EventType.PLAN_RECEIVED_DEBUG,
+            summary='Ask: "reset password"',
+            orchestrator_ask="reset password",
+        ),
+    ]
+    tl = ConversationTimeline(events=events)
+    items = build_orchestrator_decision_timeline(tl)
+    interpreted = [i for i in items if i["kind"] == "interpreted"]
+    assert len(interpreted) == 0
+
+
+def test_build_plan_evolution_single_plan():
+    """With only one plan, evolution should be empty."""
+    events = [
+        TimelineEvent(
+            event_type=EventType.PLAN_RECEIVED,
+            plan_steps=["A", "B"],
+            plan_identifier="plan-1",
+            is_final_plan=True,
+        ),
+    ]
+    tl = ConversationTimeline(events=events)
+    result = build_plan_evolution(tl)
+    assert result == []
+
+
+def test_build_plan_evolution_multiple_plans():
+    """With multiple plans, evolution should detect added/removed steps."""
+    events = [
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:01Z",
+            event_type=EventType.PLAN_RECEIVED,
+            plan_steps=["A", "B"],
+            plan_identifier="plan-1",
+            is_final_plan=False,
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:05Z",
+            event_type=EventType.PLAN_RECEIVED,
+            plan_steps=["A", "C"],
+            plan_identifier="plan-2",
+            is_final_plan=True,
+        ),
+    ]
+    tl = ConversationTimeline(events=events)
+    result = build_plan_evolution(tl)
+    assert len(result) == 2
+
+    # First plan has no diff
+    assert result[0]["plan_index"] == "1"
+    assert result[0]["change_summary"] == ""
+
+    # Second plan shows diff
+    assert result[1]["plan_index"] == "2"
+    assert "C" in result[1]["added_steps"]
+    assert "B" in result[1]["removed_steps"]
+    assert "+1 added" in result[1]["change_summary"]
+    assert "-1 removed" in result[1]["change_summary"]
+
+
+def test_build_topic_lifecycles_enhanced_fields():
+    """Verify lifecycles include has_recommendations, used_outputs, plan_identifier."""
+    tl = _make_orchestrator_timeline()
+    lifecycles = build_topic_lifecycles(tl)
+    assert len(lifecycles) == 1
+
+    lc = lifecycles[0]
+    assert lc["name"] == "PasswordReset"
+    assert lc["has_recommendations"] == "true"
+    assert lc["used_outputs"] == "Used outputs from: KnowledgeSearch"
+    assert lc["plan_identifier"] == "plan-1"
+
+
+def test_build_trigger_match_items_orchestrator_ask():
+    """Verify trigger match items include orchestrator_ask when it differs."""
+    events = [
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:00Z",
+            position=1,
+            event_type=EventType.USER_MESSAGE,
+            summary='User: "help with pw"',
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:01Z",
+            position=2,
+            event_type=EventType.PLAN_RECEIVED_DEBUG,
+            summary='Ask: "password reset"',
+            orchestrator_ask="password reset",
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:02Z",
+            position=3,
+            event_type=EventType.STEP_TRIGGERED,
+            topic_name="PasswordReset",
+            summary="Step start: PasswordReset (CustomTopic)",
+            state="inProgress",
+            step_id="step-1",
+        ),
+    ]
+    tl = ConversationTimeline(events=events)
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="PasswordReset",
+                schema_name="cr_pw_reset",
+                trigger_queries=["reset password", "forgot my password"],
+            ),
+        ],
+    )
+    items = build_trigger_match_items(tl, profile)
+    assert len(items) == 1
+    assert items[0]["orchestrator_ask"] == "password reset"

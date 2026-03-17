@@ -1238,12 +1238,17 @@ def _mcs_lifecycle_card(item: dict) -> rx.Component:
                     item["start"] != "",
                     rx.text(
                         rx.text.span(item["start"]),
-                        rx.text.span(" → ", color="var(--gray-a6)"),
+                        rx.text.span(" -> ", color="var(--gray-a6)"),
                         rx.text.span(item["end"]),
                         font_size="11px",
                         color="var(--gray-a8)",
                         font_family=_MONO,
                     ),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["has_recommendations"] == "true",
+                    rx.badge("Alternatives considered", color_scheme="amber", variant="soft", size="1"),
                     rx.box(),
                 ),
                 spacing="2",
@@ -1259,6 +1264,11 @@ def _mcs_lifecycle_card(item: dict) -> rx.Component:
                     color="var(--gray-a7)",
                     line_height="1.4",
                 ),
+                rx.box(),
+            ),
+            rx.cond(
+                item["used_outputs"] != "",
+                rx.text(item["used_outputs"], font_size="11px", color="var(--blue-9)"),
                 rx.box(),
             ),
             rx.cond(
@@ -1287,9 +1297,272 @@ def _mcs_lifecycle_card(item: dict) -> rx.Component:
     )
 
 
+# ── Orchestrator Decision Timeline renderers ────────────────────────────
+
+
+def _mcs_decision_item(item: dict) -> rx.Component:
+    """Render a single orchestrator decision timeline item by kind."""
+    return rx.match(
+        item["kind"],
+        # User message bubble
+        (
+            "user_message",
+            rx.box(
+                rx.hstack(
+                    rx.icon("message-circle", size=14, color="var(--blue-9)"),
+                    rx.text(item.get("text", ""), font_size="13px", color="var(--gray-12)", font_weight="500"),
+                    rx.text(item.get("timestamp", ""), font_size="10px", color="var(--gray-a7)", font_family=_MONO),
+                    spacing="2",
+                    align="center",
+                ),
+                padding="10px 14px",
+                background="var(--blue-a2)",
+                border_radius="8px",
+                margin_bottom="4px",
+            ),
+        ),
+        # Interpreted query
+        (
+            "interpreted",
+            rx.box(
+                rx.hstack(
+                    rx.icon("sparkles", size=12, color="var(--violet-9)"),
+                    rx.text(
+                        rx.text.span("Interpreted as: ", font_weight="600"),
+                        rx.text.span(item.get("ask", ""), font_style="italic"),
+                        font_size="12px",
+                        color="var(--violet-11)",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                padding="6px 14px 6px 28px",
+                margin_bottom="2px",
+            ),
+        ),
+        # Plan
+        (
+            "plan",
+            rx.box(
+                rx.hstack(
+                    rx.icon("list-ordered", size=14, color="var(--teal-9)"),
+                    rx.text("Plan", font_size="12px", font_weight="600", color="var(--gray-11)"),
+                    rx.cond(
+                        item.get("is_final", "") == "True",
+                        rx.badge("Final", color_scheme="green", variant="soft", size="1"),
+                        rx.cond(
+                            item.get("is_final", "") == "False",
+                            rx.badge("Intermediate", color_scheme="amber", variant="soft", size="1"),
+                            rx.box(),
+                        ),
+                    ),
+                    rx.text(item.get("timestamp", ""), font_size="10px", color="var(--gray-a7)", font_family=_MONO),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    item.get("steps", ""),
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    padding_left="22px",
+                    padding_top="2px",
+                ),
+                padding="8px 14px",
+                border_left="3px solid var(--teal-7)",
+                margin_left="6px",
+                margin_bottom="4px",
+            ),
+        ),
+        # Step
+        (
+            "step",
+            rx.box(
+                rx.hstack(
+                    rx.cond(
+                        item.get("event_subtype", "") == "triggered",
+                        rx.icon("play", size=12, color="var(--green-9)"),
+                        rx.icon("check", size=12, color="var(--gray-a8)"),
+                    ),
+                    rx.badge(
+                        item.get("topic_name", ""),
+                        color_scheme=rx.cond(
+                            item.get("status", "") == "failed",
+                            "red",
+                            rx.cond(item.get("event_subtype", "") == "triggered", "teal", "gray"),
+                        ),
+                        variant="soft",
+                        size="1",
+                    ),
+                    rx.cond(
+                        item.get("duration", "") != "",
+                        rx.text(item.get("duration", ""), font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                        rx.box(),
+                    ),
+                    rx.cond(
+                        item.get("has_recommendations", "") == "true",
+                        rx.badge("Alternatives", color_scheme="amber", variant="soft", size="1"),
+                        rx.box(),
+                    ),
+                    rx.cond(
+                        item.get("used_outputs", "") != "",
+                        rx.badge(item.get("used_outputs", ""), color_scheme="blue", variant="outline", size="1"),
+                        rx.box(),
+                    ),
+                    spacing="2",
+                    align="center",
+                    flex_wrap="wrap",
+                ),
+                rx.cond(
+                    item.get("thought", "") != "",
+                    rx.text(
+                        item.get("thought", ""),
+                        font_size="11px",
+                        font_style="italic",
+                        color="var(--gray-a7)",
+                        padding_left="22px",
+                        padding_top="2px",
+                    ),
+                    rx.box(),
+                ),
+                padding="4px 14px 4px 36px",
+                margin_bottom="2px",
+            ),
+        ),
+        # Plan finished
+        (
+            "plan_finished",
+            rx.box(
+                rx.separator(size="4", color_scheme="gray"),
+                rx.cond(
+                    item.get("is_cancelled", "") == "true",
+                    rx.text("Plan cancelled", font_size="10px", color="var(--red-9)", text_align="center"),
+                    rx.box(),
+                ),
+                padding="4px 14px",
+                margin_bottom="8px",
+            ),
+        ),
+        # Fallback
+        rx.box(),
+    )
+
+
+# ── Plan Evolution renderers ────────────────────────────────────────────
+
+
+def _mcs_plan_evolution_card(item: dict) -> rx.Component:
+    """Render a single plan evolution entry."""
+    return rx.box(
+        rx.vstack(
+            rx.hstack(
+                rx.text(
+                    rx.text.span("Plan #"),
+                    rx.text.span(item["plan_index"], font_weight="600"),
+                    font_size="12px",
+                    color="var(--gray-11)",
+                ),
+                rx.cond(
+                    item["is_final"] == "True",
+                    rx.badge("Final", color_scheme="green", variant="soft", size="1"),
+                    rx.cond(
+                        item["is_final"] == "False",
+                        rx.badge("Intermediate", color_scheme="amber", variant="soft", size="1"),
+                        rx.box(),
+                    ),
+                ),
+                rx.cond(
+                    item["change_summary"] != "",
+                    rx.text(item["change_summary"], font_size="11px", color="var(--gray-a8)"),
+                    rx.box(),
+                ),
+                rx.text(item["timestamp"], font_size="10px", color="var(--gray-a7)", font_family=_MONO),
+                spacing="2",
+                align="center",
+                flex_wrap="wrap",
+            ),
+            rx.text(item["steps"], font_size="11px", color="var(--gray-a9)", line_height="1.4"),
+            rx.cond(
+                item["added_steps"] != "",
+                rx.text(
+                    rx.text.span("+ ", color="var(--green-9)", font_weight="600"),
+                    rx.text.span(item["added_steps"]),
+                    font_size="11px",
+                    color="var(--green-11)",
+                ),
+                rx.box(),
+            ),
+            rx.cond(
+                item["removed_steps"] != "",
+                rx.text(
+                    rx.text.span("- ", color="var(--red-9)", font_weight="600"),
+                    rx.text.span(item["removed_steps"]),
+                    font_size="11px",
+                    color="var(--red-11)",
+                ),
+                rx.box(),
+            ),
+            spacing="1",
+            width="100%",
+        ),
+        padding="10px 14px",
+        border_bottom="1px solid var(--gray-a3)",
+    )
+
+
 def _mcs_routing_panel() -> rx.Component:
     return rx.vstack(
-        # Topic Lifecycles
+        # Section 1: Orchestrator Decision Timeline
+        rx.cond(
+            State.mcs_routing_decisions.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("brain", size=16, color="var(--violet-9)"),
+                    section_heading("Orchestrator Decision Timeline"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "How the orchestrator interpreted queries, planned steps, and executed topics.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="8px",
+                ),
+                rx.box(
+                    rx.foreach(State.mcs_routing_decisions, _mcs_decision_item),
+                    width="100%",
+                    padding="8px 0",
+                ),
+                width="100%",
+            ),
+        ),
+        # Section 2: Plan Evolution (only when >1 plan)
+        rx.cond(
+            State.mcs_routing_plan_evolution.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("git-compare", size=16, color="var(--amber-9)"),
+                    section_heading("Plan Evolution"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "How the orchestrator's plan changed across replanning attempts.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="8px",
+                ),
+                rx.box(
+                    rx.foreach(State.mcs_routing_plan_evolution, _mcs_plan_evolution_card),
+                    width="100%",
+                    border=f"1px solid {SURFACE_BORDER}",
+                    border_radius="8px",
+                    background="var(--gray-a2)",
+                    overflow="hidden",
+                ),
+                width="100%",
+            ),
+        ),
+        # Section 3: Topic Lifecycles (enhanced)
         rx.cond(
             State.mcs_routing_lifecycles.length() > 0,  # type: ignore[union-attr]
             card(
@@ -1316,7 +1589,7 @@ def _mcs_routing_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Trigger Phrase Analysis
+        # Section 4: Trigger Phrase Analysis (enhanced)
         rx.cond(
             State.mcs_topics_trigger_matches.length() > 0,  # type: ignore[union-attr]
             card(
@@ -1436,6 +1709,23 @@ def _mcs_trigger_match_card(item: dict) -> rx.Component:
                 rx.text(item["user_message"], font_size="13px", color="var(--gray-12)", font_weight="500"),
                 spacing="2",
                 align="center",
+            ),
+            # Orchestrator interpretation (when different from user message)
+            rx.cond(
+                item.get("orchestrator_ask", "") != "",
+                rx.hstack(
+                    rx.icon("sparkles", size=12, color="var(--violet-9)"),
+                    rx.text(
+                        rx.text.span("Orchestrator interpreted as: ", font_weight="600"),
+                        rx.text.span(item.get("orchestrator_ask", ""), font_style="italic"),
+                        font_size="12px",
+                        color="var(--violet-11)",
+                    ),
+                    spacing="2",
+                    align="center",
+                    padding_left="6px",
+                ),
+                rx.box(),
             ),
             # Selected topic badge
             rx.hstack(

@@ -189,6 +189,8 @@ def _process_trace_event(
                     event_type=EventType.PLAN_RECEIVED,
                     summary=f"Plan: [{tools_summary}]",
                     plan_identifier=value.get("planIdentifier"),
+                    is_final_plan=value.get("isFinalPlan"),
+                    plan_steps=step_names,
                 )
             )
             for td in value.get("toolDefinitions", []):
@@ -206,6 +208,8 @@ def _process_trace_event(
                     event_type=EventType.PLAN_RECEIVED_DEBUG,
                     summary=f'Ask: "{ask}"',
                     plan_identifier=value.get("planIdentifier"),
+                    orchestrator_ask=ask or None,
+                    is_final_plan=value.get("isFinalPlan"),
                 )
             )
 
@@ -231,6 +235,7 @@ def _process_trace_event(
                     step_id=step_id,
                     plan_identifier=value.get("planIdentifier"),
                     thought=value.get("thought"),
+                    has_recommendations=value.get("hasRecommendations"),
                 )
             )
 
@@ -305,6 +310,14 @@ def _process_trace_event(
                 error_msg = "Step failed"
                 state.errors.append(f"{topic}: failed")
 
+            # Format planUsedOutputs into readable string
+            raw_used_outputs = value.get("planUsedOutputs") or {}
+            plan_used_outputs_str = None
+            if raw_used_outputs and isinstance(raw_used_outputs, dict):
+                sources = [k for k in raw_used_outputs.keys()]
+                if sources:
+                    plan_used_outputs_str = f"Used outputs from: {', '.join(sources)}"
+
             state.events.append(
                 TimelineEvent(
                     timestamp=timestamp,
@@ -317,6 +330,8 @@ def _process_trace_event(
                     error=error_msg,
                     step_id=step_id,
                     plan_identifier=value.get("planIdentifier"),
+                    has_recommendations=value.get("hasRecommendations"),
+                    plan_used_outputs=plan_used_outputs_str,
                 )
             )
 
