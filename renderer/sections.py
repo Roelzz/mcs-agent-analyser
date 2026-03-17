@@ -377,12 +377,16 @@ def build_topic_lifecycles(timeline: ConversationTimeline) -> list[dict]:
                 "thought": ev.thought or "",
                 "start": ev.timestamp,
                 "position": ev.position,
+                "has_recommendations": ev.has_recommendations,
+                "plan_identifier": ev.plan_identifier or "",
             }
         elif ev.event_type == EventType.STEP_FINISHED and ev.step_id:
             finishes[ev.step_id] = {
                 "end": ev.timestamp,
                 "state": ev.state or "unknown",
                 "error": ev.error or "",
+                "has_recommendations": ev.has_recommendations,
+                "plan_used_outputs": ev.plan_used_outputs or "",
             }
 
     lifecycles: list[dict] = []
@@ -419,6 +423,10 @@ def build_topic_lifecycles(timeline: ConversationTimeline) -> list[dict]:
             f"{ce['type']}: {ce['summary']}" for ce in child_events
         ) if child_events else ""
 
+        # Merge has_recommendations from trigger or finish
+        has_recs = trig.get("has_recommendations") or fin.get("has_recommendations")
+        used_outputs = fin.get("plan_used_outputs", "")
+
         lifecycles.append(
             {
                 "step_id": step_id,
@@ -432,6 +440,9 @@ def build_topic_lifecycles(timeline: ConversationTimeline) -> list[dict]:
                 "error": fin.get("error") or "",
                 "child_summary": child_summary,
                 "child_count": str(len(child_events)),
+                "has_recommendations": "true" if has_recs else "",
+                "used_outputs": used_outputs,
+                "plan_identifier": trig.get("plan_identifier", ""),
             }
         )
 
@@ -485,8 +496,14 @@ def build_trigger_match_items(
         if not user_text:
             continue
 
-        # Find actually triggered topics between this user message and the next
+        # Find orchestrator interpretation and triggered topics between this and next user msg
         next_ui = user_indices[pos + 1] if pos + 1 < len(user_indices) else len(events)
+        orchestrator_ask = ""
+        for between_ev in events[ui + 1 : next_ui]:
+            if between_ev.event_type == EventType.PLAN_RECEIVED_DEBUG and between_ev.orchestrator_ask:
+                orchestrator_ask = between_ev.orchestrator_ask
+                break
+
         triggered_topics: list[str] = []
         for between_ev in events[ui + 1 : next_ui]:
             if between_ev.event_type != EventType.STEP_TRIGGERED:
@@ -549,13 +566,152 @@ def build_trigger_match_items(
 
         matches_summary = "\n".join(lines) if lines else "No matches above threshold"
 
+        # Include orchestrator_ask when it differs from user text
+        ask_display = ""
+        if orchestrator_ask and orchestrator_ask.strip('"') != user_text:
+            ask_display = orchestrator_ask
+
         items.append(
             {
                 "user_message": user_text,
                 "selected_topic": selected_display,
                 "matches_summary": matches_summary,
                 "total_matches": str(total_count),
+                "orchestrator_ask": ask_display,
             }
         )
 
     return items
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator decision timeline
+# ---------------------------------------------------------------------------
+
+
+def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list[dict]:
+    """Build a flat list of orchestrator decision items grouped by user-message turns.
+
+    Each dict has a ``kind`` key: user_message, interpreted, plan, step, plan_finished.
+    All values are strings (Reflex Var constraint).
+    """
+    items: list[dict] = []
+    events = timeline.events
+    latest_user_text: str = ""
+
+    for ev in events:
+        if ev.event_type == EventType.USER_MESSAGE:
+            latest_user_text = (ev.summary or "").replace("User: ", "", 1).strip()
+            items.append({
+                "kind": "user_message",
+                "text": latest_user_text,
+                "timestamp": _format_clock(ev.timestamp),
+            })
+            continue
+
+        if ev.event_type == EventType.PLAN_RECEIVED_DEBUG:
+            ask = ev.orchestrator_ask or ""
+            if ask and ask != latest_user_text:
+                items.append({
+                    "kind": "interpreted",
+                    "ask": ask,
+                    "timestamp": _format_clock(ev.timestamp),
+                })
+            continue
+
+        if ev.event_type == EventType.PLAN_RECEIVED:
+            steps_str = ", ".join(ev.plan_steps) if ev.plan_steps else (ev.summary or "")
+            items.append({
+                "kind": "plan",
+                "steps": steps_str,
+                "is_final": str(ev.is_final_plan) if ev.is_final_plan is not None else "",
+                "plan_identifier": ev.plan_identifier or "",
+                "timestamp": _format_clock(ev.timestamp),
+            })
+            continue
+
+        if ev.event_type in {EventType.STEP_TRIGGERED, EventType.STEP_FINISHED}:
+            status = ev.state or ""
+            duration = ""
+            used_outputs = ""
+            has_recs = ""
+            if ev.event_type == EventType.STEP_FINISHED:
+                import re as _re
+
+                m = _re.search(r"\((\d+)ms\)", ev.summary or "")
+                duration = f"{m.group(1)}ms" if m else ""
+                used_outputs = ev.plan_used_outputs or ""
+            if ev.has_recommendations is True:
+                has_recs = "true"
+            items.append({
+                "kind": "step",
+                "event_subtype": "triggered" if ev.event_type == EventType.STEP_TRIGGERED else "finished",
+                "topic_name": ev.topic_name or "",
+                "thought": ev.thought or "",
+                "has_recommendations": has_recs,
+                "used_outputs": used_outputs,
+                "status": status,
+                "duration": duration,
+                "timestamp": _format_clock(ev.timestamp),
+                "plan_identifier": ev.plan_identifier or "",
+            })
+            continue
+
+        if ev.event_type == EventType.PLAN_FINISHED:
+            is_cancelled = "true" if "cancelled=True" in (ev.summary or "") else "false"
+            items.append({
+                "kind": "plan_finished",
+                "is_cancelled": is_cancelled,
+                "timestamp": _format_clock(ev.timestamp),
+            })
+
+    return items
+
+
+# ---------------------------------------------------------------------------
+# Plan evolution tracker
+# ---------------------------------------------------------------------------
+
+
+def build_plan_evolution(timeline: ConversationTimeline) -> list[dict]:
+    """Compare consecutive PLAN_RECEIVED events to show how plans evolved.
+
+    Only returns data when >1 plan exists in the conversation.
+    """
+    plan_events = [
+        ev for ev in timeline.events if ev.event_type == EventType.PLAN_RECEIVED
+    ]
+    if len(plan_events) <= 1:
+        return []
+
+    results: list[dict] = []
+    for idx, ev in enumerate(plan_events):
+        current_steps = set(ev.plan_steps)
+        added = ""
+        removed = ""
+        change_summary = ""
+        if idx > 0:
+            prev_steps = set(plan_events[idx - 1].plan_steps)
+            added_set = current_steps - prev_steps
+            removed_set = prev_steps - current_steps
+            added = ", ".join(sorted(added_set)) if added_set else ""
+            removed = ", ".join(sorted(removed_set)) if removed_set else ""
+            parts = []
+            if added_set:
+                parts.append(f"+{len(added_set)} added")
+            if removed_set:
+                parts.append(f"-{len(removed_set)} removed")
+            change_summary = ", ".join(parts) if parts else "No changes"
+
+        results.append({
+            "plan_index": str(idx + 1),
+            "plan_identifier": ev.plan_identifier or "",
+            "is_final": str(ev.is_final_plan) if ev.is_final_plan is not None else "",
+            "steps": ", ".join(ev.plan_steps) if ev.plan_steps else "",
+            "added_steps": added,
+            "removed_steps": removed,
+            "change_summary": change_summary,
+            "timestamp": _format_clock(ev.timestamp),
+        })
+
+    return results

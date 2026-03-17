@@ -137,6 +137,11 @@ class TimelineEvent(BaseModel):
     plan_identifier: str | None = None
     raw_type: str | None = None
     thought: str | None = None
+    is_final_plan: bool | None = None
+    has_recommendations: bool | None = None
+    plan_used_outputs: str | None = None
+    orchestrator_ask: str | None = None
+    plan_steps: list[str] = Field(default_factory=list)
 
 
 class ExecutionPhase(BaseModel):
