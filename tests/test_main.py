@@ -2789,6 +2789,59 @@ def test_render_trigger_overlaps_table():
     assert "75.0%" in result
 
 
+# --- build_topic_lifecycles ---
+
+
+def test_build_topic_lifecycles_basic():
+    """Triggered + finished step produces a lifecycle entry."""
+    from renderer.sections import build_topic_lifecycles
+
+    tl = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                position=1,
+                event_type=EventType.STEP_TRIGGERED,
+                step_id="s1",
+                topic_name="Billing Help",
+                thought="User wants billing info",
+                timestamp="2024-01-01T10:00:00Z",
+            ),
+            TimelineEvent(
+                position=2,
+                event_type=EventType.STEP_FINISHED,
+                step_id="s1",
+                state="completed",
+                timestamp="2024-01-01T10:00:02Z",
+            ),
+        ],
+    )
+    lifecycles = build_topic_lifecycles(tl)
+    assert len(lifecycles) == 1
+    assert lifecycles[0]["name"] == "Billing Help"
+    assert lifecycles[0]["status"] == "completed"
+    assert lifecycles[0]["thought"] == "User wants billing info"
+
+
+def test_build_topic_lifecycles_pending():
+    """Step without a finish event shows as pending."""
+    from renderer.sections import build_topic_lifecycles
+
+    tl = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                position=1,
+                event_type=EventType.STEP_TRIGGERED,
+                step_id="s1",
+                topic_name="Orphaned",
+                timestamp="2024-01-01T10:00:00Z",
+            ),
+        ],
+    )
+    lifecycles = build_topic_lifecycles(tl)
+    assert len(lifecycles) == 1
+    assert lifecycles[0]["status"] == "pending"
+
+
 # --- match_query_to_triggers ---
 
 

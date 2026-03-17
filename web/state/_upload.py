@@ -24,6 +24,7 @@ from renderer.profile import (  # noqa: E402
 from renderer.sections import (  # noqa: E402
     build_conversation_flow_items,
     build_conversation_visual_summary,
+    build_topic_lifecycles,
     build_trigger_match_items,
     render_report_sections,
 )
@@ -836,11 +837,13 @@ class UploadMixin(rx.State, mixin=True):
             for c in untriggered
         ]
 
-        # Trigger phrase analysis
+        # Trigger phrase analysis + topic lifecycles (Routing tab)
         if timeline is not None:
             self.mcs_topics_trigger_matches = build_trigger_match_items(timeline, profile)  # type: ignore[attr-defined]
+            self.mcs_routing_lifecycles = build_topic_lifecycles(timeline)  # type: ignore[attr-defined]
         else:
             self.mcs_topics_trigger_matches = []  # type: ignore[attr-defined]
+            self.mcs_routing_lifecycles = []  # type: ignore[attr-defined]
 
         # Graph anomalies
         anomalies = detect_topic_graph_anomalies(profile)
@@ -1050,6 +1053,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_topics_anomalies = []  # type: ignore[attr-defined]
         self.mcs_topics_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_topics_trigger_matches = []  # type: ignore[attr-defined]
+        self.mcs_routing_lifecycles = []  # type: ignore[attr-defined]
         self.mcs_model_kpis = []  # type: ignore[attr-defined]
         self.mcs_model_configured = []  # type: ignore[attr-defined]
         self.mcs_model_strengths = []  # type: ignore[attr-defined]

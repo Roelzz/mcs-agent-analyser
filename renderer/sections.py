@@ -195,6 +195,7 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
             EventType.KNOWLEDGE_SEARCH,
             EventType.DIALOG_TRACING,
             EventType.DIALOG_REDIRECT,
+            EventType.ACTION_TRIGGER_EVAL,
             EventType.ERROR,
         }:
             title_map = {
@@ -205,9 +206,15 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
                 EventType.KNOWLEDGE_SEARCH: "Knowledge Search",
                 EventType.DIALOG_TRACING: "Topic Trace",
                 EventType.DIALOG_REDIRECT: "Topic Redirect",
+                EventType.ACTION_TRIGGER_EVAL: "Condition Eval",
                 EventType.ERROR: "Error",
             }
-            tone = "error" if ev.event_type == EventType.ERROR else "info"
+            if ev.event_type == EventType.ERROR:
+                tone = "error"
+            elif ev.event_type == EventType.ACTION_TRIGGER_EVAL:
+                tone = "trace"
+            else:
+                tone = "info"
             detail = summary
             query = getattr(ev, "search_query", None)
             if ev.event_type == EventType.KNOWLEDGE_SEARCH and query:
@@ -221,6 +228,9 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
                     "summary": detail,
                     "timestamp": timestamp,
                     "tone": tone,
+                    "thought": ev.thought or "",
+                    "topic_name": ev.topic_name or "",
+                    "state": ev.state or "",
                 }
             )
 
@@ -344,6 +354,88 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
         "latency_bands": latency_bands,
         "highlights": highlights,
     }
+
+
+# ---------------------------------------------------------------------------
+# Topic lifecycle grouping
+# ---------------------------------------------------------------------------
+
+
+def build_topic_lifecycles(timeline: ConversationTimeline) -> list[dict]:
+    """Group timeline events by step_id to build per-topic lifecycle cards.
+
+    Each lifecycle dict contains: step_id, name, thought, status, duration_ms,
+    duration_label, start, end, error, child_summary, child_count.
+    """
+    triggers: dict[str, dict] = {}
+    finishes: dict[str, dict] = {}
+
+    for ev in timeline.events:
+        if ev.event_type == EventType.STEP_TRIGGERED and ev.step_id:
+            triggers[ev.step_id] = {
+                "name": ev.topic_name or "Unknown",
+                "thought": ev.thought or "",
+                "start": ev.timestamp,
+                "position": ev.position,
+            }
+        elif ev.event_type == EventType.STEP_FINISHED and ev.step_id:
+            finishes[ev.step_id] = {
+                "end": ev.timestamp,
+                "state": ev.state or "unknown",
+                "error": ev.error or "",
+            }
+
+    lifecycles: list[dict] = []
+    for step_id in triggers:
+        trig = triggers[step_id]
+        fin = finishes.get(step_id, {})
+        topic_name = trig["name"]
+
+        # Collect child events between trigger and finish
+        child_events: list[dict] = []
+        trig_pos = trig["position"]
+        fin_end = fin.get("end")
+        for ev in timeline.events:
+            if ev.position <= trig_pos:
+                continue
+            if fin_end and ev.timestamp and ev.timestamp > fin_end:
+                break
+            if ev.step_id == step_id:
+                continue
+            if ev.event_type in {
+                EventType.KNOWLEDGE_SEARCH,
+                EventType.ACTION_TRIGGER_EVAL,
+                EventType.DIALOG_REDIRECT,
+            }:
+                child_events.append(
+                    {
+                        "type": ev.event_type.value,
+                        "summary": (ev.summary or "")[:80],
+                    }
+                )
+
+        duration_ms = _ms_between_iso(trig["start"], fin.get("end"))
+        child_summary = " → ".join(
+            f"{ce['type']}: {ce['summary']}" for ce in child_events
+        ) if child_events else ""
+
+        lifecycles.append(
+            {
+                "step_id": step_id,
+                "name": topic_name,
+                "thought": trig["thought"],
+                "status": fin.get("state", "pending"),
+                "duration_ms": str(round(duration_ms, 1)),
+                "duration_label": f"{duration_ms:.0f}ms" if duration_ms > 0 else "",
+                "start": _format_clock(trig["start"]),
+                "end": _format_clock(fin.get("end")),
+                "error": fin.get("error") or "",
+                "child_summary": child_summary,
+                "child_count": str(len(child_events)),
+            }
+        )
+
+    return lifecycles
 
 
 # ---------------------------------------------------------------------------

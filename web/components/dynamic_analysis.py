@@ -97,6 +97,7 @@ def _mcs_section_tab_bar() -> rx.Component:
             _btn("topics", "list", "Topics"),
             _btn("model_comparison", "bar-chart-2", "Model"),
             _btn("credits", "coins", "Credits"),
+            _btn("routing", "route", "Routing"),
             _btn("conversation", "message-square", "Conversation"),
             spacing="0",
             border_bottom=f"1px solid {SURFACE_BORDER}",
@@ -106,6 +107,7 @@ def _mcs_section_tab_bar() -> rx.Component:
         # No profile: limited tabs
         rx.hstack(
             _btn("conversation", "message-square", "Conversation"),
+            _btn("routing", "route", "Routing"),
             _btn("credits", "coins", "Credits"),
             spacing="0",
             border_bottom=f"1px solid {SURFACE_BORDER}",
@@ -256,41 +258,92 @@ def _mcs_flow_message(item: dict) -> rx.Component:
 
 def _mcs_flow_event(item: dict) -> rx.Component:
     is_error = item["tone"] == "error"
-    return rx.center(
-        rx.box(
+    is_trace = item["tone"] == "trace"
+
+    return rx.cond(
+        is_trace,
+        # Compact chip for trace (condition eval) events
+        rx.center(
             rx.hstack(
-                rx.icon(
-                    rx.cond(is_error, "triangle-alert", "workflow"),
-                    size=16,
-                    color=rx.cond(is_error, "var(--red-9)", PRIMARY),
-                ),
-                rx.vstack(
-                    rx.hstack(
-                        rx.text(item["title"], font_size="12px", font_weight="700", color="var(--gray-12)"),
-                        rx.cond(
-                            item["timestamp"] != "",
-                            rx.text(item["timestamp"], font_size="11px", color="var(--gray-a8)"),
-                            rx.box(),
-                        ),
-                        spacing="2",
-                        align="center",
-                        flex_wrap="wrap",
-                    ),
-                    rx.text(item["summary"], font_size="12px", color="var(--gray-a9)", line_height="1.45"),
-                    align="start",
-                    spacing="1",
+                rx.icon("git-branch", size=12, color="var(--gray-a8)"),
+                rx.text(item["summary"], font_size="11px", color="var(--gray-a8)"),
+                rx.cond(
+                    item["timestamp"] != "",
+                    rx.text(item["timestamp"], font_size="10px", color="var(--gray-a6)"),
+                    rx.box(),
                 ),
                 spacing="2",
-                align="start",
-                width="100%",
+                align="center",
+                background="var(--gray-a2)",
+                border=f"1px solid {SURFACE_BORDER}",
+                border_radius="20px",
+                padding="4px 10px",
             ),
-            width=["100%", "100%", "78%"],
-            background=rx.cond(is_error, "var(--red-a3)", "var(--green-a2)"),
-            border=rx.cond(is_error, "1px solid var(--red-a5)", "1px solid var(--green-a4)"),
-            border_radius="12px",
-            padding="10px 12px",
+            width="100%",
         ),
-        width="100%",
+        # Standard event card (info / error)
+        rx.center(
+            rx.box(
+                rx.hstack(
+                    rx.icon(
+                        rx.cond(is_error, "triangle-alert", "workflow"),
+                        size=16,
+                        color=rx.cond(is_error, "var(--red-9)", PRIMARY),
+                    ),
+                    rx.vstack(
+                        rx.hstack(
+                            rx.text(item["title"], font_size="12px", font_weight="700", color="var(--gray-12)"),
+                            rx.cond(
+                                item["topic_name"] != "",
+                                rx.badge(item["topic_name"], color_scheme="teal", variant="soft", size="1"),
+                                rx.box(),
+                            ),
+                            rx.cond(
+                                item["state"] != "",
+                                rx.badge(
+                                    item["state"],
+                                    color_scheme=rx.cond(item["state"] == "completed", "green", "red"),
+                                    variant="soft",
+                                    size="1",
+                                ),
+                                rx.box(),
+                            ),
+                            rx.cond(
+                                item["timestamp"] != "",
+                                rx.text(item["timestamp"], font_size="11px", color="var(--gray-a8)"),
+                                rx.box(),
+                            ),
+                            spacing="2",
+                            align="center",
+                            flex_wrap="wrap",
+                        ),
+                        rx.text(item["summary"], font_size="12px", color="var(--gray-a9)", line_height="1.45"),
+                        rx.cond(
+                            item["thought"] != "",
+                            rx.text(
+                                item["thought"],
+                                font_size="11px",
+                                font_style="italic",
+                                color="var(--gray-a7)",
+                                line_height="1.4",
+                            ),
+                            rx.box(),
+                        ),
+                        align="start",
+                        spacing="1",
+                    ),
+                    spacing="2",
+                    align="start",
+                    width="100%",
+                ),
+                width=["100%", "100%", "78%"],
+                background=rx.cond(is_error, "var(--red-a3)", "var(--green-a2)"),
+                border=rx.cond(is_error, "1px solid var(--red-a5)", "1px solid var(--green-a4)"),
+                border_radius="12px",
+                padding="10px 12px",
+            ),
+            width="100%",
+        ),
     )
 
 
@@ -1154,6 +1207,147 @@ def _mcs_knowledge_panel() -> rx.Component:
     )
 
 
+# ── Routing panel ────────────────────────────────────────────────────────
+
+
+def _mcs_lifecycle_card(item: dict) -> rx.Component:
+    """Render a single topic lifecycle card."""
+    is_failed = item["status"] == "failed"
+    is_pending = item["status"] == "pending"
+    return rx.box(
+        rx.vstack(
+            rx.hstack(
+                rx.badge(
+                    item["name"],
+                    color_scheme=rx.cond(is_failed, "red", rx.cond(is_pending, "amber", "teal")),
+                    variant="soft",
+                    size="1",
+                ),
+                rx.badge(
+                    item["status"],
+                    color_scheme=rx.cond(is_failed, "red", rx.cond(is_pending, "amber", "green")),
+                    variant="outline",
+                    size="1",
+                ),
+                rx.cond(
+                    item["duration_label"] != "",
+                    rx.text(item["duration_label"], font_size="11px", color="var(--gray-a8)", font_family=_MONO),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["start"] != "",
+                    rx.text(
+                        rx.text.span(item["start"]),
+                        rx.text.span(" → ", color="var(--gray-a6)"),
+                        rx.text.span(item["end"]),
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_family=_MONO,
+                    ),
+                    rx.box(),
+                ),
+                spacing="2",
+                align="center",
+                flex_wrap="wrap",
+            ),
+            rx.cond(
+                item["thought"] != "",
+                rx.text(
+                    item["thought"],
+                    font_size="11px",
+                    font_style="italic",
+                    color="var(--gray-a7)",
+                    line_height="1.4",
+                ),
+                rx.box(),
+            ),
+            rx.cond(
+                item["error"] != "",
+                rx.text(item["error"], font_size="11px", color="var(--red-9)"),
+                rx.box(),
+            ),
+            rx.cond(
+                item["child_count"].to(int) > 0,  # type: ignore[union-attr]
+                rx.text(
+                    item["child_summary"],
+                    font_size="11px",
+                    color="var(--gray-a7)",
+                    overflow="hidden",
+                    text_overflow="ellipsis",
+                    white_space="nowrap",
+                ),
+                rx.box(),
+            ),
+            spacing="1",
+            width="100%",
+        ),
+        padding="10px 14px",
+        border_bottom="1px solid var(--gray-a3)",
+        _hover={"background": "var(--gray-a2)"},
+    )
+
+
+def _mcs_routing_panel() -> rx.Component:
+    return rx.vstack(
+        # Topic Lifecycles
+        rx.cond(
+            State.mcs_routing_lifecycles.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("activity", size=16, color="var(--teal-9)"),
+                    section_heading("Topic Lifecycles"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "How topics were triggered, executed, and completed during the conversation.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="8px",
+                ),
+                rx.box(
+                    rx.foreach(State.mcs_routing_lifecycles, _mcs_lifecycle_card),
+                    width="100%",
+                    border=f"1px solid {SURFACE_BORDER}",
+                    border_radius="8px",
+                    background="var(--gray-a2)",
+                    overflow="hidden",
+                ),
+                width="100%",
+            ),
+        ),
+        # Trigger Phrase Analysis
+        rx.cond(
+            State.mcs_topics_trigger_matches.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("crosshair", size=16, color="var(--teal-9)"),
+                    section_heading("Trigger Phrase Analysis"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "How user messages matched against topic trigger phrases.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="8px",
+                ),
+                rx.box(
+                    rx.foreach(State.mcs_topics_trigger_matches, _mcs_trigger_match_card),
+                    width="100%",
+                    border=f"1px solid {SURFACE_BORDER}",
+                    border_radius="8px",
+                    background="var(--gray-a2)",
+                    overflow="hidden",
+                ),
+                width="100%",
+            ),
+        ),
+        spacing="4",
+        width="100%",
+    )
+
+
 # ── Topics panel ─────────────────────────────────────────────────────────
 
 
@@ -1399,33 +1593,6 @@ def _mcs_topics_panel() -> rx.Component:
                     "3fr 1fr 1fr",
                     State.mcs_topics_coverage,
                     _mcs_topics_coverage_row,
-                ),
-                width="100%",
-            ),
-        ),
-        # Trigger Phrase Analysis
-        rx.cond(
-            State.mcs_topics_trigger_matches.length() > 0,  # type: ignore[union-attr]
-            card(
-                rx.hstack(
-                    rx.icon("crosshair", size=16, color="var(--teal-9)"),
-                    section_heading("Trigger Phrase Analysis"),
-                    spacing="2",
-                    align="center",
-                ),
-                rx.text(
-                    "How user messages matched against topic trigger phrases.",
-                    font_size="12px",
-                    color="var(--gray-a9)",
-                    padding_bottom="8px",
-                ),
-                rx.box(
-                    rx.foreach(State.mcs_topics_trigger_matches, _mcs_trigger_match_card),
-                    width="100%",
-                    border=f"1px solid {SURFACE_BORDER}",
-                    border_radius="8px",
-                    background="var(--gray-a2)",
-                    overflow="hidden",
                 ),
                 width="100%",
             ),
@@ -1992,6 +2159,7 @@ def dynamic_analysis_viewer() -> rx.Component:
                     ("knowledge", _mcs_knowledge_panel()),
                     ("topics", _mcs_topics_panel()),
                     ("model_comparison", _mcs_model_panel()),
+                    ("routing", _mcs_routing_panel()),
                     rx.box(),  # fallback
                 ),
                 padding_top="20px",
