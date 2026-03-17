@@ -2,7 +2,12 @@
 
 ![Repo Views](https://komarev.com/ghpvc/?username=Roelzz&label=Repo%20Views&color=0e75b6&style=flat)
 
-Parses Microsoft Copilot Studio bot exports and live Dataverse environments — generates architecture reports, runs best-practice rules, compares bots, and aggregates conversation analytics. Includes a full web UI.
+# TLDR
+**Peek under the hood of your Copilot Studio agents.** Upload a bot export, drop a conversation transcript, or connect straight to Dataverse; Instantly see what your agent is actually doing under the hood: how the orchestrator routes decisions, which topics/tools/agents fire and why, where knowledge searches hit or miss, how long each step takes, and what falls through the cracks. Architecture reports, best-practice rules, trigger overlap detection, execution timelines, credit estimates.
+
+Everything you need to build with confidence and debug without guessing. If you're serious about Copilot Studio development, this belongs in your toolkit.
+
+![Dashboard](docs/screenshots/dashboard.png)
 
 ## Why Agent Analyser
 
@@ -20,6 +25,7 @@ Parses Microsoft Copilot Studio bot exports and live Dataverse environments — 
 | --- | --- |
 | **Upload bot export** | Drop a `.zip`, or `botContent.yml` + `dialog.json` — get a full architecture report with quick wins |
 | **Connect to Dataverse** | Device-code auth to your environment, auto-analyses your bot the moment you connect |
+| **Routing analysis** | Orchestrator decision timeline, topic lifecycles with redirect tracking, trigger phrase similarity, plan evolution |
 | **Conversation transcripts** | Upload or fetch transcripts from Dataverse — sequence diagrams, Gantt charts, event logs |
 | **Single conversation lookup** | Fetch and analyse a specific conversation by ID directly from Dataverse |
 | **Batch analytics** | Aggregate multiple transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
@@ -177,6 +183,24 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 - **Solution checker** — custom rules run alongside built-in check categories
 - **Rules page** (`/rules`) — view, edit, and manage rules in the web UI
 
+## Screenshots
+
+### Dynamic Analysis — Profile Tab
+
+![Dynamic Analysis Profile](docs/screenshots/dynamic-profile.png)
+
+### Knowledge Search Results
+
+![Knowledge Search](docs/screenshots/knowledge-search.png)
+
+### Conversation Analytics
+
+![Conversation Analytics](docs/screenshots/conversation-analytics.png)
+
+### Execution Timeline
+
+![Execution Timeline](docs/screenshots/execution-timeline.png)
+
 ## What It Extracts
 
 **From `botContent.yml`:**
@@ -184,7 +208,7 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 - AI configuration (GPT component model, instructions, knowledge sources, capabilities)
 - All components with kind, state, triggers, dialog types
 - Topic connection graph (which topics call which via `BeginDialog`)
-- Trigger query overlap detection
+- Trigger query overlap detection (always shown, reports "no overlaps" when all topics are distinct)
 - Security inventory (auth mode, access control, content moderation, App Insights config)
 - MCS credit estimation
 
@@ -231,6 +255,7 @@ Each generated report contains:
 11. **Integration Map** — Mermaid diagram of external connections
 12. **Credit Estimate** — MCS message credit estimation based on bot features
 13. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log, errors
+14. **Routing Analysis** — orchestrator decision timeline, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution, trigger phrase similarity analysis, condition evaluations
 
 Transcript reports contain:
 
@@ -338,7 +363,7 @@ Make sure `.env` contains at least `REFLEX_ENV=prod` and `PORT=2009`.
 ```bash
 cp .env.example .env          # edit credentials
 uv sync
-uv run pytest              # 247 tests
+uv run pytest              # 262 tests
 uv run ruff check .
 uv run ruff format .
 uv run reflex run          # dev server — frontend :3000, backend :8000
@@ -369,6 +394,7 @@ renderer/                Markdown + Mermaid rendering
   knowledge.py           Knowledge source rendering
   profile.py             Bot profile rendering
   report.py              Main report assembly
+  sections.py            Routing tab builders (lifecycles, decision timeline, trigger analysis, plan evolution)
   timeline_render.py     Timeline / conversation trace rendering
 
 solution_checker/        Solution health checker
@@ -396,6 +422,7 @@ web/
     _report.py           Report generation state
     _rules.py            Custom rules state
     _solution.py         Solution tools state
+    _dynamic.py          Dynamic analysis state (routing, conversation, profile tabs)
     _upload.py           File upload state
 
   components/            UI components
@@ -406,6 +433,7 @@ web/
     report.py            Report viewer
     rules.py             Rules editor
     solution_tools.py    Solution tools form
+    dynamic_analysis.py  Dynamic analysis panels (routing, conversation, profile)
     upload.py            Upload form
 
 data/
@@ -413,7 +441,7 @@ data/
 
 best_practices/          GPT model best-practice reference docs
 samples/                 Sample reports
-tests/                   Test suite (247 tests)
+tests/                   Test suite (262 tests)
 ```
 
 ## License

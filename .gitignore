@@ -43,5 +43,6 @@ Transcripts/
 data/*
 !data/default_rules.yaml
 
-# Local docs / plans
-docs/
+# Local docs / plans (keep screenshots for README)
+docs/*
+!docs/screenshots/

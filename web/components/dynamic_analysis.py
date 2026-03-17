@@ -1974,24 +1974,30 @@ def _mcs_topics_panel() -> rx.Component:
             ),
         ),
         # Trigger Overlaps
-        rx.cond(
-            State.mcs_profile_trigger_overlaps.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Trigger Overlaps"),
-                rx.text(
-                    "Topics with >50% token overlap in trigger phrases.",
-                    font_size="12px",
-                    color="var(--gray-a9)",
-                    padding_bottom="8px",
-                ),
+        card(
+            section_heading("Trigger Overlaps"),
+            rx.text(
+                "Topics with >50% token overlap in trigger phrases.",
+                font_size="12px",
+                color="var(--gray-a9)",
+                padding_bottom="8px",
+            ),
+            rx.cond(
+                State.mcs_profile_trigger_overlaps.length() > 0,  # type: ignore[union-attr]
                 _data_table(
                     ["Topic A", "Topic B", "Overlap", "Shared Tokens"],
                     "2fr 2fr 1fr 3fr",
                     State.mcs_profile_trigger_overlaps,
                     _mcs_profile_overlap_row,
                 ),
-                width="100%",
+                rx.text(
+                    "No overlaps detected — all topics have distinct trigger phrases.",
+                    font_size="12px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
+                ),
             ),
+            width="100%",
         ),
         # Orchestrator Topics detail
         rx.cond(
