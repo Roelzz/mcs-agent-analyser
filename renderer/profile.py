@@ -489,9 +489,14 @@ def render_quick_wins(profile: BotProfile) -> str:
         if comp.kind == "DialogComponent":
             desc = comp.description
             if desc is None or len(desc) < 10 or desc.strip() == comp.display_name.strip():
-                reason = "missing" if desc is None else ("too short" if len(desc) < 10 else "matches display name")
+                if desc is None:
+                    reason_detail = "missing"
+                elif len(desc) < 10:
+                    reason_detail = f'too short: "{desc}"'
+                else:
+                    reason_detail = "matches display name"
                 findings.append(
-                    _fmt("info", f'Weak description: "{comp.display_name}" — Description is {reason}.')
+                    _fmt("info", f'Weak description: "{comp.display_name}" — {reason_detail}')
                 )
 
     # 4. Missing system topics

@@ -159,6 +159,17 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
     """Build chat-style flow items from timeline events for UI rendering."""
     items: list[dict] = []
 
+    # Extra detail keys required by rx.foreach (must be uniform across all dicts)
+    _detail_defaults = {
+        "has_recommendations": "",
+        "plan_used_outputs": "",
+        "plan_identifier": "",
+        "plan_steps": "",
+        "error": "",
+        "is_final_plan": "",
+        "orchestrator_ask": "",
+    }
+
     for ev in timeline.events:
         summary = (ev.summary or "").strip()
         timestamp = _format_clock(ev.timestamp)
@@ -171,6 +182,14 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
                     "actor": ACTOR_NAMES["user"],
                     "text": _strip_prefix(summary, "User:"),
                     "timestamp": timestamp,
+                    "event_type": "",
+                    "title": "",
+                    "summary": "",
+                    "tone": "",
+                    "thought": "",
+                    "topic_name": "",
+                    "state": "",
+                    **_detail_defaults,
                 }
             )
             continue
@@ -183,6 +202,14 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
                     "actor": ACTOR_NAMES["bot"],
                     "text": _strip_prefix(summary, "Bot:"),
                     "timestamp": timestamp,
+                    "event_type": "",
+                    "title": "",
+                    "summary": "",
+                    "tone": "",
+                    "thought": "",
+                    "topic_name": "",
+                    "state": "",
+                    **_detail_defaults,
                 }
             )
             continue
@@ -223,6 +250,9 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
             items.append(
                 {
                     "kind": "event",
+                    "role": "",
+                    "actor": "",
+                    "text": "",
                     "event_type": ev.event_type.value,
                     "title": title_map.get(ev.event_type, ev.event_type.value),
                     "summary": detail,
@@ -231,6 +261,13 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
                     "thought": ev.thought or "",
                     "topic_name": ev.topic_name or "",
                     "state": ev.state or "",
+                    "has_recommendations": "true" if ev.has_recommendations else "",
+                    "plan_used_outputs": ev.plan_used_outputs or "",
+                    "plan_identifier": ev.plan_identifier or "",
+                    "plan_steps": ", ".join(ev.plan_steps) if ev.plan_steps else "",
+                    "error": ev.error or "",
+                    "is_final_plan": str(ev.is_final_plan) if ev.is_final_plan is not None else "",
+                    "orchestrator_ask": ev.orchestrator_ask or "",
                 }
             )
 
@@ -410,6 +447,8 @@ def build_topic_lifecycles(timeline: ConversationTimeline) -> list[dict]:
                 EventType.KNOWLEDGE_SEARCH,
                 EventType.ACTION_TRIGGER_EVAL,
                 EventType.DIALOG_REDIRECT,
+                EventType.ACTION_HTTP_REQUEST,
+                EventType.ACTION_BEGIN_DIALOG,
             }:
                 child_events.append(
                     {
@@ -631,13 +670,17 @@ def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list
             continue
 
         if ev.event_type in {EventType.STEP_TRIGGERED, EventType.STEP_FINISHED}:
+            import re as _re
+
             status = ev.state or ""
             duration = ""
             used_outputs = ""
             has_recs = ""
+            error = ev.error or ""
+            # Parse step_type from summary parenthetical, e.g. "(CustomTopic)"
+            _st_match = _re.search(r"\((\w+)\)", ev.summary or "")
+            step_type = _st_match.group(1) if _st_match else ""
             if ev.event_type == EventType.STEP_FINISHED:
-                import re as _re
-
                 m = _re.search(r"\((\d+)ms\)", ev.summary or "")
                 duration = f"{m.group(1)}ms" if m else ""
                 used_outputs = ev.plan_used_outputs or ""
@@ -654,6 +697,20 @@ def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list
                 "duration": duration,
                 "timestamp": _format_clock(ev.timestamp),
                 "plan_identifier": ev.plan_identifier or "",
+                "step_type": step_type,
+                "error": error,
+            })
+            continue
+
+        if ev.event_type in {EventType.ACTION_HTTP_REQUEST, EventType.ACTION_BEGIN_DIALOG}:
+            action_type = "HTTP Request" if ev.event_type == EventType.ACTION_HTTP_REQUEST else "Begin Dialog"
+            items.append({
+                "kind": "action",
+                "action_type": action_type,
+                "topic_name": ev.topic_name or "",
+                "summary": (ev.summary or "")[:120],
+                "error": ev.error or "",
+                "timestamp": _format_clock(ev.timestamp),
             })
             continue
 
