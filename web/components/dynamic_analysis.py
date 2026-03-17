@@ -256,6 +256,96 @@ def _mcs_flow_message(item: dict) -> rx.Component:
     )
 
 
+def _flow_event_detail_accordion(item: dict) -> rx.Component:
+    """Expandable detail section for flow events with rich fields."""
+    return rx.accordion.root(
+        rx.accordion.item(
+            header=rx.text("Details", font_size="11px", color="var(--gray-a8)"),
+            content=rx.vstack(
+                rx.cond(
+                    item["thought"] != "",
+                    rx.text(item["thought"], font_size="11px", font_style="italic", color="var(--gray-a7)", line_height="1.4"),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["error"] != "",
+                    rx.text(item["error"], font_size="11px", color="var(--red-9)"),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["plan_steps"] != "",
+                    rx.vstack(
+                        rx.text("Plan steps:", font_size="11px", color="var(--gray-a8)", font_weight="600"),
+                        rx.text(item["plan_steps"], font_size="11px", color="var(--gray-11)"),
+                        spacing="1",
+                        width="100%",
+                    ),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["has_recommendations"] == "true",
+                    rx.badge("Alternatives considered", color_scheme="amber", variant="soft", size="1"),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["plan_used_outputs"] != "",
+                    rx.text(
+                        rx.text.span("Used outputs: ", font_weight="600", color="var(--gray-a8)"),
+                        rx.text.span(item["plan_used_outputs"]),
+                        font_size="11px",
+                        color="var(--blue-9)",
+                    ),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["plan_identifier"] != "",
+                    rx.hstack(
+                        rx.text(item["plan_identifier"], font_size="11px", color="var(--gray-a8)"),
+                        rx.cond(
+                            item["is_final_plan"] == "True",
+                            rx.badge("Final", color_scheme="green", variant="soft", size="1"),
+                            rx.box(),
+                        ),
+                        spacing="2",
+                        align="center",
+                    ),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["orchestrator_ask"] != "",
+                    rx.text(
+                        rx.text.span("Ask: ", font_weight="600", color="var(--gray-a8)"),
+                        rx.text.span(item["orchestrator_ask"], font_style="italic"),
+                        font_size="11px",
+                        color="var(--violet-11)",
+                    ),
+                    rx.box(),
+                ),
+                spacing="1",
+                width="100%",
+                padding_top="4px",
+            ),
+            value="details",
+        ),
+        type="multiple",
+        variant="ghost",
+        width="100%",
+    )
+
+
+def _has_flow_details(item: dict) -> rx.Var:
+    """Check if any detail field is non-empty."""
+    return (
+        (item["thought"] != "")
+        | (item["error"] != "")
+        | (item["plan_steps"] != "")
+        | (item["has_recommendations"] == "true")
+        | (item["plan_used_outputs"] != "")
+        | (item["plan_identifier"] != "")
+        | (item["orchestrator_ask"] != "")
+    )
+
+
 def _mcs_flow_event(item: dict) -> rx.Component:
     is_error = item["tone"] == "error"
     is_trace = item["tone"] == "trace"
@@ -318,15 +408,10 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                             flex_wrap="wrap",
                         ),
                         rx.text(item["summary"], font_size="12px", color="var(--gray-a9)", line_height="1.45"),
+                        # Expandable details accordion (only when detail fields exist)
                         rx.cond(
-                            item["thought"] != "",
-                            rx.text(
-                                item["thought"],
-                                font_size="11px",
-                                font_style="italic",
-                                color="var(--gray-a7)",
-                                line_height="1.4",
-                            ),
+                            _has_flow_details(item),
+                            _flow_event_detail_accordion(item),
                             rx.box(),
                         ),
                         align="start",
@@ -1394,6 +1479,11 @@ def _mcs_decision_item(item: dict) -> rx.Component:
                         size="1",
                     ),
                     rx.cond(
+                        item.get("step_type", "") != "",
+                        rx.badge(item.get("step_type", ""), color_scheme="gray", variant="outline", size="1"),
+                        rx.box(),
+                    ),
+                    rx.cond(
                         item.get("duration", "") != "",
                         rx.text(item.get("duration", ""), font_size="10px", color="var(--gray-a8)", font_family=_MONO),
                         rx.box(),
@@ -1423,6 +1513,44 @@ def _mcs_decision_item(item: dict) -> rx.Component:
                         padding_top="2px",
                     ),
                     rx.box(),
+                ),
+                rx.cond(
+                    item.get("error", "") != "",
+                    rx.text(
+                        item.get("error", ""),
+                        font_size="11px",
+                        color="var(--red-9)",
+                        padding_left="22px",
+                        padding_top="2px",
+                    ),
+                    rx.box(),
+                ),
+                padding="4px 14px 4px 36px",
+                margin_bottom="2px",
+            ),
+        ),
+        # Action (HTTP request / Begin Dialog)
+        (
+            "action",
+            rx.box(
+                rx.hstack(
+                    rx.icon("globe", size=12, color="var(--purple-9)"),
+                    rx.text(item.get("action_type", ""), font_size="11px", font_weight="600", color="var(--purple-11)"),
+                    rx.cond(
+                        item.get("topic_name", "") != "",
+                        rx.badge(item.get("topic_name", ""), color_scheme="purple", variant="soft", size="1"),
+                        rx.box(),
+                    ),
+                    rx.text(item.get("summary", ""), font_size="11px", color="var(--gray-a8)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap", max_width="400px"),
+                    rx.cond(
+                        item.get("error", "") != "",
+                        rx.text(item.get("error", ""), font_size="11px", color="var(--red-9)"),
+                        rx.box(),
+                    ),
+                    rx.text(item.get("timestamp", ""), font_size="10px", color="var(--gray-a7)", font_family=_MONO),
+                    spacing="2",
+                    align="center",
+                    flex_wrap="wrap",
                 ),
                 padding="4px 14px 4px 36px",
                 margin_bottom="2px",
@@ -2110,14 +2238,78 @@ def _mcs_conv_error_item(error: str) -> rx.Component:
 
 
 def _mcs_conv_reasoning_row(item: dict) -> rx.Component:
-    return rx.grid(
-        rx.text(item["step"], font_size="13px", color="var(--gray-a9)", text_align="right"),
-        rx.text(item["topic"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-        rx.text(item["reasoning"], font_size="12px", color="var(--gray-11)", line_height="1.5"),
-        columns="0.5fr 1.5fr 4fr",
-        gap="8px",
-        align="start",
-        padding_y="6px",
+    return rx.box(
+        rx.vstack(
+            # Header row: step number + topic badge + step_type badge + status badge + duration
+            rx.hstack(
+                rx.text(
+                    rx.text.span("#"),
+                    rx.text.span(item["step"], font_weight="600"),
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                ),
+                rx.badge(item["topic"], color_scheme="teal", variant="soft", size="1"),
+                rx.cond(
+                    item["step_type"] != "",
+                    rx.badge(item["step_type"], color_scheme="gray", variant="outline", size="1"),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["status"] != "",
+                    rx.badge(
+                        item["status"],
+                        color_scheme=rx.cond(item["status"] == "completed", "green", "red"),
+                        variant="soft",
+                        size="1",
+                    ),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["duration"] != "",
+                    rx.text(item["duration"], font_size="11px", color="var(--gray-a8)", font_family=_MONO),
+                    rx.box(),
+                ),
+                spacing="2",
+                align="center",
+                flex_wrap="wrap",
+            ),
+            # Reasoning text
+            rx.text(item["reasoning"], font_size="12px", color="var(--gray-11)", line_height="1.5"),
+            # Conditional details
+            rx.cond(
+                item["orchestrator_ask"] != "",
+                rx.text(
+                    rx.text.span("Ask: ", font_weight="600", color="var(--gray-a8)"),
+                    rx.text.span(item["orchestrator_ask"], font_style="italic"),
+                    font_size="11px",
+                    color="var(--violet-11)",
+                ),
+                rx.box(),
+            ),
+            rx.cond(
+                item["has_recommendations"] == "true",
+                rx.badge("Alternatives considered", color_scheme="amber", variant="soft", size="1"),
+                rx.box(),
+            ),
+            rx.cond(
+                item["used_outputs"] != "",
+                rx.text(
+                    rx.text.span("Outputs: ", font_weight="600", color="var(--gray-a8)"),
+                    rx.text.span(item["used_outputs"]),
+                    font_size="11px",
+                    color="var(--blue-9)",
+                ),
+                rx.box(),
+            ),
+            rx.cond(
+                item["error"] != "",
+                rx.text(item["error"], font_size="11px", color="var(--red-9)"),
+                rx.box(),
+            ),
+            spacing="1",
+            width="100%",
+        ),
+        padding="10px 14px",
         border_bottom=f"1px solid {SURFACE_BORDER}",
         width="100%",
     )
@@ -2239,14 +2431,12 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                         align="center",
                     ),
                     rx.box(
-                        _grid_header("Step", "Topic", "Reasoning", template="0.5fr 1.5fr 4fr"),
                         rx.foreach(State.mcs_conv_reasoning, _mcs_conv_reasoning_row),
                         width="100%",
                         border=f"1px solid {SURFACE_BORDER}",
                         border_radius="8px",
-                        padding_x="12px",
                         background="var(--gray-a2)",
-                        overflow_x="auto",
+                        overflow="hidden",
                     ),
                     width="100%",
                 ),

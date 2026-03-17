@@ -22,6 +22,7 @@ from renderer.profile import (  # noqa: E402
     render_topic_graph,
 )
 from renderer.sections import (  # noqa: E402
+    _ms_between_iso,
     build_conversation_flow_items,
     build_conversation_visual_summary,
     build_orchestrator_decision_timeline,
@@ -405,7 +406,13 @@ class UploadMixin(rx.State, mixin=True):
             if comp.kind == "DialogComponent":
                 desc = comp.description
                 if desc is None or len(desc) < 10 or desc.strip() == comp.display_name.strip():
-                    quick_wins.append({"severity": "info", "icon": "info", "text": f'Weak description: "{comp.display_name}"'})
+                    if desc is None:
+                        _reason = "missing"
+                    elif len(desc) < 10:
+                        _reason = f'too short: "{desc}"'
+                    else:
+                        _reason = "matches display name"
+                    quick_wins.append({"severity": "info", "icon": "info", "text": f'Weak description: "{comp.display_name}" — {_reason}'})
         trigger_kinds = {c.trigger_kind for c in profile.components if c.trigger_kind}
         for trigger in ("OnError", "OnUnknownIntent", "OnEscalate"):
             if trigger not in trigger_kinds:
@@ -986,16 +993,60 @@ class UploadMixin(rx.State, mixin=True):
         # Errors
         self.mcs_conv_errors = list(timeline.errors)  # type: ignore[attr-defined]
 
-        # Orchestrator reasoning
+        # Orchestrator reasoning — enriched with finish data
+        import re as _re_reason
+
+        # Build finish lookup by step_id
+        finish_lookup: dict[str, object] = {}
+        for _fev in timeline.events:
+            if _fev.event_type == EventType.STEP_FINISHED and _fev.step_id:
+                finish_lookup[_fev.step_id] = _fev
+
         reasoning: list[dict] = []
         step_num = 0
+        last_ask = ""
         for ev in timeline.events:
+            # Track preceding PlanReceivedDebug for orchestrator_ask
+            if ev.event_type == EventType.PLAN_RECEIVED_DEBUG and ev.orchestrator_ask:
+                last_ask = ev.orchestrator_ask
+
             if ev.event_type == EventType.STEP_TRIGGERED and ev.thought:
                 step_num += 1
+                # Parse step_type from summary parenthetical
+                _st_m = _re_reason.search(r"\((\w+)\)", ev.summary or "")
+                step_type = _st_m.group(1) if _st_m else ""
+
+                # Pair with finish event
+                fin_ev = finish_lookup.get(ev.step_id) if ev.step_id else None
+                fin_status = ""
+                fin_error = ""
+                fin_has_recs = ""
+                fin_used_outputs = ""
+                duration_label = ""
+                if fin_ev:
+                    fin_status = fin_ev.state or ""
+                    fin_error = fin_ev.error or ""
+                    if fin_ev.has_recommendations:
+                        fin_has_recs = "true"
+                    fin_used_outputs = fin_ev.plan_used_outputs or ""
+                    dur_ms = _ms_between_iso(ev.timestamp, fin_ev.timestamp)
+                    if dur_ms > 0:
+                        duration_label = f"{dur_ms:.0f}ms"
+
+                # Merge has_recommendations from trigger or finish
+                has_recs = "true" if ev.has_recommendations or fin_has_recs else ""
+
                 reasoning.append({
                     "step": str(step_num),
                     "topic": ev.topic_name or "—",
                     "reasoning": ev.thought,
+                    "step_type": step_type,
+                    "orchestrator_ask": last_ask,
+                    "status": fin_status,
+                    "duration": duration_label,
+                    "error": fin_error,
+                    "has_recommendations": has_recs,
+                    "used_outputs": fin_used_outputs,
                 })
         self.mcs_conv_reasoning = reasoning  # type: ignore[attr-defined]
 

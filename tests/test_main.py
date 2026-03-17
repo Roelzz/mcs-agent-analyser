@@ -63,6 +63,7 @@ from renderer import (
     render_transcript_report,
 )
 from renderer.sections import (
+    build_conversation_flow_items,
     build_orchestrator_decision_timeline,
     build_plan_evolution,
     build_topic_lifecycles,
@@ -4201,3 +4202,127 @@ def test_build_trigger_match_items_orchestrator_ask():
     items = build_trigger_match_items(tl, profile)
     assert len(items) == 1
     assert items[0]["orchestrator_ask"] == "password reset"
+
+
+# --- Improvement 4: Quick wins show actual description ---
+
+
+def test_quick_wins_weak_description_missing():
+    """Quick wins should say 'missing' when description is None."""
+    profile = BotProfile(components=[
+        ComponentSummary(kind="DialogComponent", display_name="Test", schema_name="cr_test", description=None),
+    ])
+    md = render_quick_wins(profile)
+    assert 'Weak description: "Test" — missing' in md
+
+
+def test_quick_wins_weak_description_too_short():
+    """Quick wins should show the actual short description."""
+    profile = BotProfile(components=[
+        ComponentSummary(kind="DialogComponent", display_name="Test", schema_name="cr_test", description="Hi"),
+    ])
+    md = render_quick_wins(profile)
+    assert 'too short: "Hi"' in md
+
+
+def test_quick_wins_weak_description_matches_name():
+    """Quick wins should say 'matches display name' when desc == name."""
+    profile = BotProfile(components=[
+        ComponentSummary(kind="DialogComponent", display_name="PasswordReset", schema_name="cr_pw", description="PasswordReset"),
+    ])
+    md = render_quick_wins(profile)
+    assert "matches display name" in md
+
+
+# --- Improvement 1: HTTP calls in lifecycles + decision timeline ---
+
+
+def test_lifecycle_includes_http_child_events():
+    """Topic lifecycles should include HTTP and BeginDialog child events."""
+    events = [
+        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="Main", position=1, timestamp="2024-01-01T10:00:00Z"),
+        TimelineEvent(event_type=EventType.ACTION_HTTP_REQUEST, summary="GET /api/data", position=2, timestamp="2024-01-01T10:00:01Z"),
+        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Begin SubTopic", position=3, timestamp="2024-01-01T10:00:02Z"),
+        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", position=4, timestamp="2024-01-01T10:00:03Z"),
+    ]
+    tl = ConversationTimeline(events=events)
+    lifecycles = build_topic_lifecycles(tl)
+    assert len(lifecycles) == 1
+    assert lifecycles[0]["child_count"] == "2"
+    assert "ActionHttpRequest" in lifecycles[0]["child_summary"]
+    assert "ActionBeginDialog" in lifecycles[0]["child_summary"]
+
+
+def test_decision_timeline_action_items():
+    """Decision timeline should emit action items for HTTP and BeginDialog."""
+    events = [
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hello", position=1, timestamp="2024-01-01T10:00:00Z"),
+        TimelineEvent(event_type=EventType.ACTION_HTTP_REQUEST, summary="GET /api/data", topic_name="Main", position=2, timestamp="2024-01-01T10:00:01Z"),
+        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Begin SubTopic", position=3, timestamp="2024-01-01T10:00:02Z"),
+    ]
+    tl = ConversationTimeline(events=events)
+    items = build_orchestrator_decision_timeline(tl)
+    action_items = [i for i in items if i["kind"] == "action"]
+    assert len(action_items) == 2
+    assert action_items[0]["action_type"] == "HTTP Request"
+    assert action_items[1]["action_type"] == "Begin Dialog"
+
+
+# --- Improvement 5: Richer step items with step_type and error ---
+
+
+def test_decision_timeline_step_type_and_error():
+    """Step items should include step_type parsed from summary and error."""
+    events = [
+        TimelineEvent(
+            event_type=EventType.STEP_TRIGGERED,
+            step_id="s1",
+            topic_name="Greeting",
+            summary="Step triggered: Greeting (CustomTopic)",
+            thought="User wants greeting",
+            position=1,
+            timestamp="2024-01-01T10:00:00Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.STEP_FINISHED,
+            step_id="s1",
+            topic_name="Greeting",
+            summary="Step finished: Greeting (500ms)",
+            state="failed",
+            error="Timeout reached",
+            position=2,
+            timestamp="2024-01-01T10:00:01Z",
+        ),
+    ]
+    tl = ConversationTimeline(events=events)
+    items = build_orchestrator_decision_timeline(tl)
+    steps = [i for i in items if i["kind"] == "step"]
+    assert len(steps) == 2
+    # Triggered step
+    assert steps[0]["step_type"] == "CustomTopic"
+    assert steps[0]["error"] == ""
+    # Finished step
+    assert steps[1]["error"] == "Timeout reached"
+    assert steps[1]["status"] == "failed"
+
+
+# --- Improvement 2: Flow items have uniform keys ---
+
+
+def test_conversation_flow_items_uniform_keys():
+    """All flow items (messages + events) should have the same dict keys."""
+    events = [
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hello", position=1, timestamp="2024-01-01T10:00:00Z"),
+        TimelineEvent(event_type=EventType.PLAN_RECEIVED, summary="Plan received", plan_steps=["StepA"], is_final_plan=True, position=2, timestamp="2024-01-01T10:00:01Z"),
+        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hi", position=3, timestamp="2024-01-01T10:00:02Z"),
+    ]
+    tl = ConversationTimeline(events=events)
+    items = build_conversation_flow_items(tl)
+    assert len(items) == 3
+    # All items should have the same keys
+    key_sets = [set(i.keys()) for i in items]
+    assert key_sets[0] == key_sets[1] == key_sets[2]
+    # Event should have plan detail fields populated
+    event_item = items[1]
+    assert event_item["plan_steps"] == "StepA"
+    assert event_item["is_final_plan"] == "True"
