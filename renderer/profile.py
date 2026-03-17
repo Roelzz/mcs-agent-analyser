@@ -26,6 +26,8 @@ _AUTOMATION_TRIGGERS: set[str] = {
     "OnActivity",
 }
 
+_EXT_KINDS = {"InvokeConnectorAction", "InvokeFlowAction", "InvokeAIBuilderModelAction", "HttpRequestAction"}
+
 _CATEGORY_ORDER: list[str] = [
     "user_topics",
     "system_topics",
@@ -330,19 +332,43 @@ def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | N
     """Render topic deep dive: external calls and coverage analysis."""
     lines: list[str] = []
 
-    # Section 1: Topics with external calls
+    # Section 1: Topics with external calls (per-action detail)
     external_topics = [c for c in profile.components if c.kind == "DialogComponent" and c.has_external_calls]
     if external_topics:
         lines.append("### Topics with External Calls\n")
-        lines.append("| Topic | Connector | Flow | AI Builder | HTTP | Total Actions |")
-        lines.append("| --- | --- | --- | --- | --- | --- |")
-        for comp in external_topics:
-            connector = comp.action_summary.get("InvokeConnectorAction", 0)
-            flow = comp.action_summary.get("InvokeFlowAction", 0)
-            ai_builder = comp.action_summary.get("InvokeAIBuilderModelAction", 0)
-            http = comp.action_summary.get("HttpRequestAction", 0)
-            total = sum(comp.action_summary.values())
-            lines.append(f"| {comp.display_name} | {connector} | {flow} | {ai_builder} | {http} | {total} |")
+        # Check if any topic has action_details
+        has_details = any(c.action_details for c in external_topics)
+        if has_details:
+            lines.append("| Topic | Action Kind | Connector | Operation |")
+            lines.append("| --- | --- | --- | --- |")
+            # Collect all rows, then deduplicate
+            raw_rows: list[tuple[str, str, str, str]] = []
+            for comp in external_topics:
+                if comp.action_details:
+                    for detail in comp.action_details:
+                        kind = detail.get("kind", "—")
+                        connector = detail.get("connector_display_name") or detail.get("connection_reference") or "—"
+                        operation = detail.get("operation_id") or "—"
+                        raw_rows.append((comp.display_name, kind, connector, operation))
+                else:
+                    total = sum(v for k, v in comp.action_summary.items() if k in _EXT_KINDS)
+                    raw_rows.append((comp.display_name, "(summary)", "—", f"{total} calls"))
+            # Deduplicate: count identical rows
+            from collections import Counter
+            row_counts = Counter(raw_rows)
+            for (topic, kind, connector, operation), count in row_counts.items():
+                op_display = f"{operation} (×{count})" if count > 1 else operation
+                lines.append(f"| {topic} | {kind} | {connector} | {op_display} |")
+        else:
+            lines.append("| Topic | Connector | Flow | AI Builder | HTTP | Total Actions |")
+            lines.append("| --- | --- | --- | --- | --- | --- |")
+            for comp in external_topics:
+                connector = comp.action_summary.get("InvokeConnectorAction", 0)
+                flow = comp.action_summary.get("InvokeFlowAction", 0)
+                ai_builder = comp.action_summary.get("InvokeAIBuilderModelAction", 0)
+                http = comp.action_summary.get("HttpRequestAction", 0)
+                total = sum(comp.action_summary.values())
+                lines.append(f"| {comp.display_name} | {connector} | {flow} | {ai_builder} | {http} | {total} |")
         lines.append("")
 
     # Section 2: Topic coverage (only if timeline provided)
@@ -546,7 +572,7 @@ def render_trigger_overlaps(overlaps: list[dict]) -> str:
         return ""
 
     lines = [
-        "## Trigger Query Overlaps\n",
+        "### Trigger Query Overlaps\n",
         "Topics with >50% token overlap in trigger phrases may cause disambiguation issues.\n",
         "| Topic A | Topic B | Overlap | Shared Tokens |",
         "|---------|---------|---------|---------------|",

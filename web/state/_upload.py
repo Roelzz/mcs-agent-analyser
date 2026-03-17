@@ -15,6 +15,7 @@ from renderer.timeline_render import render_gantt_chart, render_mermaid_sequence
 from renderer.knowledge import _grounding_score, _source_efficiency  # noqa: E402
 from renderer.profile import (  # noqa: E402
     _AUTOMATION_TRIGGERS,
+    _CATEGORY_ORDER,
     _SYSTEM_TRIGGERS,
     _classify_component,
     detect_topic_graph_anomalies,
@@ -423,7 +424,7 @@ class UploadMixin(rx.State, mixin=True):
             quick_wins.append({"severity": sev, "icon": "alert-triangle" if sev == "warn" else "info", "text": issue["message"]})
 
         # KPIs
-        total_comps = sum(len(v) for v in by_cat.values())
+        total_comps = sum(len(v) for k, v in by_cat.items() if k in _CATEGORY_ORDER)
         self.mcs_profile_kpis = [  # type: ignore[attr-defined]
             {"label": "Components", "value": str(total_comps), "hint": "Total config items", "tone": "neutral"},
             {"label": "User Topics", "value": str(len(user_topics)), "hint": "Trigger-based", "tone": "neutral"},
@@ -567,6 +568,29 @@ class UploadMixin(rx.State, mixin=True):
             }
             for t in tools
         ]
+
+        # External calls detail (per-action rows from action_details, deduplicated)
+        from collections import Counter
+        raw_ext: list[tuple[str, str, str, str]] = []
+        for c in profile.components:
+            if c.kind == "DialogComponent" and c.has_external_calls and c.action_details:
+                for detail in c.action_details:
+                    raw_ext.append((
+                        c.display_name,
+                        detail.get("kind", "—"),
+                        detail.get("connector_display_name") or detail.get("connection_reference") or "—",
+                        detail.get("operation_id") or "—",
+                    ))
+        ext_rows: list[dict] = []
+        for (topic, kind, connector, operation), count in Counter(raw_ext).items():
+            op_display = f"{operation} (×{count})" if count > 1 else operation
+            ext_rows.append({
+                "topic": topic,
+                "kind": kind,
+                "connector": connector,
+                "operation": op_display,
+            })
+        self.mcs_tools_external_calls = ext_rows  # type: ignore[attr-defined]
 
         # Mermaid integration map — extract raw source without fences
         int_map = render_integration_map(profile)
@@ -806,19 +830,8 @@ class UploadMixin(rx.State, mixin=True):
             for c in system_topics
         ]
 
-        # External calls
-        ext_topics = [c for c in profile.components if c.kind == "DialogComponent" and c.has_external_calls]
-        self.mcs_topics_external_calls = [  # type: ignore[attr-defined]
-            {
-                "name": c.display_name,
-                "connector": str(c.action_summary.get("InvokeConnectorAction", 0)),
-                "flow": str(c.action_summary.get("InvokeFlowAction", 0)),
-                "ai_builder": str(c.action_summary.get("InvokeAIBuilderModelAction", 0)),
-                "http": str(c.action_summary.get("HttpRequestAction", 0)),
-                "total": str(sum(c.action_summary.values())),
-            }
-            for c in ext_topics
-        ]
+        # External calls (moved to Tools tab — just clear this legacy var)
+        self.mcs_topics_external_calls = []  # type: ignore[attr-defined]
 
         # Coverage
         dialog_comps = [
@@ -1091,6 +1104,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_tools_kpis = []  # type: ignore[attr-defined]
         self.mcs_tools_rows = []  # type: ignore[attr-defined]
         self.mcs_tools_mermaid = ""  # type: ignore[attr-defined]
+        self.mcs_tools_external_calls = []  # type: ignore[attr-defined]
         self.mcs_knowledge_kpis = []  # type: ignore[attr-defined]
         self.mcs_knowledge_sources = []  # type: ignore[attr-defined]
         self.mcs_knowledge_files = []  # type: ignore[attr-defined]

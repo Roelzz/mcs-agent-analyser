@@ -11,6 +11,7 @@ from ._helpers import (
     _sanitize_mermaid,
     _sanitize_table_cell,
 )
+from model_comparison import build_comparison_markdown
 from .knowledge import render_knowledge_search_section
 from .profile import (
     render_ai_config,
@@ -73,6 +74,14 @@ def render_report(
     15. Deep dive (topic details + knowledge search)
     """
     from timeline import estimate_credits
+    from .sections import (
+        render_conversation_flow_md,
+        render_conversation_summary_md,
+        render_decision_timeline_md,
+        render_plan_evolution_md,
+        render_topic_lifecycles_md,
+        render_trigger_analysis_md,
+    )
 
     if timeline is None:
         timeline = ConversationTimeline()
@@ -133,10 +142,35 @@ def render_report(
     # 7. Conversation trace
     sections.append(render_timeline(timeline, skip_diagrams=True))
 
+    # 7.1 Conversation visual summary
+    conv_summary = render_conversation_summary_md(timeline)
+    if conv_summary:
+        sections.append(conv_summary)
+
+    # 7.2 Conversation flow
+    conv_flow = render_conversation_flow_md(timeline)
+    if conv_flow:
+        sections.append(conv_flow)
+
     # 8. Orchestrator reasoning
     reasoning = render_orchestrator_reasoning(timeline)
     if reasoning:
         sections.append(reasoning)
+
+    # 8.1 Orchestrator decision timeline
+    decision_timeline = render_decision_timeline_md(timeline)
+    if decision_timeline:
+        sections.append(decision_timeline)
+
+    # 8.2 Plan evolution
+    plan_evo = render_plan_evolution_md(timeline)
+    if plan_evo:
+        sections.append(plan_evo)
+
+    # 8.3 Topic lifecycles
+    topic_lc = render_topic_lifecycles_md(timeline)
+    if topic_lc:
+        sections.append(topic_lc)
 
     # --- Inventories (static capabilities) ---
 
@@ -152,6 +186,11 @@ def render_report(
     int_map = render_integration_map(profile)
     if int_map:
         sections.append(int_map)
+
+    # 12.1 Model Comparison
+    model_cmp = build_comparison_markdown(profile)
+    if model_cmp:
+        sections.append(model_cmp)
 
     # 13. Topic graph
     topic_graph = render_topic_graph(profile)
@@ -176,6 +215,11 @@ def render_report(
         sections.append(topic_details)
 
     sections.append(render_knowledge_search_section(timeline, profile=profile))
+
+    # 15.1 Trigger phrase analysis
+    trigger_analysis = render_trigger_analysis_md(timeline, profile)
+    if trigger_analysis:
+        sections.append(trigger_analysis)
 
     # 16. MCS Credit Estimate (last section)
     credit_section = render_credit_estimate(credit_estimate, timeline)

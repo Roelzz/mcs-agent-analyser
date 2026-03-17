@@ -43,6 +43,45 @@ def _count_action_kinds(actions: list) -> dict[str, int]:
     return counts
 
 
+def _extract_action_details(actions: list) -> list[dict]:
+    """Recursively walk action trees and return per-action dicts for external action kinds."""
+    details: list[dict] = []
+    if not actions:
+        return details
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        kind = action.get("kind", "")
+        if kind in _EXTERNAL_ACTION_KINDS:
+            if kind == "HttpRequestAction":
+                details.append({
+                    "kind": kind,
+                    "connection_reference": "",
+                    "operation_id": action.get("displayName", "") or action.get("operationId", ""),
+                    "connector_display_name": "HTTP",
+                    "http_method": action.get("method", ""),
+                    "http_url": (action.get("url", "") or "")[:120],
+                })
+            else:
+                details.append({
+                    "kind": kind,
+                    "connection_reference": action.get("connectionReference", ""),
+                    "operation_id": action.get("operationId", ""),
+                    "connector_display_name": "",
+                })
+        for key in ("actions", "elseActions"):
+            nested = action.get(key)
+            if isinstance(nested, list):
+                details.extend(_extract_action_details(nested))
+        for cond in action.get("conditions", []) or []:
+            if isinstance(cond, dict):
+                for key in ("actions", "elseActions"):
+                    nested = cond.get(key)
+                    if isinstance(nested, list):
+                        details.extend(_extract_action_details(nested))
+    return details
+
+
 def _extract_gpt_info(comp: dict) -> GptInfo:
     """Extract GPT configuration from a GptComponent."""
     metadata = comp.get("metadata", {}) or {}
@@ -224,12 +263,14 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
     model_description = None
     trigger_queries: list[str] = []
     action_summary: dict[str, int] = {}
+    action_details: list[dict] = []
     has_external_calls = False
     if kind == "DialogComponent":
         model_description = dialog.get("modelDescription")
         trigger_queries = begin_dialog.get("intent", {}).get("triggerQueries", []) or []
         dialog_actions = begin_dialog.get("actions", []) or []
         action_summary = _count_action_kinds(dialog_actions)
+        action_details = _extract_action_details(dialog_actions)
         has_external_calls = bool(set(action_summary) & _EXTERNAL_ACTION_KINDS)
 
     # KnowledgeSourceComponent: extract source config + trigger condition
@@ -277,6 +318,7 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
         model_description=model_description,
         trigger_queries=trigger_queries,
         action_summary=action_summary,
+        action_details=action_details,
         has_external_calls=has_external_calls,
         source_kind=source_kind,
         source_site=source_site,
@@ -385,6 +427,11 @@ def _parse_connection_infrastructure(
     for comp_summary in components:
         if comp_summary.connection_reference and comp_summary.connection_reference in ref_logical_to_connector:
             comp_summary.connector_display_name = ref_logical_to_connector[comp_summary.connection_reference]
+        # Resolve connector names in action_details
+        for detail in comp_summary.action_details:
+            ref_name = detail.get("connection_reference", "")
+            if ref_name and ref_name in ref_logical_to_connector:
+                detail["connector_display_name"] = ref_logical_to_connector[ref_name]
 
     return connection_references, connector_definitions
 

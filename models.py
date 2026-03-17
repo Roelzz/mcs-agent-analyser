@@ -28,6 +28,7 @@ class ComponentSummary(BaseModel):
     model_description: str | None = None
     trigger_queries: list[str] = Field(default_factory=list)
     action_summary: dict[str, int] = Field(default_factory=dict)
+    action_details: list[dict] = Field(default_factory=list)
     has_external_calls: bool = False
     source_kind: str | None = None
     source_site: str | None = None

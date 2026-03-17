@@ -935,26 +935,6 @@ def _mcs_profile_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Trigger Overlaps
-        rx.cond(
-            State.mcs_profile_trigger_overlaps.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Trigger Overlaps"),
-                rx.text(
-                    "Topics with >50% token overlap in trigger phrases.",
-                    font_size="12px",
-                    color="var(--gray-a9)",
-                    padding_bottom="8px",
-                ),
-                _data_table(
-                    ["Topic A", "Topic B", "Overlap", "Shared Tokens"],
-                    "2fr 2fr 1fr 3fr",
-                    State.mcs_profile_trigger_overlaps,
-                    _mcs_profile_overlap_row,
-                ),
-                width="100%",
-            ),
-        ),
         # Custom findings
         _mcs_custom_findings_section(),
         spacing="4",
@@ -1001,6 +981,18 @@ def _mcs_tool_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_tools_ext_detail_row(item: dict) -> rx.Component:
+    return _grid_row(
+        [
+            rx.text(item["topic"], font_size="13px", color="var(--gray-12)"),
+            rx.text(item["kind"], font_size="13px", color="var(--gray-a9)"),
+            rx.text(item["connector"], font_size="13px", color="var(--gray-11)"),
+            rx.text(item["operation"], font_size="13px", color="var(--gray-a9)"),
+        ],
+        template="2fr 1fr 2fr 2fr",
+    )
+
+
 def _mcs_tools_panel() -> rx.Component:
     return rx.vstack(
         # KPI grid
@@ -1030,6 +1022,20 @@ def _mcs_tools_panel() -> rx.Component:
         ),
         # Integration map
         _mermaid_block(State.mcs_tools_mermaid),
+        # External calls detail
+        rx.cond(
+            State.mcs_tools_external_calls.length() > 0,  # type: ignore[union-attr]
+            card(
+                section_heading("External Calls"),
+                _data_table(
+                    ["Topic", "Action Kind", "Connector", "Operation"],
+                    "2fr 1fr 2fr 2fr",
+                    State.mcs_tools_external_calls,
+                    _mcs_tools_ext_detail_row,
+                ),
+                width="100%",
+            ),
+        ),
         spacing="4",
         width="100%",
     )
@@ -1299,18 +1305,27 @@ def _mcs_lifecycle_card(item: dict) -> rx.Component:
     """Render a single topic lifecycle card."""
     is_failed = item["status"] == "failed"
     is_pending = item["status"] == "pending"
+    is_redirected = item["status"] == "redirected"
     return rx.box(
         rx.vstack(
             rx.hstack(
                 rx.badge(
                     item["name"],
-                    color_scheme=rx.cond(is_failed, "red", rx.cond(is_pending, "amber", "teal")),
+                    color_scheme=rx.cond(
+                        is_failed, "red",
+                        rx.cond(is_pending, "amber",
+                                rx.cond(is_redirected, "blue", "teal")),
+                    ),
                     variant="soft",
                     size="1",
                 ),
                 rx.badge(
                     item["status"],
-                    color_scheme=rx.cond(is_failed, "red", rx.cond(is_pending, "amber", "green")),
+                    color_scheme=rx.cond(
+                        is_failed, "red",
+                        rx.cond(is_pending, "amber",
+                                rx.cond(is_redirected, "blue", "green")),
+                    ),
                     variant="outline",
                     size="1",
                 ),
@@ -1870,6 +1885,13 @@ def _mcs_trigger_match_card(item: dict) -> rx.Component:
             # Matches summary with visual hierarchy
             rx.box(
                 rx.text(
+                    "Trigger phrase similarity (offline analysis, not evaluated by orchestrator):",
+                    font_size="11px",
+                    color="var(--gray-a7)",
+                    font_style="italic",
+                    margin_bottom="4px",
+                ),
+                rx.text(
                     item["matches_summary"],
                     font_size="12px",
                     color="var(--gray-a9)",
@@ -1951,6 +1973,26 @@ def _mcs_topics_panel() -> rx.Component:
                 width="100%",
             ),
         ),
+        # Trigger Overlaps
+        rx.cond(
+            State.mcs_profile_trigger_overlaps.length() > 0,  # type: ignore[union-attr]
+            card(
+                section_heading("Trigger Overlaps"),
+                rx.text(
+                    "Topics with >50% token overlap in trigger phrases.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="8px",
+                ),
+                _data_table(
+                    ["Topic A", "Topic B", "Overlap", "Shared Tokens"],
+                    "2fr 2fr 1fr 3fr",
+                    State.mcs_profile_trigger_overlaps,
+                    _mcs_profile_overlap_row,
+                ),
+                width="100%",
+            ),
+        ),
         # Orchestrator Topics detail
         rx.cond(
             State.mcs_topics_orch_rows.length() > 0,  # type: ignore[union-attr]
@@ -1975,20 +2017,6 @@ def _mcs_topics_panel() -> rx.Component:
                     "2fr 2fr 1fr 1fr",
                     State.mcs_topics_system_rows,
                     _mcs_topics_system_row,
-                ),
-                width="100%",
-            ),
-        ),
-        # External Calls
-        rx.cond(
-            State.mcs_topics_external_calls.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Topics with External Calls"),
-                _data_table(
-                    ["Topic", "Connector", "Flow", "AI Builder", "HTTP", "Total"],
-                    "3fr 1fr 1fr 1fr 1fr 1fr",
-                    State.mcs_topics_external_calls,
-                    _mcs_topics_ext_row,
                 ),
                 width="100%",
             ),

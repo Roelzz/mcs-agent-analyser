@@ -62,8 +62,6 @@ def render_report_sections(
         profile_parts.append(quick_wins)
     overlaps = detect_trigger_overlaps(profile.components)
     trigger_section = render_trigger_overlaps(overlaps)
-    if trigger_section:
-        profile_parts.append(trigger_section)
 
     # Knowledge section
     knowledge_parts: list[str] = []
@@ -87,8 +85,10 @@ def render_report_sections(
     if int_map:
         tools_parts.append(int_map)
 
-    # Topics section (includes graph)
+    # Topics section (includes graph + trigger overlaps)
     topics_parts = [render_topic_inventory(profile)]
+    if trigger_section:
+        topics_parts.append(trigger_section)
     topic_details = render_topic_details(profile, timeline)
     if topic_details:
         topics_parts.append(topic_details)
@@ -485,6 +485,42 @@ def build_topic_lifecycles(timeline: ConversationTimeline) -> list[dict]:
             }
         )
 
+    # Add redirect-based entries for ACTION_BEGIN_DIALOG events that represent
+    # topic transitions (e.g. "Call to Fallback", "Call to GenAIAnsGeneration")
+    # not already captured as their own STEP_TRIGGERED lifecycle.
+    existing_names = {lc["name"] for lc in lifecycles}
+    for ev in timeline.events:
+        if ev.event_type != EventType.ACTION_BEGIN_DIALOG:
+            continue
+        raw = (ev.summary or "")
+        # Strip common prefixes
+        for prefix in ("Call to ", "Begin "):
+            if raw.startswith(prefix):
+                raw = raw[len(prefix):]
+                break
+        target = raw.strip()
+        if not target or target in existing_names:
+            continue
+        existing_names.add(target)
+        lifecycles.append(
+            {
+                "step_id": f"redirect_{ev.position}",
+                "name": target,
+                "thought": "",
+                "status": "redirected",
+                "duration_ms": "0",
+                "duration_label": "",
+                "start": _format_clock(ev.timestamp),
+                "end": "",
+                "error": "",
+                "child_summary": "",
+                "child_count": "0",
+                "has_recommendations": "",
+                "used_outputs": "",
+                "plan_identifier": "",
+            }
+        )
+
     return lifecycles
 
 
@@ -558,6 +594,12 @@ def build_trigger_match_items(
 
         # Resolve selected topic display name — pick first custom topic
         selected_display = "—"
+        if not triggered_topics:
+            # No custom topic triggered — show first system tool as fallback
+            for between_ev in events[ui + 1 : next_ui]:
+                if between_ev.event_type == EventType.STEP_TRIGGERED and between_ev.topic_name:
+                    selected_display = f"{between_ev.topic_name} (system)"
+                    break
         if triggered_topics:
             # Try to find matching display name from components
             for comp in profile.components:
@@ -702,11 +744,15 @@ def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list
             })
             continue
 
-        if ev.event_type in {EventType.ACTION_HTTP_REQUEST, EventType.ACTION_BEGIN_DIALOG}:
-            action_type = "HTTP Request" if ev.event_type == EventType.ACTION_HTTP_REQUEST else "Begin Dialog"
+        if ev.event_type in {EventType.ACTION_HTTP_REQUEST, EventType.ACTION_BEGIN_DIALOG, EventType.ACTION_TRIGGER_EVAL}:
+            action_type_map = {
+                EventType.ACTION_HTTP_REQUEST: "HTTP Request",
+                EventType.ACTION_BEGIN_DIALOG: "Begin Dialog",
+                EventType.ACTION_TRIGGER_EVAL: "Condition Eval",
+            }
             items.append({
                 "kind": "action",
-                "action_type": action_type,
+                "action_type": action_type_map[ev.event_type],
                 "topic_name": ev.topic_name or "",
                 "summary": (ev.summary or "")[:120],
                 "error": ev.error or "",
@@ -772,3 +818,172 @@ def build_plan_evolution(timeline: ConversationTimeline) -> list[dict]:
         })
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Markdown renderers for document view parity
+# ---------------------------------------------------------------------------
+
+
+def render_topic_lifecycles_md(timeline: ConversationTimeline) -> str:
+    """Render topic lifecycles as a markdown table."""
+    items = build_topic_lifecycles(timeline)
+    if not items:
+        return ""
+    lines = [
+        "## Topic Lifecycles\n",
+        "| Topic | Status | Duration | Start → End | Thought |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for lc in items:
+        thought = (lc.get("thought") or "—")[:80].replace("|", "\\|").replace("\n", " ")
+        time_range = f"{lc.get('start', '')} → {lc.get('end', '')}" if lc.get("start") else "—"
+        lines.append(
+            f"| {lc['name']} | {lc['status']} | {lc.get('duration_label') or '—'} | {time_range} | {thought} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_decision_timeline_md(timeline: ConversationTimeline) -> str:
+    """Render orchestrator decision timeline as grouped markdown."""
+    items = build_orchestrator_decision_timeline(timeline)
+    if not items:
+        return ""
+    lines = ["## Orchestrator Decision Timeline\n"]
+    for item in items:
+        kind = item.get("kind", "")
+        if kind == "user_message":
+            lines.append(f"> **User** ({item.get('timestamp', '')}): {item.get('text', '')}\n")
+        elif kind == "interpreted":
+            lines.append(f"*Interpreted as:* {item.get('ask', '')}\n")
+        elif kind == "plan":
+            final = " (final)" if item.get("is_final") == "True" else ""
+            lines.append(f"- **Plan{final}:** {item.get('steps', '')}")
+        elif kind == "step":
+            subtype = item.get("event_subtype", "")
+            topic = item.get("topic_name", "")
+            if subtype == "triggered":
+                thought = item.get("thought", "")
+                prefix = f" — *{thought}*" if thought else ""
+                lines.append(f"  - ▶ {topic}{prefix}")
+            else:
+                duration = item.get("duration", "")
+                status = item.get("status", "")
+                lines.append(f"  - ✓ {topic} ({status}, {duration})" if duration else f"  - ✓ {topic} ({status})")
+        elif kind == "action":
+            lines.append(f"  - ⚡ {item.get('action_type', '')}: {item.get('summary', '')}")
+        elif kind == "plan_finished":
+            cancelled = " (cancelled)" if item.get("is_cancelled") == "true" else ""
+            lines.append(f"- **Plan finished**{cancelled}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_plan_evolution_md(timeline: ConversationTimeline) -> str:
+    """Render plan evolution as a markdown table."""
+    items = build_plan_evolution(timeline)
+    if not items:
+        return ""
+    lines = [
+        "## Plan Evolution\n",
+        "| Plan # | Final? | Steps | Changes |",
+        "| --- | --- | --- | --- |",
+    ]
+    for p in items:
+        final = "Yes" if p.get("is_final") == "True" else "No" if p.get("is_final") else "—"
+        steps = (p.get("steps") or "—").replace("|", "\\|")
+        changes = p.get("change_summary") or "—"
+        lines.append(f"| {p['plan_index']} | {final} | {steps} | {changes} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def render_trigger_analysis_md(
+    timeline: ConversationTimeline,
+    profile: BotProfile,
+) -> str:
+    """Render trigger phrase analysis as markdown sections."""
+    items = build_trigger_match_items(timeline, profile)
+    if not items:
+        return ""
+    lines = ["## Trigger Phrase Analysis\n"]
+    for item in items:
+        user_msg = item.get("user_message", "")
+        selected = item.get("selected_topic", "—")
+        lines.append(f"### \"{user_msg}\"\n")
+        lines.append(f"**Selected topic:** {selected}\n")
+        ask = item.get("orchestrator_ask", "")
+        if ask:
+            lines.append(f"*Orchestrator interpretation:* {ask}\n")
+        summary = item.get("matches_summary", "")
+        if summary:
+            lines.append("```")
+            lines.append(summary)
+            lines.append("```")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def render_conversation_summary_md(timeline: ConversationTimeline) -> str:
+    """Render conversation visual summary as markdown tables."""
+    data = build_conversation_visual_summary(timeline)
+    if not data or not data.get("kpis"):
+        return ""
+    lines = ["## Conversation Summary\n"]
+
+    # KPIs
+    lines.append("| Metric | Value |")
+    lines.append("| --- | --- |")
+    for kpi in data["kpis"]:
+        lines.append(f"| {kpi['label']} | {kpi['value']} |")
+    lines.append("")
+
+    # Event mix
+    mix = data.get("event_mix", [])
+    if mix:
+        lines.append("### Event Mix\n")
+        lines.append("| Category | Count | % |")
+        lines.append("| --- | --- | --- |")
+        for m in mix:
+            lines.append(f"| {m['label']} | {m['count']} | {m['pct']} |")
+        lines.append("")
+
+    # Latency bands
+    bands = data.get("latency_bands", [])
+    if bands:
+        lines.append("### Latency Distribution\n")
+        lines.append("| Band | Count | % |")
+        lines.append("| --- | --- | --- |")
+        for b in bands:
+            lines.append(f"| {b['label']} | {b['count']} | {b['pct']} |")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def render_conversation_flow_md(timeline: ConversationTimeline) -> str:
+    """Render conversation flow as markdown."""
+    items = build_conversation_flow_items(timeline)
+    if not items:
+        return ""
+    lines = ["## Conversation Flow\n"]
+    for item in items:
+        kind = item.get("kind", "")
+        ts = item.get("timestamp", "")
+        ts_prefix = f"[{ts}] " if ts else ""
+        if kind == "message":
+            role = item.get("role", "")
+            actor = item.get("actor", role)
+            text = item.get("text", "")
+            lines.append(f"> **{actor}** {ts_prefix}: {text}\n")
+        elif kind == "event":
+            title = item.get("title", "")
+            summary = item.get("summary", "")
+            thought = item.get("thought", "")
+            line = f"- {ts_prefix}**{title}**: {summary}"
+            if thought:
+                line += f" — *{thought}*"
+            lines.append(line)
+    lines.append("")
+    return "\n".join(lines)

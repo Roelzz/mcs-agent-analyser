@@ -76,6 +76,7 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_tools_kpis: list[dict] = []
     mcs_tools_rows: list[dict] = []
     mcs_tools_mermaid: str = ""
+    mcs_tools_external_calls: list[dict] = []
 
     # ── Knowledge tab ────────────────────────────────────────────────────────
     mcs_knowledge_kpis: list[dict] = []

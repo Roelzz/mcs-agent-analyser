@@ -4247,10 +4247,15 @@ def test_lifecycle_includes_http_child_events():
     ]
     tl = ConversationTimeline(events=events)
     lifecycles = build_topic_lifecycles(tl)
-    assert len(lifecycles) == 1
-    assert lifecycles[0]["child_count"] == "2"
-    assert "ActionHttpRequest" in lifecycles[0]["child_summary"]
-    assert "ActionBeginDialog" in lifecycles[0]["child_summary"]
+    main_lc = [lc for lc in lifecycles if lc["name"] == "Main"]
+    assert len(main_lc) == 1
+    assert main_lc[0]["child_count"] == "2"
+    assert "ActionHttpRequest" in main_lc[0]["child_summary"]
+    assert "ActionBeginDialog" in main_lc[0]["child_summary"]
+    # SubTopic also appears as a redirect entry
+    redirect_lc = [lc for lc in lifecycles if lc["name"] == "SubTopic"]
+    assert len(redirect_lc) == 1
+    assert redirect_lc[0]["status"] == "redirected"
 
 
 def test_decision_timeline_action_items():
@@ -4326,3 +4331,230 @@ def test_conversation_flow_items_uniform_keys():
     event_item = items[1]
     assert event_item["plan_steps"] == "StepA"
     assert event_item["is_final_plan"] == "True"
+
+
+# --- New tests: document view parity, KPI count fix, action details ---
+
+
+def test_render_topic_lifecycles_md():
+    """render_topic_lifecycles_md returns a table with lifecycles."""
+    from renderer.sections import render_topic_lifecycles_md
+
+    tl = ConversationTimeline(events=[
+        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="TopicA", thought="think", timestamp="2024-01-01T00:00:01Z", position=1),
+        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", timestamp="2024-01-01T00:00:02Z", position=2),
+    ])
+    md = render_topic_lifecycles_md(tl)
+    assert "## Topic Lifecycles" in md
+    assert "TopicA" in md
+    assert "completed" in md
+
+
+def test_render_topic_lifecycles_md_empty():
+    """render_topic_lifecycles_md returns empty for no events."""
+    from renderer.sections import render_topic_lifecycles_md
+
+    md = render_topic_lifecycles_md(ConversationTimeline())
+    assert md == ""
+
+
+def test_render_decision_timeline_md():
+    """render_decision_timeline_md returns grouped markdown."""
+    from renderer.sections import render_decision_timeline_md
+
+    tl = ConversationTimeline(events=[
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hello", timestamp="2024-01-01T00:00:01Z", position=1),
+        TimelineEvent(event_type=EventType.PLAN_RECEIVED, plan_steps=["StepA"], is_final_plan=True, timestamp="2024-01-01T00:00:02Z", position=2),
+        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="TopicA", thought="reason", timestamp="2024-01-01T00:00:03Z", position=3),
+    ])
+    md = render_decision_timeline_md(tl)
+    assert "## Orchestrator Decision Timeline" in md
+    assert "hello" in md
+    assert "StepA" in md
+
+
+def test_extract_action_details():
+    """_extract_action_details returns per-action dicts for external kinds."""
+    from parser import _extract_action_details
+
+    actions = [
+        {"kind": "InvokeConnectorAction", "connectionReference": "ref_o365", "operationId": "SendEmail"},
+        {"kind": "SendActivity"},
+        {"kind": "HttpRequestAction", "displayName": "Graph Access Token API", "method": "Post", "url": "https://login.microsoftonline.com/token"},
+        {"kind": "ConditionGroup", "conditions": [
+            {"actions": [{"kind": "InvokeFlowAction", "connectionReference": "ref_flow", "operationId": "RunFlow"}]},
+        ]},
+    ]
+    details = _extract_action_details(actions)
+    assert len(details) == 3
+    assert details[0]["kind"] == "InvokeConnectorAction"
+    assert details[0]["connection_reference"] == "ref_o365"
+    assert details[0]["operation_id"] == "SendEmail"
+    assert details[1]["kind"] == "HttpRequestAction"
+    assert details[1]["connector_display_name"] == "HTTP"
+    assert details[1]["operation_id"] == "Graph Access Token API"
+    assert details[1]["http_method"] == "Post"
+    assert details[1]["http_url"] == "https://login.microsoftonline.com/token"
+    assert details[2]["kind"] == "InvokeFlowAction"
+
+
+def test_external_calls_deduplication():
+    """Identical external call rows are deduplicated with count in renderer output."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Order Headset",
+                schema_name="order.headset",
+                has_external_calls=True,
+                action_summary={"HttpRequestAction": 3},
+                action_details=[
+                    {"kind": "HttpRequestAction", "connector_display_name": "HTTP", "operation_id": "Create Service Request API"},
+                    {"kind": "HttpRequestAction", "connector_display_name": "HTTP", "operation_id": "Create Service Request API"},
+                    {"kind": "HttpRequestAction", "connector_display_name": "HTTP", "operation_id": "Graph Access Token API"},
+                ],
+            ),
+        ],
+    )
+    md = render_topic_details(profile)
+    # Duplicated row should show ×2
+    assert "×2" in md
+    # Unique row should NOT show ×1
+    assert "Graph Access Token API |" in md
+    assert "×1" not in md
+
+
+def test_action_details_connector_resolution():
+    """Connector names are resolved in action_details during parsing."""
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Test Topic",
+                schema_name="test.topic",
+                has_external_calls=True,
+                action_details=[
+                    {"kind": "InvokeConnectorAction", "connection_reference": "ref_o365", "operation_id": "SendEmail", "connector_display_name": ""},
+                ],
+            ),
+        ],
+        connection_references=[
+            {"connectionReferenceLogicalName": "ref_o365", "connectorId": "/providers/Microsoft.PowerApps/apis/shared_office365", "displayName": "O365 Ref", "connectionId": ""},
+        ],
+        connector_definitions=[
+            {"connectorId": "/providers/Microsoft.PowerApps/apis/shared_office365", "displayName": "Office 365 Outlook", "isCustom": False, "connectorType": "", "operationCount": 5, "hasMCP": False},
+        ],
+    )
+    # Simulate the enrichment that _parse_connection_infrastructure does
+    from parser import _parse_connection_infrastructure
+
+    _parse_connection_infrastructure(
+        {
+            "connectionReferences": profile.connection_references,
+            "connectorDefinitions": [
+                {"connectorId": "/providers/Microsoft.PowerApps/apis/shared_office365", "displayName": "Office 365 Outlook", "isCustom": False, "operations": []},
+            ],
+        },
+        profile.components,
+    )
+    detail = profile.components[0].action_details[0]
+    assert detail["connector_display_name"] == "Office 365 Outlook"
+
+
+def test_profile_kpi_excludes_orchestrator():
+    """Components KPI should exclude orchestrator_topics from count."""
+    from renderer.profile import _classify_component, _CATEGORY_ORDER
+
+    comps = [
+        ComponentSummary(kind="DialogComponent", display_name="User Topic", schema_name="ut", trigger_kind="OnIntent"),
+        ComponentSummary(kind="DialogComponent", display_name="Task Tool", schema_name="tt", dialog_kind="TaskDialog", action_kind="InvokeConnectorTaskAction"),
+        ComponentSummary(kind="GlobalVariableComponent", display_name="Var1", schema_name="v1"),
+    ]
+    by_cat: dict[str, list] = {}
+    for c in comps:
+        cat = _classify_component(c)
+        if cat is not None:
+            by_cat.setdefault(cat, []).append(c)
+
+    # Old way (includes orchestrator_topics)
+    total_old = sum(len(v) for v in by_cat.values())
+    # New way (excludes orchestrator_topics)
+    total_new = sum(len(v) for k, v in by_cat.items() if k in _CATEGORY_ORDER)
+
+    assert total_old == 3  # user + orch + variable
+    assert total_new == 2  # user + variable (orchestrator excluded)
+
+
+def test_render_report_has_routing_sections():
+    """render_report output contains new routing/conversation sections when timeline has data."""
+    tl = ConversationTimeline(events=[
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hello", timestamp="2024-01-01T00:00:01Z", position=1),
+        TimelineEvent(event_type=EventType.PLAN_RECEIVED, plan_steps=["StepA"], is_final_plan=True, timestamp="2024-01-01T00:00:02Z", position=2),
+        TimelineEvent(event_type=EventType.PLAN_RECEIVED, plan_steps=["StepA", "StepB"], is_final_plan=False, timestamp="2024-01-01T00:00:03Z", position=3),
+        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="TopicA", thought="reason", timestamp="2024-01-01T00:00:04Z", position=4),
+        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", timestamp="2024-01-01T00:00:05Z", position=5),
+        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hi", timestamp="2024-01-01T00:00:06Z", position=6),
+    ])
+    profile = BotProfile(display_name="TestBot", components=[
+        ComponentSummary(kind="DialogComponent", display_name="TopicA", schema_name="t.a", trigger_kind="OnIntent", trigger_queries=["hello"]),
+    ])
+    report = render_report(profile, tl)
+    assert "## Topic Lifecycles" in report
+    assert "## Orchestrator Decision Timeline" in report
+    assert "## Plan Evolution" in report
+    assert "## Conversation Summary" in report
+    assert "## Conversation Flow" in report
+
+
+# --- Topic Lifecycles: redirect entries from ACTION_BEGIN_DIALOG ---
+
+
+def test_build_topic_lifecycles_redirect_entries():
+    """ACTION_BEGIN_DIALOG events create redirect lifecycle entries."""
+    events = [
+        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="P:UniversalSearchTool", position=1, timestamp="2024-01-01T10:00:00Z"),
+        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Call to Fallback", position=2, timestamp="2024-01-01T10:00:01Z"),
+        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Call to GenAIAnsGeneration", position=3, timestamp="2024-01-01T10:00:02Z"),
+        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", position=4, timestamp="2024-01-01T10:00:03Z"),
+    ]
+    tl = ConversationTimeline(events=events)
+    lifecycles = build_topic_lifecycles(tl)
+    names = [lc["name"] for lc in lifecycles]
+    assert "P:UniversalSearchTool" in names
+    assert "Fallback" in names
+    assert "GenAIAnsGeneration" in names
+    # Redirect entries have correct status
+    redirect_entries = [lc for lc in lifecycles if lc["status"] == "redirected"]
+    assert len(redirect_entries) == 2
+
+
+def test_build_topic_lifecycles_no_duplicate_redirect():
+    """If a topic already has a STEP_TRIGGERED lifecycle, no redirect duplicate is created."""
+    events = [
+        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="Fallback", position=1, timestamp="2024-01-01T10:00:00Z"),
+        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Call to Fallback", position=2, timestamp="2024-01-01T10:00:01Z"),
+        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", position=3, timestamp="2024-01-01T10:00:02Z"),
+    ]
+    tl = ConversationTimeline(events=events)
+    lifecycles = build_topic_lifecycles(tl)
+    fallback_entries = [lc for lc in lifecycles if lc["name"] == "Fallback"]
+    assert len(fallback_entries) == 1
+    assert fallback_entries[0]["status"] == "completed"
+
+
+# --- Trigger Phrase Analysis: system tool shown when no custom topic ---
+
+
+def test_build_trigger_match_items_system_tool_fallback():
+    """When only system tools triggered, show the system tool name with (system) suffix."""
+    events = [
+        TimelineEvent(timestamp="2025-01-01T10:00:00Z", position=1, event_type=EventType.USER_MESSAGE, summary='User: "reset my password"'),
+        TimelineEvent(timestamp="2025-01-01T10:00:01Z", position=2, event_type=EventType.STEP_TRIGGERED, topic_name="P:UniversalSearchTool", summary="Step start: P:UniversalSearchTool", step_id="step-1"),
+    ]
+    tl = ConversationTimeline(events=events)
+    profile = BotProfile(components=[
+        ComponentSummary(kind="DialogComponent", display_name="PasswordReset", schema_name="cr_pw", trigger_queries=["reset password"]),
+    ])
+    items = build_trigger_match_items(tl, profile)
+    assert len(items) == 1
+    assert items[0]["selected_topic"] == "P:UniversalSearchTool (system)"
