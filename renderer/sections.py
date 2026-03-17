@@ -12,7 +12,7 @@ from models import (
 )
 
 from model_comparison import build_comparison_markdown
-from parser import detect_trigger_overlaps
+from parser import detect_trigger_overlaps, match_query_to_triggers
 
 from .knowledge import render_knowledge_search_section
 from .profile import (
@@ -37,13 +37,16 @@ from .timeline_render import render_orchestrator_reasoning, render_timeline
 
 def render_report_sections(
     profile: BotProfile,
-    timeline: ConversationTimeline,
+    timeline: ConversationTimeline | None = None,
 ) -> tuple[dict[str, str], CreditEstimate | None]:
     """Build individual section markdown strings for the dynamic view.
 
     Returns a tuple of (sections dict, credit_estimate).
     """
     from timeline import estimate_credits
+
+    if timeline is None:
+        timeline = ConversationTimeline()
 
     # Profile section
     profile_parts = [render_bot_profile(profile)]
@@ -341,3 +344,126 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
         "latency_bands": latency_bands,
         "highlights": highlights,
     }
+
+
+# ---------------------------------------------------------------------------
+# Trigger phrase analysis
+# ---------------------------------------------------------------------------
+
+# System tool suffixes to exclude from "selected topic" detection
+_SYSTEM_TOOL_SUFFIXES = {"UniversalSearchTool", "KnowledgeSource", "GenerateAnswer"}
+
+
+def _normalize_topic_name(name: str) -> str:
+    """Lowercase, strip prefix markers like 'P:', and remove whitespace."""
+    return name.lower().replace("p:", "").strip()
+
+
+def build_trigger_match_items(
+    timeline: ConversationTimeline,
+    profile: BotProfile,
+) -> list[dict]:
+    """Build trigger-phrase match items for each user message in the timeline.
+
+    For each user message, runs ``match_query_to_triggers`` against the bot's
+    components, resolves which topic was *actually* triggered (filtering out
+    system tools), and returns a flat list of dicts safe for Reflex state.
+
+    Each item dict contains:
+    - ``user_message``: the original user text
+    - ``selected_topic``: display name of actually triggered topic (or "—")
+    - ``matches_summary``: pre-formatted string with selected match first
+    - ``total_matches``: total matches before cap (for "showing N of M" label)
+    """
+    if not timeline or not profile:
+        return []
+
+    items: list[dict] = []
+
+    # Collect STEP_TRIGGERED events grouped by position relative to user messages
+    events = timeline.events
+    user_indices: list[int] = []
+    for idx, ev in enumerate(events):
+        if ev.event_type == EventType.USER_MESSAGE:
+            user_indices.append(idx)
+
+    for pos, ui in enumerate(user_indices):
+        ev = events[ui]
+        user_text = (ev.summary or "").replace("User: ", "", 1).strip()
+        if not user_text:
+            continue
+
+        # Find actually triggered topics between this user message and the next
+        next_ui = user_indices[pos + 1] if pos + 1 < len(user_indices) else len(events)
+        triggered_topics: list[str] = []
+        for between_ev in events[ui + 1 : next_ui]:
+            if between_ev.event_type != EventType.STEP_TRIGGERED:
+                continue
+            tname = between_ev.topic_name or ""
+            summary = between_ev.summary or ""
+            # Skip system tools
+            if any(suffix in tname for suffix in _SYSTEM_TOOL_SUFFIXES):
+                continue
+            # Only keep CustomTopic steps
+            if "(CustomTopic)" in summary or "(Dialog)" in summary:
+                triggered_topics.append(tname)
+
+        # Resolve selected topic display name — pick first custom topic
+        selected_display = "—"
+        if triggered_topics:
+            # Try to find matching display name from components
+            for comp in profile.components:
+                if comp.kind != "DialogComponent":
+                    continue
+                norm_comp = _normalize_topic_name(comp.display_name)
+                for tname in triggered_topics:
+                    norm_triggered = _normalize_topic_name(tname)
+                    if norm_comp == norm_triggered or norm_comp in norm_triggered or norm_triggered in norm_comp:
+                        selected_display = comp.display_name
+                        break
+                if selected_display != "—":
+                    break
+            # Fallback: use raw name
+            if selected_display == "—":
+                selected_display = triggered_topics[0]
+
+        # Run trigger matching
+        all_matches = match_query_to_triggers(user_text, profile.components, threshold=0.5)
+        total_count = len(all_matches)
+        capped = all_matches[:8]
+
+        # Build formatted summary string
+        lines: list[str] = []
+        norm_selected = _normalize_topic_name(selected_display)
+        selected_line_added = False
+
+        for m in capped:
+            pct = f"{m['score']:.0%}"
+            norm_match = _normalize_topic_name(m["display_name"])
+            is_selected = (
+                norm_selected == norm_match
+                or norm_selected in norm_match
+                or norm_match in norm_selected
+            )
+            if is_selected and not selected_line_added:
+                lines.insert(0, f"✓ {m['display_name']} ({pct}) — \"{m['best_phrase']}\"")
+                selected_line_added = True
+            else:
+                lines.append(f"· {m['display_name']} ({pct}) — \"{m['best_phrase']}\"")
+
+        # Insert blank separator after selected line
+        if selected_line_added and len(lines) > 1:
+            lines.insert(1, "")
+
+        matches_summary = "\n".join(lines) if lines else "No matches above threshold"
+
+        items.append(
+            {
+                "user_message": user_text,
+                "selected_topic": selected_display,
+                "matches_summary": matches_summary,
+                "total_matches": str(total_count),
+            }
+        )
+
+    return items

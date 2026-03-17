@@ -24,6 +24,7 @@ from renderer.profile import (  # noqa: E402
 from renderer.sections import (  # noqa: E402
     build_conversation_flow_items,
     build_conversation_visual_summary,
+    build_trigger_match_items,
     render_report_sections,
 )
 from timeline import build_timeline  # noqa: E402
@@ -285,15 +286,24 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_section_credits = ""  # type: ignore[attr-defined]
 
         # Conversation flow
-        self.mcs_conversation_flow = build_conversation_flow_items(timeline)  # type: ignore[attr-defined]
+        if timeline is not None:
+            self.mcs_conversation_flow = build_conversation_flow_items(timeline)  # type: ignore[attr-defined]
+        else:
+            self.mcs_conversation_flow = []  # type: ignore[attr-defined]
         self.mcs_conversation_flow_source = source  # type: ignore[attr-defined]
 
         # Visual summary
-        summary = build_conversation_visual_summary(timeline)
-        self.mcs_conv_kpis = summary["kpis"]  # type: ignore[attr-defined]
-        self.mcs_conv_event_mix = summary["event_mix"]  # type: ignore[attr-defined]
-        self.mcs_conv_latency_bands = summary["latency_bands"]  # type: ignore[attr-defined]
-        self.mcs_conv_highlights = summary["highlights"]  # type: ignore[attr-defined]
+        if timeline is not None:
+            summary = build_conversation_visual_summary(timeline)
+            self.mcs_conv_kpis = summary["kpis"]  # type: ignore[attr-defined]
+            self.mcs_conv_event_mix = summary["event_mix"]  # type: ignore[attr-defined]
+            self.mcs_conv_latency_bands = summary["latency_bands"]  # type: ignore[attr-defined]
+            self.mcs_conv_highlights = summary["highlights"]  # type: ignore[attr-defined]
+        else:
+            self.mcs_conv_kpis = []  # type: ignore[attr-defined]
+            self.mcs_conv_event_mix = []  # type: ignore[attr-defined]
+            self.mcs_conv_latency_bands = []  # type: ignore[attr-defined]
+            self.mcs_conv_highlights = []  # type: ignore[attr-defined]
 
         # Credit rows for the credits panel
         logger.info(
@@ -343,7 +353,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_custom_findings = self.report_custom_findings  # type: ignore[attr-defined]
 
         # ── Structured data for native panels ────────────────────────────────
-        self._populate_conversation_data(timeline)
+        if timeline is not None:
+            self._populate_conversation_data(timeline)
         if profile is not None:
             self._populate_profile_data(profile)
             self._populate_tools_data(profile)
@@ -353,11 +364,11 @@ class UploadMixin(rx.State, mixin=True):
         else:
             self._clear_panel_data()
 
-        # Set default tab based on source
-        if source == "transcript":
-            self.mcs_analyse_tab = "credits"  # type: ignore[attr-defined]
-        else:
+        # Set default tab based on profile presence
+        if profile is not None:
             self.mcs_analyse_tab = "profile"  # type: ignore[attr-defined]
+        else:
+            self.mcs_analyse_tab = "conversation"  # type: ignore[attr-defined]
 
     # ── Profile tab data extraction ──────────────────────────────────────────
 
@@ -573,8 +584,8 @@ class UploadMixin(rx.State, mixin=True):
         """Extract structured data for the Knowledge tab."""
         ks_comps = [c for c in profile.components if c.kind == "KnowledgeSourceComponent"]
         file_comps = [c for c in profile.components if c.kind == "FileAttachmentComponent"]
-        searches = timeline.knowledge_searches
-        custom_steps = getattr(timeline, "custom_search_steps", [])
+        searches = timeline.knowledge_searches if timeline is not None else []
+        custom_steps = getattr(timeline, "custom_search_steps", []) if timeline is not None else []
 
         active_count = sum(1 for c in ks_comps + file_comps if c.state == "Active")
         self.mcs_knowledge_kpis = [  # type: ignore[attr-defined]
@@ -806,10 +817,13 @@ class UploadMixin(rx.State, mixin=True):
             and c.trigger_kind not in (_SYSTEM_TRIGGERS | _AUTOMATION_TRIGGERS | {None})
             and c.dialog_kind not in ("TaskDialog", "AgentDialog")
         ]
-        triggered_names = {
-            ev.topic_name for ev in timeline.events
-            if ev.event_type == EventType.STEP_TRIGGERED and ev.topic_name
-        }
+        if timeline is not None:
+            triggered_names = {
+                ev.topic_name for ev in timeline.events
+                if ev.event_type == EventType.STEP_TRIGGERED and ev.topic_name
+            }
+        else:
+            triggered_names = set()
         triggered_count = sum(1 for c in dialog_comps if c.display_name in triggered_names)
         untriggered = [c for c in dialog_comps if c.display_name not in triggered_names]
         self.mcs_topics_coverage_summary = f"{triggered_count} of {len(dialog_comps)} user topics triggered"  # type: ignore[attr-defined]
@@ -821,6 +835,12 @@ class UploadMixin(rx.State, mixin=True):
             }
             for c in untriggered
         ]
+
+        # Trigger phrase analysis
+        if timeline is not None:
+            self.mcs_topics_trigger_matches = build_trigger_match_items(timeline, profile)  # type: ignore[attr-defined]
+        else:
+            self.mcs_topics_trigger_matches = []  # type: ignore[attr-defined]
 
         # Graph anomalies
         anomalies = detect_topic_graph_anomalies(profile)
@@ -1029,6 +1049,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_topics_coverage_summary = ""  # type: ignore[attr-defined]
         self.mcs_topics_anomalies = []  # type: ignore[attr-defined]
         self.mcs_topics_mermaid = ""  # type: ignore[attr-defined]
+        self.mcs_topics_trigger_matches = []  # type: ignore[attr-defined]
         self.mcs_model_kpis = []  # type: ignore[attr-defined]
         self.mcs_model_configured = []  # type: ignore[attr-defined]
         self.mcs_model_strengths = []  # type: ignore[attr-defined]

@@ -98,6 +98,7 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_topics_coverage_summary: str = ""
     mcs_topics_anomalies: list[dict] = []
     mcs_topics_mermaid: str = ""
+    mcs_topics_trigger_matches: list[dict] = []
 
     # ── Model tab ────────────────────────────────────────────────────────────
     mcs_model_kpis: list[dict] = []

@@ -88,17 +88,8 @@ def _mcs_section_tab_bar() -> rx.Component:
         )
 
     return rx.cond(
-        State.mcs_conversation_flow_source == "transcript",
-        # Transcript-only: limited tabs
-        rx.hstack(
-            _btn("credits", "coins", "Credits"),
-            _btn("conversation", "message-square", "Conversation"),
-            spacing="0",
-            border_bottom=f"1px solid {SURFACE_BORDER}",
-            width="100%",
-            overflow_x="auto",
-        ),
-        # Full snapshot: all tabs
+        State.mcs_section_profile,
+        # Profile data exists: all tabs
         rx.hstack(
             _btn("profile", "user-round", "Profile"),
             _btn("knowledge", "database", "Knowledge"),
@@ -107,6 +98,15 @@ def _mcs_section_tab_bar() -> rx.Component:
             _btn("model_comparison", "bar-chart-2", "Model"),
             _btn("credits", "coins", "Credits"),
             _btn("conversation", "message-square", "Conversation"),
+            spacing="0",
+            border_bottom=f"1px solid {SURFACE_BORDER}",
+            width="100%",
+            overflow_x="auto",
+        ),
+        # No profile: limited tabs
+        rx.hstack(
+            _btn("conversation", "message-square", "Conversation"),
+            _btn("credits", "coins", "Credits"),
             spacing="0",
             border_bottom=f"1px solid {SURFACE_BORDER}",
             width="100%",
@@ -1232,6 +1232,65 @@ def _mcs_topics_coverage_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_trigger_match_card(item: dict) -> rx.Component:
+    """Render a single trigger phrase analysis card for one user message."""
+    return rx.box(
+        rx.vstack(
+            # User message
+            rx.hstack(
+                rx.icon("message-circle", size=14, color="var(--blue-9)"),
+                rx.text(item["user_message"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+                spacing="2",
+                align="center",
+            ),
+            # Selected topic badge
+            rx.hstack(
+                rx.text("Triggered:", font_size="12px", color="var(--gray-a9)"),
+                rx.badge(
+                    item["selected_topic"],
+                    color_scheme=rx.cond(item["selected_topic"] == "—", "gray", "green"),
+                    variant="soft",
+                    size="1",
+                ),
+                spacing="2",
+                align="center",
+            ),
+            # Matches summary with visual hierarchy
+            rx.box(
+                rx.text(
+                    item["matches_summary"],
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    white_space="pre-wrap",
+                    font_family=_MONO,
+                    line_height="1.6",
+                ),
+                border_left="2px solid var(--gray-a4)",
+                padding_left="12px",
+                margin_top="4px",
+            ),
+            # Cap indicator
+            rx.cond(
+                item["total_matches"].to(int) > 8,  # type: ignore[union-attr]
+                rx.text(
+                    rx.text.span("showing top 8 of "),
+                    rx.text.span(item["total_matches"], font_weight="600"),
+                    rx.text.span(" matches"),
+                    font_size="11px",
+                    color="var(--gray-a7)",
+                    font_style="italic",
+                    padding_top="4px",
+                ),
+            ),
+            spacing="2",
+            width="100%",
+        ),
+        padding="14px 16px",
+        border_bottom="1px solid var(--gray-a3)",
+        _hover={"background": "var(--gray-a2)"},
+    )
+
+
 def _mcs_topics_panel() -> rx.Component:
     return rx.vstack(
         # KPI grid
@@ -1340,6 +1399,33 @@ def _mcs_topics_panel() -> rx.Component:
                     "3fr 1fr 1fr",
                     State.mcs_topics_coverage,
                     _mcs_topics_coverage_row,
+                ),
+                width="100%",
+            ),
+        ),
+        # Trigger Phrase Analysis
+        rx.cond(
+            State.mcs_topics_trigger_matches.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("crosshair", size=16, color="var(--teal-9)"),
+                    section_heading("Trigger Phrase Analysis"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "How user messages matched against topic trigger phrases.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="8px",
+                ),
+                rx.box(
+                    rx.foreach(State.mcs_topics_trigger_matches, _mcs_trigger_match_card),
+                    width="100%",
+                    border=f"1px solid {SURFACE_BORDER}",
+                    border_radius="8px",
+                    background="var(--gray-a2)",
+                    overflow="hidden",
                 ),
                 width="100%",
             ),

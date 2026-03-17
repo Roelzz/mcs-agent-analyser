@@ -27,6 +27,7 @@ from batch_analytics import aggregate_timelines, render_batch_report
 from parser import (
     _count_action_kinds,
     detect_trigger_overlaps,
+    match_query_to_triggers,
     parse_dialog_json,
     parse_yaml,
     resolve_topic_name,
@@ -2786,6 +2787,73 @@ def test_render_trigger_overlaps_table():
     assert "## Trigger Query Overlaps" in result
     assert "T1" in result
     assert "75.0%" in result
+
+
+# --- match_query_to_triggers ---
+
+
+def test_match_query_to_triggers_basic():
+    """A query with shared tokens scores above threshold."""
+    components = [
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="Password Reset",
+            schema_name="s1",
+            trigger_queries=["how to reset my password", "forgot my password"],
+        ),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="Order Tracking",
+            schema_name="s2",
+            trigger_queries=["track my order", "where is my shipment"],
+        ),
+    ]
+    results = match_query_to_triggers("I need to reset my password", components)
+    assert len(results) >= 1
+    assert results[0]["display_name"] == "Password Reset"
+    assert results[0]["score"] >= 0.5
+
+
+def test_match_query_to_triggers_threshold():
+    """Matches below 0.5 threshold are excluded."""
+    components = [
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="Password Reset",
+            schema_name="s1",
+            trigger_queries=["how to reset my password"],
+        ),
+    ]
+    results = match_query_to_triggers("what is the weather today", components)
+    assert results == []
+
+
+def test_match_query_to_triggers_max_results():
+    """At most max_results entries are returned."""
+    components = [
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name=f"Topic{i}",
+            schema_name=f"s{i}",
+            trigger_queries=["reset password help"],
+        )
+        for i in range(20)
+    ]
+    results = match_query_to_triggers("reset password help", components, max_results=5)
+    assert len(results) <= 5
+
+
+def test_match_query_to_triggers_empty_query():
+    """Empty query returns no results."""
+    components = [
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="T1",
+            schema_name="s1",
+            trigger_queries=["hello"],
+        ),
+    ]
+    assert match_query_to_triggers("", components) == []
 
 
 # --- Step 3: Quick Wins Section (1.1) ---

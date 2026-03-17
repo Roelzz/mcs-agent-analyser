@@ -250,7 +250,7 @@ class DataverseMixin(rx.State, mixin=True):
                     if self.report_markdown:  # type: ignore[attr-defined]
                         yield
                         await self._refresh_community_count()  # type: ignore[attr-defined]
-                        yield rx.redirect("/analysis")
+                        yield rx.redirect("/analysis/dynamic")
             else:
                 error = result.get("error_description", result.get("error", "Unknown error"))
                 self.dv_auth_error = (
@@ -434,6 +434,7 @@ class DataverseMixin(rx.State, mixin=True):
                     self.report_custom_findings = []  # type: ignore[attr-defined]
                 self.report_source = "import"  # type: ignore[attr-defined]
                 self.lint_report_markdown = ""  # type: ignore[attr-defined]
+                self._populate_dynamic_sections(profile if self.bot_profile_json else None, timeline, "transcript")  # type: ignore[attr-defined]
 
         except Exception as e:
             logger.error(f"Dataverse transcript analysis failed: {e}")
@@ -443,7 +444,7 @@ class DataverseMixin(rx.State, mixin=True):
             yield
             await self._refresh_community_count()  # type: ignore[attr-defined]
             if self.report_markdown:  # type: ignore[attr-defined]
-                yield rx.redirect("/analysis")
+                yield rx.redirect("/analysis/dynamic")
 
     @rx.event
     async def dv_fetch_and_analyse_by_id(self):
@@ -518,6 +519,7 @@ class DataverseMixin(rx.State, mixin=True):
                     self.report_custom_findings = []  # type: ignore[attr-defined]
                 self.report_source = "import"  # type: ignore[attr-defined]
                 self.lint_report_markdown = ""  # type: ignore[attr-defined]
+                self._populate_dynamic_sections(profile if self.bot_profile_json else None, timeline, "transcript")  # type: ignore[attr-defined]
 
         except RuntimeError as e:
             self.dv_single_fetch_error = str(e)
@@ -537,7 +539,7 @@ class DataverseMixin(rx.State, mixin=True):
             yield
             await self._refresh_community_count()  # type: ignore[attr-defined]
             if self.report_markdown:  # type: ignore[attr-defined]
-                yield rx.redirect("/analysis")
+                yield rx.redirect("/analysis/dynamic")
 
     async def _run_bot_analysis(self):
         """Core bot analysis logic — fetch config + components, generate report.
@@ -577,6 +579,7 @@ class DataverseMixin(rx.State, mixin=True):
             self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
             logger.debug("Stored bot_profile_json (len={})", len(self.bot_profile_json))  # type: ignore[attr-defined]
             self.lint_report_markdown = ""  # type: ignore[attr-defined]
+            self._populate_dynamic_sections(profile, None, "snapshot")  # type: ignore[attr-defined]
 
             instruction_diff = save_snapshot(profile)
             if instruction_diff and instruction_diff.is_significant:
@@ -616,7 +619,7 @@ class DataverseMixin(rx.State, mixin=True):
         yield
         await self._refresh_community_count()  # type: ignore[attr-defined]
         if self.report_markdown:  # type: ignore[attr-defined]
-            yield rx.redirect("/analysis")
+            yield rx.redirect("/analysis/dynamic")
 
     @rx.event
     async def dv_run_batch_analysis(self):

@@ -623,6 +623,49 @@ def detect_trigger_overlaps(components: list[ComponentSummary]) -> list[dict]:
     return overlaps
 
 
+def match_query_to_triggers(
+    query: str,
+    components: list[ComponentSummary],
+    threshold: float = 0.5,
+    max_results: int = 8,
+) -> list[dict]:
+    """Score a user query against topic trigger phrases using normalized token overlap.
+
+    Returns at most *max_results* matches above *threshold*, sorted by score descending.
+    Each result dict has keys: display_name, score (0‥1), best_phrase.
+    """
+    query_tokens = set(query.lower().split())
+    if not query_tokens:
+        return []
+
+    results: list[dict] = []
+    for comp in components:
+        if comp.kind != "DialogComponent" or not comp.trigger_queries:
+            continue
+        best_score = 0.0
+        best_phrase = ""
+        for phrase in comp.trigger_queries:
+            phrase_tokens = set(phrase.lower().split())
+            if not phrase_tokens:
+                continue
+            shared = query_tokens & phrase_tokens
+            score = len(shared) / max(len(query_tokens), len(phrase_tokens))
+            if score > best_score:
+                best_score = score
+                best_phrase = phrase
+        if best_score >= threshold:
+            results.append(
+                {
+                    "display_name": comp.display_name,
+                    "score": round(best_score, 4),
+                    "best_phrase": best_phrase,
+                }
+            )
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results[:max_results]
+
+
 def parse_dialog_json(path: Path) -> list[dict]:
     """Parse dialog.json and return activities sorted by position."""
     with open(path, encoding="utf-8") as f:
