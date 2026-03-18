@@ -597,7 +597,11 @@ def _mcs_conversation_visual_dashboard() -> rx.Component:
             rx.grid(
                 rx.box(
                     rx.text(
-                        "Event Mix", font_size="13px", color="var(--gray-12)", font_weight="700", margin_bottom="8px"
+                        "Event Mix", font_size="13px", color="var(--gray-12)", font_weight="700",
+                    ),
+                    rx.text(
+                        "Breakdown of all events in the conversation by category.",
+                        font_size="11px", color="var(--gray-a9)", margin_bottom="8px",
                     ),
                     rx.vstack(rx.foreach(State.mcs_conv_event_mix, _mcs_mix_row), spacing="2", width="100%"),
                     border=f"1px solid {SURFACE_BORDER}",
@@ -611,7 +615,10 @@ def _mcs_conversation_visual_dashboard() -> rx.Component:
                         font_size="13px",
                         color="var(--gray-12)",
                         font_weight="700",
-                        margin_bottom="8px",
+                    ),
+                    rx.text(
+                        "How long the agent takes to respond — green is fast, red is slow.",
+                        font_size="11px", color="var(--gray-a9)", margin_bottom="8px",
                     ),
                     rx.vstack(rx.foreach(State.mcs_conv_latency_bands, _mcs_mix_row), spacing="2", width="100%"),
                     border=f"1px solid {SURFACE_BORDER}",

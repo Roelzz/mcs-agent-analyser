@@ -382,10 +382,10 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
             "avg_fmt": stats["avg_fmt"] if stats else "",
         })
 
-    # Latency bands
+    # Latency bands — green→yellow→amber→red severity scale
     bands = [
         ("< 1s", sum(1 for t in turns if t["latency_ms"] < 1000), "var(--green-9)"),
-        ("1-3s", sum(1 for t in turns if 1000 <= t["latency_ms"] < 3000), "var(--blue-9)"),
+        ("1-3s", sum(1 for t in turns if 1000 <= t["latency_ms"] < 3000), "var(--yellow-9)"),
         ("3-8s", sum(1 for t in turns if 3000 <= t["latency_ms"] < 8000), "var(--amber-9)"),
         (">= 8s", sum(1 for t in turns if t["latency_ms"] >= 8000), "var(--red-9)"),
     ]
@@ -396,6 +396,9 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
             "count": str(count),
             "color": color,
             "pct": f"{(count / turns_total) * 100:.1f}%",
+            "min_fmt": "",
+            "max_fmt": "",
+            "avg_fmt": "",
         }
         for label, count, color in bands
     ]
