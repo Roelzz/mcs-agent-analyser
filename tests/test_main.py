@@ -15,6 +15,7 @@ from models import (
     ConversationTimeline,
     CreditEstimate,
     CustomRule,
+    CustomSearchStep,
     EventType,
     ExecutionPhase,
     GptInfo,
@@ -4787,3 +4788,23 @@ def test_event_mix_errors_no_duration():
     assert err_row["max_fmt"] == ""
     assert err_row["avg_fmt"] == ""
     assert err_row["bar_color"] == "var(--gray-a5)"
+
+
+def test_event_mix_search_includes_custom_search_steps():
+    """Custom search steps (e.g. Universal Search Tool) should be included in Search durations."""
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.KNOWLEDGE_SEARCH, summary="KS 1", timestamp="2024-01-01T00:00:00Z"),
+        ],
+        knowledge_searches=[
+            KnowledgeSearchInfo(execution_time="00:00:00.9000000"),
+        ],
+        custom_search_steps=[
+            CustomSearchStep(task_dialog_id="ust1", display_name="Universal Search Tool", execution_time="00:00:21.4000000"),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    search_row = next(r for r in result["event_mix"] if r["label"] == "Search")
+    assert search_row["min_fmt"] == "900ms"
+    assert search_row["max_fmt"] == "21.4s"
+    assert search_row["bar_color"] == "var(--red-9)"  # avg ~11s = red

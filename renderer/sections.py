@@ -353,6 +353,9 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
     search_durations = [
         d for ks in timeline.knowledge_searches
         if (d := _parse_execution_time_ms(ks.execution_time)) is not None
+    ] + [
+        d for cs in timeline.custom_search_steps
+        if (d := _parse_execution_time_ms(cs.execution_time)) is not None
     ]
 
     # KPIs
