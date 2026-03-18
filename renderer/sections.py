@@ -292,7 +292,7 @@ def _pair_message_turns(timeline: ConversationTimeline) -> list[dict]:
             }
             continue
 
-        if ev.event_type == EventType.BOT_MESSAGE and pending_user is not None:
+        if ev.event_type in (EventType.BOT_MESSAGE, EventType.ACTION_SEND_ACTIVITY) and pending_user is not None:
             latency_ms = _ms_between_iso(pending_user.get("user_ts"), ev.timestamp)
             turns.append(
                 {
@@ -311,7 +311,7 @@ def _pair_message_turns(timeline: ConversationTimeline) -> list[dict]:
 def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[str, list[dict]]:
     """Compute KPIs, event mix, latency bands, and highlights from a timeline."""
     user_msgs = sum(1 for e in timeline.events if e.event_type == EventType.USER_MESSAGE)
-    bot_msgs = sum(1 for e in timeline.events if e.event_type == EventType.BOT_MESSAGE)
+    bot_msgs = sum(1 for e in timeline.events if e.event_type in (EventType.BOT_MESSAGE, EventType.ACTION_SEND_ACTIVITY))
     errors = sum(1 for e in timeline.events if e.event_type == EventType.ERROR)
     searches = sum(1 for e in timeline.events if e.event_type == EventType.KNOWLEDGE_SEARCH)
 

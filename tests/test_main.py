@@ -64,6 +64,7 @@ from renderer import (
 )
 from renderer.sections import (
     build_conversation_flow_items,
+    build_conversation_visual_summary,
     build_orchestrator_decision_timeline,
     build_plan_evolution,
     build_topic_lifecycles,
@@ -4661,3 +4662,43 @@ def test_build_trigger_match_items_system_tool_fallback():
     items = build_trigger_match_items(tl, profile)
     assert len(items) == 1
     assert items[0]["selected_topic"] == "P:UniversalSearchTool (system)"
+
+
+# --- Conversation Visual Summary: ACTION_SEND_ACTIVITY as bot response ---
+
+
+def test_visual_summary_action_send_counts_as_bot_response():
+    """ACTION_SEND_ACTIVITY should be counted in 'Bot Responses' KPI."""
+    timeline = ConversationTimeline(events=[
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
+        TimelineEvent(event_type=EventType.ACTION_SEND_ACTIVITY, summary="Bot: hello", timestamp="2024-01-01T00:00:01Z"),
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: bye", timestamp="2024-01-01T00:00:02Z"),
+        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: goodbye", timestamp="2024-01-01T00:00:03Z"),
+    ])
+    result = build_conversation_visual_summary(timeline)
+    bot_kpi = next(k for k in result["kpis"] if k["label"] == "Bot Responses")
+    assert bot_kpi["value"] == "2"
+
+
+def test_visual_summary_latency_with_action_send():
+    """USER_MESSAGE -> ACTION_SEND_ACTIVITY should produce correct turn latency."""
+    timeline = ConversationTimeline(events=[
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
+        TimelineEvent(event_type=EventType.ACTION_SEND_ACTIVITY, summary="Bot: hello", timestamp="2024-01-01T00:00:02Z"),
+    ])
+    result = build_conversation_visual_summary(timeline)
+    avg_kpi = next(k for k in result["kpis"] if k["label"] == "Avg Turn Latency")
+    assert avg_kpi["value"] == "2000 ms"
+
+
+def test_visual_summary_latency_bands_populated():
+    """Latency bands should have non-zero counts when turns exist."""
+    timeline = ConversationTimeline(events=[
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
+        TimelineEvent(event_type=EventType.ACTION_SEND_ACTIVITY, summary="Bot: hello", timestamp="2024-01-01T00:00:01.500Z"),
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: bye", timestamp="2024-01-01T00:00:03Z"),
+        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: goodbye", timestamp="2024-01-01T00:00:06Z"),
+    ])
+    result = build_conversation_visual_summary(timeline)
+    total_band_count = sum(int(b["count"]) for b in result["latency_bands"])
+    assert total_band_count == 2
