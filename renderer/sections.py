@@ -289,7 +289,19 @@ def _duration_stats(durations: list[float]) -> dict | None:
         "min_fmt": _format_duration(min(durations)),
         "max_fmt": _format_duration(max(durations)),
         "avg_fmt": _format_duration(avg),
+        "avg_ms": avg,
     }
+
+
+def _severity_color(avg_ms: float) -> str:
+    """Map average duration to a green→yellow→amber→red severity color."""
+    if avg_ms < 1000:
+        return "var(--green-9)"
+    if avg_ms < 3000:
+        return "var(--yellow-9)"
+    if avg_ms < 8000:
+        return "var(--amber-9)"
+    return "var(--red-9)"
 
 
 def _pair_message_turns(timeline: ConversationTimeline) -> list[dict]:
@@ -372,10 +384,12 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
     event_mix = []
     for label, count, color, durations in mix_raw:
         stats = _duration_stats(durations)
+        bar_color = _severity_color(stats["avg_ms"]) if stats else "var(--gray-a5)"
         event_mix.append({
             "label": label,
             "count": str(count),
             "color": color,
+            "bar_color": bar_color,
             "pct": f"{(count / mix_total) * 100:.1f}%",
             "min_fmt": stats["min_fmt"] if stats else "",
             "max_fmt": stats["max_fmt"] if stats else "",
@@ -395,6 +409,7 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
             "label": label,
             "count": str(count),
             "color": color,
+            "bar_color": color,
             "pct": f"{(count / turns_total) * 100:.1f}%",
             "min_fmt": "",
             "max_fmt": "",

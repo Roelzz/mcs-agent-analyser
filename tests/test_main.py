@@ -4713,16 +4713,16 @@ def test_duration_stats_helper():
     """Basic min/max/avg, empty list, single value."""
     assert _duration_stats([]) is None
     result = _duration_stats([1000.0])
-    assert result == {"min_fmt": "1.0s", "max_fmt": "1.0s", "avg_fmt": "1.0s"}
+    assert result == {"min_fmt": "1.0s", "max_fmt": "1.0s", "avg_fmt": "1.0s", "avg_ms": 1000.0}
     result = _duration_stats([500.0, 1500.0, 3000.0])
     assert result["min_fmt"] == "500ms"
     assert result["max_fmt"] == "3.0s"
-    # avg = (500+1500+3000)/3 = 1666.67ms
     assert result["avg_fmt"] == "1.7s"
+    assert abs(result["avg_ms"] - 1666.67) < 1
 
 
 def test_event_mix_includes_step_durations():
-    """Timeline with 2 phases -> Steps row has correct min/avg/max."""
+    """Timeline with 2 phases -> Steps row has correct min/avg/max and severity color."""
     timeline = ConversationTimeline(
         events=[
             TimelineEvent(event_type=EventType.STEP_TRIGGERED, summary="Step A", timestamp="2024-01-01T00:00:00Z"),
@@ -4738,10 +4738,11 @@ def test_event_mix_includes_step_durations():
     assert steps_row["min_fmt"] == "2.0s"
     assert steps_row["max_fmt"] == "58.1s"
     assert steps_row["avg_fmt"] == "30.1s"
+    assert steps_row["bar_color"] == "var(--red-9)"  # avg 30s = red
 
 
 def test_event_mix_includes_search_durations():
-    """Timeline with knowledge_searches -> Search row has correct stats."""
+    """Timeline with knowledge_searches -> Search row has correct stats and severity color."""
     timeline = ConversationTimeline(
         events=[
             TimelineEvent(event_type=EventType.KNOWLEDGE_SEARCH, summary="KS 1", timestamp="2024-01-01T00:00:00Z"),
@@ -4757,6 +4758,7 @@ def test_event_mix_includes_search_durations():
     assert search_row["min_fmt"] == "1.5s"
     assert search_row["max_fmt"] == "3.0s"
     assert search_row["avg_fmt"] == "2.2s"
+    assert search_row["bar_color"] == "var(--yellow-9)"  # avg 2.2s = yellow
 
 
 def test_event_mix_includes_message_latency():
@@ -4775,7 +4777,7 @@ def test_event_mix_includes_message_latency():
 
 
 def test_event_mix_errors_no_duration():
-    """Errors row has empty format strings."""
+    """Errors row has empty format strings and neutral gray bar."""
     timeline = ConversationTimeline(events=[
         TimelineEvent(event_type=EventType.ERROR, summary="Error!", timestamp="2024-01-01T00:00:00Z"),
     ])
@@ -4784,3 +4786,4 @@ def test_event_mix_errors_no_duration():
     assert err_row["min_fmt"] == ""
     assert err_row["max_fmt"] == ""
     assert err_row["avg_fmt"] == ""
+    assert err_row["bar_color"] == "var(--gray-a5)"

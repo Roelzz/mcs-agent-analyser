@@ -518,7 +518,7 @@ def _mcs_mix_row(item: dict) -> rx.Component:
             rx.box(
                 height="8px",
                 border_radius="999px",
-                background=item["color"],
+                background=item["bar_color"],
                 width=item["pct"],
                 min_width="6px",
             ),
