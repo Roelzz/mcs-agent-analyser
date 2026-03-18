@@ -16,6 +16,7 @@ from models import (
     CreditEstimate,
     CustomRule,
     EventType,
+    ExecutionPhase,
     GptInfo,
     KnowledgeSearchInfo,
     RuleCondition,
@@ -63,6 +64,7 @@ from renderer import (
     render_transcript_report,
 )
 from renderer.sections import (
+    _duration_stats,
     build_conversation_flow_items,
     build_conversation_visual_summary,
     build_orchestrator_decision_timeline,
@@ -4702,3 +4704,83 @@ def test_visual_summary_latency_bands_populated():
     result = build_conversation_visual_summary(timeline)
     total_band_count = sum(int(b["count"]) for b in result["latency_bands"])
     assert total_band_count == 2
+
+
+# --- Duration stats helper + event mix durations ---
+
+
+def test_duration_stats_helper():
+    """Basic min/max/avg, empty list, single value."""
+    assert _duration_stats([]) is None
+    result = _duration_stats([1000.0])
+    assert result == {"min_fmt": "1.0s", "max_fmt": "1.0s", "avg_fmt": "1.0s"}
+    result = _duration_stats([500.0, 1500.0, 3000.0])
+    assert result["min_fmt"] == "500ms"
+    assert result["max_fmt"] == "3.0s"
+    # avg = (500+1500+3000)/3 = 1666.67ms
+    assert result["avg_fmt"] == "1.7s"
+
+
+def test_event_mix_includes_step_durations():
+    """Timeline with 2 phases -> Steps row has correct min/avg/max."""
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.STEP_TRIGGERED, summary="Step A", timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(event_type=EventType.STEP_TRIGGERED, summary="Step B", timestamp="2024-01-01T00:00:05Z"),
+        ],
+        phases=[
+            ExecutionPhase(label="Phase A", duration_ms=2000.0),
+            ExecutionPhase(label="Phase B", duration_ms=58100.0),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    steps_row = next(r for r in result["event_mix"] if r["label"] == "Steps")
+    assert steps_row["min_fmt"] == "2.0s"
+    assert steps_row["max_fmt"] == "58.1s"
+    assert steps_row["avg_fmt"] == "30.1s"
+
+
+def test_event_mix_includes_search_durations():
+    """Timeline with knowledge_searches -> Search row has correct stats."""
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.KNOWLEDGE_SEARCH, summary="KS 1", timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(event_type=EventType.KNOWLEDGE_SEARCH, summary="KS 2", timestamp="2024-01-01T00:00:05Z"),
+        ],
+        knowledge_searches=[
+            KnowledgeSearchInfo(execution_time="00:00:01.5000000"),
+            KnowledgeSearchInfo(execution_time="00:00:03.0000000"),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    search_row = next(r for r in result["event_mix"] if r["label"] == "Search")
+    assert search_row["min_fmt"] == "1.5s"
+    assert search_row["max_fmt"] == "3.0s"
+    assert search_row["avg_fmt"] == "2.2s"
+
+
+def test_event_mix_includes_message_latency():
+    """2 user-bot pairs -> Messages row has correct stats."""
+    timeline = ConversationTimeline(events=[
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
+        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hello", timestamp="2024-01-01T00:00:02Z"),
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: bye", timestamp="2024-01-01T00:00:03Z"),
+        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: goodbye", timestamp="2024-01-01T00:00:06Z"),
+    ])
+    result = build_conversation_visual_summary(timeline)
+    msg_row = next(r for r in result["event_mix"] if r["label"] == "Messages")
+    assert msg_row["min_fmt"] == "2.0s"
+    assert msg_row["max_fmt"] == "3.0s"
+    assert msg_row["avg_fmt"] == "2.5s"
+
+
+def test_event_mix_errors_no_duration():
+    """Errors row has empty format strings."""
+    timeline = ConversationTimeline(events=[
+        TimelineEvent(event_type=EventType.ERROR, summary="Error!", timestamp="2024-01-01T00:00:00Z"),
+    ])
+    result = build_conversation_visual_summary(timeline)
+    err_row = next(r for r in result["event_mix"] if r["label"] == "Errors")
+    assert err_row["min_fmt"] == ""
+    assert err_row["max_fmt"] == ""
+    assert err_row["avg_fmt"] == ""

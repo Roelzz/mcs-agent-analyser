@@ -31,6 +31,7 @@ from .profile import (
     render_topic_inventory,
     render_trigger_overlaps,
 )
+from ._helpers import _format_duration, _parse_execution_time_ms
 from .report import render_credit_estimate
 from .timeline_render import render_orchestrator_reasoning, render_timeline
 
@@ -279,6 +280,18 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _duration_stats(durations: list[float]) -> dict | None:
+    """Compute min/max/avg formatted durations from a list of milliseconds."""
+    if not durations:
+        return None
+    avg = sum(durations) / len(durations)
+    return {
+        "min_fmt": _format_duration(min(durations)),
+        "max_fmt": _format_duration(max(durations)),
+        "avg_fmt": _format_duration(avg),
+    }
+
+
 def _pair_message_turns(timeline: ConversationTimeline) -> list[dict]:
     """Pair user messages with the next bot message to form chat turns."""
     turns: list[dict] = []
@@ -324,6 +337,12 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
     avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
     p95_latency = sorted(latencies)[int(len(latencies) * 0.95)] if latencies else 0.0
 
+    step_durations = [p.duration_ms for p in timeline.phases if p.duration_ms > 0]
+    search_durations = [
+        d for ks in timeline.knowledge_searches
+        if (d := _parse_execution_time_ms(ks.execution_time)) is not None
+    ]
+
     # KPIs
     kpis = [
         {"label": "User Messages", "value": str(user_msgs), "hint": "Incoming requests", "tone": "neutral"},
@@ -344,21 +363,24 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
 
     # Event mix
     mix_raw = [
-        ("Messages", user_msgs + bot_msgs, "var(--green-9)"),
-        ("Steps", len(started_steps), "var(--teal-9)"),
-        ("Search", searches, "var(--amber-9)"),
-        ("Errors", errors, "var(--red-9)"),
+        ("Messages", user_msgs + bot_msgs, "var(--green-9)", latencies),
+        ("Steps", len(started_steps), "var(--teal-9)", step_durations),
+        ("Search", searches, "var(--amber-9)", search_durations),
+        ("Errors", errors, "var(--red-9)", []),
     ]
-    mix_total = sum(v for _, v, _ in mix_raw) or 1
-    event_mix = [
-        {
+    mix_total = sum(v for _, v, _, _ in mix_raw) or 1
+    event_mix = []
+    for label, count, color, durations in mix_raw:
+        stats = _duration_stats(durations)
+        event_mix.append({
             "label": label,
             "count": str(count),
             "color": color,
             "pct": f"{(count / mix_total) * 100:.1f}%",
-        }
-        for label, count, color in mix_raw
-    ]
+            "min_fmt": stats["min_fmt"] if stats else "",
+            "max_fmt": stats["max_fmt"] if stats else "",
+            "avg_fmt": stats["avg_fmt"] if stats else "",
+        })
 
     # Latency bands
     bands = [
