@@ -1268,6 +1268,109 @@ def test_gantt_idle_gap_tagged():
     assert ":crit, done, idle" in output
 
 
+def test_gantt_processing_gap_not_idle():
+    """Orchestrator processing after user message should not show as idle."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "submit expense"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                summary="Plan received",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:12Z",  # 12s gap — orchestrator thinking
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+    assert "section Idle" not in output
+    assert ":idle" not in output
+
+
+def test_gantt_step_finished_to_plan_not_idle():
+    """Gap between step finish and next plan is orchestrator re-planning, not idle."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                summary="Done - UniversalSearchTool",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                summary="Plan received",
+                topic_name="Main",
+                timestamp="2024-01-01T00:00:21Z",  # 21s gap — orchestrator re-planning
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+    assert "section Idle" not in output
+    assert ":idle" not in output
+
+
+def test_gantt_hitl_step_is_idle():
+    """Human in the loop wait should be genuine idle."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Step triggered",
+                topic_name="Human in the Loop",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                summary="Done - Human in the Loop",
+                topic_name="Human in the Loop",
+                timestamp="2024-01-01T00:01:00Z",  # 60s gap — human approval wait
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+    assert "section Idle" in output
+    assert ":crit, done, idle" in output
+
+
+def test_gantt_tool_execution_not_idle():
+    """Non-HITL step execution should not show as idle."""
+    timeline = ConversationTimeline(
+        bot_name="TestBot",
+        conversation_id="conv-1",
+        user_query="test",
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Step triggered",
+                topic_name="UniversalSearchTool",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                summary="Done - UniversalSearchTool",
+                topic_name="UniversalSearchTool",
+                timestamp="2024-01-01T00:00:30Z",  # 30s gap — tool execution
+            ),
+        ],
+    )
+    output = render_gantt_chart(timeline)
+    assert "section Idle" not in output
+    assert ":idle" not in output
+
+
 def test_custom_search_step_tracking():
     """Custom search topics (type=CustomTopic, taskDialogId contains 'search') should be tracked."""
     activities = [

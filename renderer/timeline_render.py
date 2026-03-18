@@ -350,6 +350,27 @@ def _gantt_tag(event: TimelineEvent) -> str:
     return _GANTT_TAG_MAP.get(event.event_type, "")
 
 
+def _is_genuine_idle(prev_event: TimelineEvent, next_event: TimelineEvent) -> bool:
+    """Determine if a gap between two events is genuine idle (waiting for user/human).
+
+    Returns True only when:
+    - prev is BOT_MESSAGE or ACTION_SEND_ACTIVITY and next is USER_MESSAGE (user thinking)
+    - prev is STEP_TRIGGERED with a "human in the loop" topic (HITL approval wait)
+    """
+    if (
+        prev_event.event_type in (EventType.BOT_MESSAGE, EventType.ACTION_SEND_ACTIVITY)
+        and next_event.event_type == EventType.USER_MESSAGE
+    ):
+        return True
+    if (
+        prev_event.event_type == EventType.STEP_TRIGGERED
+        and prev_event.topic_name
+        and "human in the loop" in prev_event.topic_name.lower()
+    ):
+        return True
+    return False
+
+
 def render_gantt_chart(timeline: ConversationTimeline) -> str:
     """Render Mermaid Gantt chart of execution timeline."""
     if not timeline.events:
@@ -403,11 +424,11 @@ def render_gantt_chart(timeline: ConversationTimeline) -> str:
     current_section = ""
     min_duration = 50  # ms minimum display width
 
-    # Detect idle gaps (no adjustments — events use actual elapsed time)
+    # Detect genuine idle gaps (user thinking, HITL waits — not orchestrator processing)
     idle_gaps: list[tuple[int, int]] = []  # (index, original_gap_ms)
     for i in range(1, len(timed)):
         gap = timed[i][0] - timed[i - 1][0]
-        if gap > IDLE_THRESHOLD_MS:
+        if gap > IDLE_THRESHOLD_MS and _is_genuine_idle(timed[i - 1][1], timed[i][1]):
             idle_gaps.append((i, gap))
     idle_gap_set = {idx for idx, _ in idle_gaps}
     precedes_idle = {idx - 1 for idx, _ in idle_gaps}
