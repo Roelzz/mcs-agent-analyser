@@ -4956,3 +4956,150 @@ def test_step_durations_exclude_idle_time():
     # Active time should be much less than 53s
     max_val = float(steps_row["max_fmt"].replace("ms", "").replace("s", "").replace("m ", ""))
     assert max_val < 10  # Active time should be a few seconds, not 53
+
+
+# --- Orchestrator thinking synthesis ---
+
+
+def test_orchestrator_thinking_phases_synthesized():
+    """Gaps between StepFinished and PlanReceived produce OrchestratorThinking phases."""
+    from timeline import build_timeline
+
+    activities = [
+        {
+            "type": "message",
+            "text": "hello",
+            "from": {"role": "user"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "channelData": {"webchat:internal:position": 0},
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanReceived",
+            "value": {"steps": [], "isFinalPlan": False},
+            "timestamp": "2024-01-01T00:00:13Z",
+            "channelData": {"webchat:internal:position": 1},
+            "from": {"role": "bot"},
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepTriggered",
+            "value": {"taskDialogId": "P:UniversalSearchTool", "type": "KnowledgeSource", "stepId": "s1"},
+            "timestamp": "2024-01-01T00:00:13.100Z",
+            "channelData": {"webchat:internal:position": 2},
+            "from": {"role": "bot"},
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "value": {"taskDialogId": "P:UniversalSearchTool", "state": "completed", "stepId": "s1"},
+            "timestamp": "2024-01-01T00:00:14Z",
+            "channelData": {"webchat:internal:position": 3},
+            "from": {"role": "bot"},
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanReceived",
+            "value": {"steps": ["SomeAction"], "isFinalPlan": True},
+            "timestamp": "2024-01-01T00:00:26Z",
+            "channelData": {"webchat:internal:position": 4},
+            "from": {"role": "bot"},
+        },
+    ]
+    timeline = build_timeline(activities, {})
+
+    # Should have orchestrator thinking phases
+    orch_phases = [p for p in timeline.phases if p.phase_type == "OrchestratorThinking"]
+    assert len(orch_phases) >= 2  # initial planning + post-search thinking
+
+    # Post-search thinking should reference search
+    search_thinking = [p for p in orch_phases if "Processing" in p.label or "search" in p.label.lower()]
+    assert len(search_thinking) == 1
+    assert search_thinking[0].duration_ms == 12000.0  # 12s gap
+
+    # Initial planning
+    initial = [p for p in orch_phases if "Planning response" in p.label]
+    assert len(initial) == 1
+    assert initial[0].duration_ms == 12000.0  # user msg at 1s, plan at 13s
+
+    # Events should include ORCHESTRATOR_THINKING
+    orch_events = [e for e in timeline.events if e.event_type == EventType.ORCHESTRATOR_THINKING]
+    assert len(orch_events) >= 2
+
+
+def test_orchestrator_thinking_in_event_mix():
+    """Orchestrator thinking phases show up in the event_mix analytics."""
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(event_type=EventType.ORCHESTRATOR_THINKING, summary="Orchestrator: Planning response (5000ms)", timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(event_type=EventType.STEP_TRIGGERED, summary="Step start: A", timestamp="2024-01-01T00:00:05Z"),
+        ],
+        phases=[
+            ExecutionPhase(label="Planning response", phase_type="OrchestratorThinking", start="2024-01-01T00:00:00Z", end="2024-01-01T00:00:05Z", duration_ms=5000.0),
+            ExecutionPhase(label="A", phase_type="CustomTopic", start="2024-01-01T00:00:05Z", end="2024-01-01T00:00:06Z", duration_ms=1000.0),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    orch_row = next(r for r in result["event_mix"] if r["label"] == "Orchestrator")
+    assert orch_row["count"] == "1"
+    assert orch_row["min_fmt"] == "5.0s"
+    assert orch_row["avg_fmt"] == "5.0s"
+
+    # OrchestratorThinking should NOT appear in Steps
+    steps_row = next(r for r in result["event_mix"] if r["label"] == "Steps")
+    assert steps_row["min_fmt"] == "1.0s"
+    assert steps_row["max_fmt"] == "1.0s"
+
+
+def test_orchestrator_thinking_not_synthesized_for_short_gaps():
+    """Gaps under 1s should not produce orchestrator thinking phases."""
+    from timeline import build_timeline
+
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepTriggered",
+            "value": {"taskDialogId": "test", "type": "CustomTopic", "stepId": "s1"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "channelData": {"webchat:internal:position": 0},
+            "from": {"role": "bot"},
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "value": {"taskDialogId": "test", "state": "completed", "stepId": "s1"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "channelData": {"webchat:internal:position": 1},
+            "from": {"role": "bot"},
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanReceived",
+            "value": {"steps": [], "isFinalPlan": True},
+            "timestamp": "2024-01-01T00:00:01.500Z",
+            "channelData": {"webchat:internal:position": 2},
+            "from": {"role": "bot"},
+        },
+    ]
+    timeline = build_timeline(activities, {})
+    orch_phases = [p for p in timeline.phases if p.phase_type == "OrchestratorThinking"]
+    assert len(orch_phases) == 0  # 500ms gap is below threshold
+
+
+def test_gantt_shows_orchestrator_thinking_bars():
+    """Gantt chart should render orchestrator thinking as labeled bars."""
+    from renderer.timeline_render import render_gantt_chart
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.STEP_FINISHED, summary="Done: Search", topic_name="Search", timestamp="2024-01-01T00:00:01Z"),
+            TimelineEvent(event_type=EventType.ORCHESTRATOR_THINKING, summary="Orchestrator: Processing: Search (10000ms)", timestamp="2024-01-01T00:00:01Z"),
+            TimelineEvent(event_type=EventType.PLAN_RECEIVED, summary="Plan: [NextStep]", timestamp="2024-01-01T00:00:11Z"),
+        ],
+        phases=[],
+        bot_name="TestBot",
+    )
+    gantt = render_gantt_chart(timeline)
+    assert "Processing - Search" in gantt
+    assert "section Orchestrator" in gantt

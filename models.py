@@ -122,6 +122,7 @@ class EventType(str, Enum):
     ACTION_TRIGGER_EVAL = "ActionTriggerEval"
     ACTION_BEGIN_DIALOG = "ActionBeginDialog"
     ACTION_SEND_ACTIVITY = "ActionSendActivity"
+    ORCHESTRATOR_THINKING = "OrchestratorThinking"
     ERROR = "Error"
     OTHER = "Other"
 

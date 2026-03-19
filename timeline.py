@@ -505,6 +505,92 @@ def _process_trace_event(
             )
 
 
+_THINKING_THRESHOLD_MS = 1000  # gaps > 1s between events are orchestrator thinking
+
+
+def _synthesize_orchestrator_phases(state: _TimelineState) -> None:
+    """Detect orchestrator thinking gaps and insert synthetic events + phases.
+
+    Patterns detected:
+    - UserMessage → PlanReceived (initial planning)
+    - StepFinished → PlanReceived (planning next step)
+    - StepFinished → PlanFinished (finalizing)
+
+    The preceding step's phase_type determines the label context.
+    """
+    if not state.events:
+        return
+
+    # Build a lookup: step finished topic → phase_type
+    phase_type_by_label: dict[str, str] = {}
+    for p in state.phases:
+        if p.label and p.phase_type:
+            phase_type_by_label[p.label] = p.phase_type
+
+    insertions: list[tuple[int, TimelineEvent, ExecutionPhase]] = []
+
+    for i in range(len(state.events) - 1):
+        ev = state.events[i]
+        nxt = state.events[i + 1]
+
+        # Detect valid gap patterns
+        is_thinking_gap = False
+        context_label = ""
+
+        if (
+            ev.event_type == EventType.STEP_FINISHED
+            and nxt.event_type in (EventType.PLAN_RECEIVED, EventType.PLAN_FINISHED)
+        ):
+            is_thinking_gap = True
+            prev_type = phase_type_by_label.get(ev.topic_name or "", "")
+            if prev_type == "KnowledgeSource":
+                context_label = f"Processing: {ev.topic_name or 'search results'}"
+            elif nxt.event_type == EventType.PLAN_FINISHED:
+                context_label = "Finalizing plan"
+            else:
+                context_label = f"Planning after: {ev.topic_name or 'step'}"
+
+        elif (
+            ev.event_type == EventType.USER_MESSAGE
+            and nxt.event_type == EventType.PLAN_RECEIVED
+        ):
+            is_thinking_gap = True
+            context_label = "Planning response"
+
+        if not is_thinking_gap:
+            continue
+
+        if not ev.timestamp or not nxt.timestamp:
+            continue
+
+        gap_ms = _ms_between(ev.timestamp, nxt.timestamp)
+        if gap_ms < _THINKING_THRESHOLD_MS:
+            continue
+
+        # Create synthetic event and phase
+        position = ev.position
+        event = TimelineEvent(
+            timestamp=ev.timestamp,
+            position=position,
+            event_type=EventType.ORCHESTRATOR_THINKING,
+            summary=f"Orchestrator: {context_label} ({gap_ms:.0f}ms)",
+        )
+        phase = ExecutionPhase(
+            label=context_label,
+            phase_type="OrchestratorThinking",
+            start=ev.timestamp,
+            end=nxt.timestamp,
+            duration_ms=gap_ms,
+            state="completed",
+        )
+        insertions.append((i + 1, event, phase))
+
+    # Insert in reverse order to preserve indices
+    for idx, event, phase in reversed(insertions):
+        state.events.insert(idx, event)
+        state.phases.append(phase)
+
+
 def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> ConversationTimeline:
     """Build a ConversationTimeline from sorted activities and schema name lookup."""
     state = _TimelineState()
@@ -575,6 +661,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
             _process_trace_event(activity, state, schema_lookup, timestamp, position)
 
     _finalize_knowledge_search(state)
+    _synthesize_orchestrator_phases(state)
 
     total_elapsed = _ms_between(state.first_timestamp, state.last_timestamp)
 

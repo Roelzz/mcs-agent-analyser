@@ -288,6 +288,13 @@ def _gantt_label(event: TimelineEvent) -> str:
         return f"Send: {event.topic_name or 'unknown'}"
     if event.event_type == EventType.DIALOG_TRACING:
         return "Dialog trace"
+    if event.event_type == EventType.ORCHESTRATOR_THINKING:
+        # Extract context from summary: "Orchestrator: <context> (Xms)"
+        raw = (event.summary or "").replace("Orchestrator: ", "", 1)
+        # Strip trailing duration
+        if "(" in raw:
+            raw = raw[:raw.rfind("(")].strip()
+        return raw or "Thinking"
     return event.summary[:40] or "Event"
 
 
@@ -297,7 +304,7 @@ def _gantt_section(event: TimelineEvent) -> str:
         return ACTOR_NAMES["User"]
     if event.event_type == EventType.BOT_MESSAGE:
         return ACTOR_NAMES["Bot"]
-    if event.event_type in (EventType.PLAN_RECEIVED, EventType.PLAN_RECEIVED_DEBUG, EventType.PLAN_FINISHED):
+    if event.event_type in (EventType.PLAN_RECEIVED, EventType.PLAN_RECEIVED_DEBUG, EventType.PLAN_FINISHED, EventType.ORCHESTRATOR_THINKING):
         return ACTOR_NAMES["AI"]
     if event.event_type == EventType.KNOWLEDGE_SEARCH:
         return ACTOR_NAMES["KS"]
@@ -326,6 +333,7 @@ _GANTT_TAG_MAP: dict[EventType, str] = {
     EventType.ACTION_QA: "active, crit, ",
     EventType.ACTION_TRIGGER_EVAL: "active, crit, ",
     EventType.KNOWLEDGE_SEARCH: "active, crit, ",
+    EventType.ORCHESTRATOR_THINKING: "done, ",
     EventType.ERROR: "crit, ",
 }
 

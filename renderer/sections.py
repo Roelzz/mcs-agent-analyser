@@ -225,6 +225,7 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
             EventType.DIALOG_TRACING,
             EventType.DIALOG_REDIRECT,
             EventType.ACTION_TRIGGER_EVAL,
+            EventType.ORCHESTRATOR_THINKING,
             EventType.ERROR,
         }:
             title_map = {
@@ -236,11 +237,12 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
                 EventType.DIALOG_TRACING: "Topic Trace",
                 EventType.DIALOG_REDIRECT: "Topic Redirect",
                 EventType.ACTION_TRIGGER_EVAL: "Condition Eval",
+                EventType.ORCHESTRATOR_THINKING: "Orchestrator Thinking",
                 EventType.ERROR: "Error",
             }
             if ev.event_type == EventType.ERROR:
                 tone = "error"
-            elif ev.event_type == EventType.ACTION_TRIGGER_EVAL:
+            elif ev.event_type in (EventType.ACTION_TRIGGER_EVAL, EventType.ORCHESTRATOR_THINKING):
                 tone = "trace"
             else:
                 tone = "info"
@@ -355,6 +357,7 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
     user_msgs = sum(1 for e in timeline.events if e.event_type == EventType.USER_MESSAGE)
     bot_msgs = sum(1 for e in timeline.events if e.event_type in (EventType.BOT_MESSAGE, EventType.ACTION_SEND_ACTIVITY))
     errors = sum(1 for e in timeline.events if e.event_type == EventType.ERROR)
+    orchestrator_count = sum(1 for e in timeline.events if e.event_type == EventType.ORCHESTRATOR_THINKING)
     searches = (
         sum(1 for e in timeline.events if e.event_type == EventType.KNOWLEDGE_SEARCH)
         + len(timeline.custom_search_steps)
@@ -374,6 +377,9 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
     def _is_search_phase(p: ExecutionPhase) -> bool:
         return p.phase_type == "KnowledgeSource" or p.label in custom_search_names
 
+    def _is_orchestrator_phase(p: ExecutionPhase) -> bool:
+        return p.phase_type == "OrchestratorThinking"
+
     idle_gaps = _compute_idle_gaps(timeline.events)
     search_durations = [
         d for d in (
@@ -381,10 +387,14 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
             for p in timeline.phases if p.duration_ms > 0 and _is_search_phase(p)
         ) if d > 0
     ]
+    orchestrator_durations = [
+        p.duration_ms for p in timeline.phases if p.duration_ms > 0 and _is_orchestrator_phase(p)
+    ]
     step_durations = [
         d for d in (
             _active_duration(p, idle_gaps)
-            for p in timeline.phases if p.duration_ms > 0 and not _is_search_phase(p)
+            for p in timeline.phases
+            if p.duration_ms > 0 and not _is_search_phase(p) and not _is_orchestrator_phase(p)
         ) if d > 0
     ]
 
@@ -415,6 +425,7 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
         ("Messages", user_msgs + bot_msgs, "var(--green-9)", latencies),
         ("Steps", len(started_steps), "var(--teal-9)", step_durations),
         ("Search", searches, "var(--amber-9)", search_durations),
+        ("Orchestrator", orchestrator_count, "var(--blue-9)", orchestrator_durations),
         ("Errors", errors, "var(--red-9)", []),
     ]
     mix_total = sum(v for _, v, _, _ in mix_raw) or 1
@@ -837,6 +848,19 @@ def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list
             })
             continue
 
+        if ev.event_type == EventType.ORCHESTRATOR_THINKING:
+            import re as _re_orch
+
+            dur_match = _re_orch.search(r"\((\d+)ms\)", ev.summary or "")
+            duration = f"{dur_match.group(1)}ms" if dur_match else ""
+            items.append({
+                "kind": "orchestrator_thinking",
+                "summary": (ev.summary or "").replace("Orchestrator: ", "", 1)[:120],
+                "duration": duration,
+                "timestamp": _format_clock(ev.timestamp),
+            })
+            continue
+
         if ev.event_type == EventType.PLAN_FINISHED:
             is_cancelled = "true" if "cancelled=True" in (ev.summary or "") else "false"
             items.append({
@@ -950,6 +974,9 @@ def render_decision_timeline_md(timeline: ConversationTimeline) -> str:
                 lines.append(f"  - ✓ {topic} ({status}, {duration})" if duration else f"  - ✓ {topic} ({status})")
         elif kind == "action":
             lines.append(f"  - ⚡ {item.get('action_type', '')}: {item.get('summary', '')}")
+        elif kind == "orchestrator_thinking":
+            summary = item.get("summary", "")
+            lines.append(f"  - ⏳ {summary}")
         elif kind == "plan_finished":
             cancelled = " (cancelled)" if item.get("is_cancelled") == "true" else ""
             lines.append(f"- **Plan finished**{cancelled}")
