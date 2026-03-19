@@ -124,14 +124,6 @@ def _find_latest_user_index(events: list, current_idx: int) -> int | None:
     return None
 
 
-def _best_score_and_topic(scores: dict[str, float]) -> tuple[float | None, str]:
-    """Return the highest score and its topic name from a scores dict."""
-    if not scores:
-        return None, ""
-    best_topic = max(scores, key=scores.get)  # type: ignore[arg-type]
-    return scores[best_topic], best_topic
-
-
 def _format_trigger_score(score: float | None) -> str:
     """Format a 0-1 score as a labelled percentage string, or empty if None."""
     if score is None:
@@ -410,7 +402,7 @@ def build_conversation_flow_items(
             if ev.event_type == EventType.KNOWLEDGE_SEARCH and query:
                 detail = f'Query: "{query}"'
 
-            # Add trigger scores for step triggered/finished events
+            # Add trigger scores for step triggered/finished events (only for matching topics)
             trigger_score_str = ""
             trigger_phrase_str = ""
             trigger_color = "gray"
@@ -418,17 +410,14 @@ def build_conversation_flow_items(
                 topic = ev.topic_name or ""
                 scores = score_lookup.get(latest_user_idx, {})
                 score = _resolve_score_for_topic(topic, scores, name_map)
-                score_topic = topic
-                if score is None and scores:
-                    score, score_topic = _best_score_and_topic(scores)
                 if score is not None:
                     trigger_score_str = _format_trigger_score(score)
                     trigger_color = _trigger_score_color(score)
-                if profile is not None:
-                    user_text = (timeline.events[latest_user_idx].summary or "").replace("User: ", "", 1).strip().strip('"')
-                    if user_text:
-                        resolved_name = name_map.get(score_topic.lower().strip(), score_topic)
-                        trigger_phrase_str = _best_trigger_phrase(user_text, resolved_name, profile.components)
+                    if profile is not None:
+                        user_text = (timeline.events[latest_user_idx].summary or "").replace("User: ", "", 1).strip().strip('"')
+                        if user_text:
+                            resolved_name = name_map.get(topic.lower().strip(), topic)
+                            trigger_phrase_str = _best_trigger_phrase(user_text, resolved_name, profile.components)
 
             items.append(
                 {
@@ -1011,7 +1000,7 @@ def build_orchestrator_decision_timeline(
             if ev.has_recommendations is True:
                 has_recs = "true"
 
-            # Look up trigger score for this step's topic (fall back to best overall match)
+            # Look up trigger score for this step's specific topic only
             trigger_score_str = ""
             trigger_phrase_str = ""
             trigger_color = "gray"
@@ -1019,16 +1008,12 @@ def build_orchestrator_decision_timeline(
                 topic = ev.topic_name or ""
                 scores = score_lookup.get(latest_user_idx, {})
                 score = _resolve_score_for_topic(topic, scores, name_map)
-                score_topic = topic
-                if score is None and scores:
-                    # No match for this specific topic — show best overall match
-                    score, score_topic = _best_score_and_topic(scores)
                 if score is not None:
                     trigger_score_str = _format_trigger_score(score)
                     trigger_color = _trigger_score_color(score)
-                if profile is not None and latest_user_text:
-                    resolved_name = name_map.get(score_topic.lower().strip(), score_topic)
-                    trigger_phrase_str = _best_trigger_phrase(latest_user_text, resolved_name, profile.components)
+                    if profile is not None and latest_user_text:
+                        resolved_name = name_map.get(topic.lower().strip(), topic)
+                        trigger_phrase_str = _best_trigger_phrase(latest_user_text, resolved_name, profile.components)
 
             items.append({
                 "kind": "step",
