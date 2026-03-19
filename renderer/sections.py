@@ -20,6 +20,57 @@ from parser import detect_trigger_overlaps, match_query_to_triggers
 # ---------------------------------------------------------------------------
 
 
+def _build_component_name_map(profile: BotProfile) -> dict[str, str]:
+    """Build a map from normalized topic names to component display_names.
+
+    Maps: display_name (lower), schema suffix (lower), schema (lower) → display_name.
+    This bridges the gap between timeline event topic_names (from resolve_topic_name)
+    and component display_names (used as keys in match_query_to_triggers results).
+    """
+    name_map: dict[str, str] = {}
+    for c in profile.components:
+        dn = c.display_name
+        dn_lower = dn.lower().strip()
+        name_map[dn_lower] = dn
+        # Schema suffix: "rrs_demo.topic.Dutchy" → "dutchy"
+        if c.schema_name:
+            suffix = c.schema_name.rsplit(".", 1)[-1].lower()
+            if suffix not in name_map:
+                name_map[suffix] = dn
+            name_map[c.schema_name.lower()] = dn
+    return name_map
+
+
+def _resolve_score_for_topic(
+    topic_name: str,
+    scores: dict[str, float],
+    name_map: dict[str, str],
+) -> float | None:
+    """Look up the trigger match score for a topic, handling name mismatches.
+
+    Tries: exact match → normalized match → alias via component name map.
+    """
+    if not topic_name:
+        return None
+    # Exact match
+    if topic_name in scores:
+        return scores[topic_name]
+    # Normalized match
+    tn_lower = topic_name.lower().strip()
+    for key, score in scores.items():
+        if key.lower().strip() == tn_lower:
+            return score
+    # Alias via component name map: topic_name → display_name → score
+    display_name = name_map.get(tn_lower)
+    if display_name and display_name in scores:
+        return scores[display_name]
+    # Substring containment (e.g. topic "Dutchy" matches component "Ask Dutchy")
+    for key, score in scores.items():
+        if tn_lower in key.lower() or key.lower() in tn_lower:
+            return score
+    return None
+
+
 def _build_trigger_score_lookup(
     timeline: ConversationTimeline,
     profile: BotProfile,
@@ -71,6 +122,14 @@ def _find_latest_user_index(events: list, current_idx: int) -> int | None:
         if events[i].event_type == EventType.USER_MESSAGE:
             return i
     return None
+
+
+def _best_score_and_topic(scores: dict[str, float]) -> tuple[float | None, str]:
+    """Return the highest score and its topic name from a scores dict."""
+    if not scores:
+        return None, ""
+    best_topic = max(scores, key=scores.get)  # type: ignore[arg-type]
+    return scores[best_topic], best_topic
 
 
 def _format_trigger_score(score: float | None) -> str:
@@ -250,8 +309,10 @@ def build_conversation_flow_items(
 
     # Build trigger score lookup if profile is available
     score_lookup: dict[int, dict[str, float]] = {}
+    name_map: dict[str, str] = {}
     if profile is not None:
         score_lookup = _build_trigger_score_lookup(timeline, profile)
+        name_map = _build_component_name_map(profile)
 
     # Extra detail keys required by rx.foreach (must be uniform across all dicts)
     _detail_defaults = {
@@ -356,14 +417,18 @@ def build_conversation_flow_items(
             if ev.event_type in {EventType.STEP_TRIGGERED, EventType.STEP_FINISHED} and latest_user_idx is not None and score_lookup:
                 topic = ev.topic_name or ""
                 scores = score_lookup.get(latest_user_idx, {})
-                score = scores.get(topic)
+                score = _resolve_score_for_topic(topic, scores, name_map)
+                score_topic = topic
+                if score is None and scores:
+                    score, score_topic = _best_score_and_topic(scores)
                 if score is not None:
                     trigger_score_str = _format_trigger_score(score)
                     trigger_color = _trigger_score_color(score)
                 if profile is not None:
                     user_text = (timeline.events[latest_user_idx].summary or "").replace("User: ", "", 1).strip().strip('"')
                     if user_text:
-                        trigger_phrase_str = _best_trigger_phrase(user_text, topic, profile.components)
+                        resolved_name = name_map.get(score_topic.lower().strip(), score_topic)
+                        trigger_phrase_str = _best_trigger_phrase(user_text, resolved_name, profile.components)
 
             items.append(
                 {
@@ -891,8 +956,10 @@ def build_orchestrator_decision_timeline(
 
     # Build trigger score lookup if profile is available
     score_lookup: dict[int, dict[str, float]] = {}
+    name_map: dict[str, str] = {}
     if profile is not None:
         score_lookup = _build_trigger_score_lookup(timeline, profile)
+        name_map = _build_component_name_map(profile)
 
     for idx, ev in enumerate(events):
         if ev.event_type == EventType.USER_MESSAGE:
@@ -944,19 +1011,24 @@ def build_orchestrator_decision_timeline(
             if ev.has_recommendations is True:
                 has_recs = "true"
 
-            # Look up trigger score for this step's topic
+            # Look up trigger score for this step's topic (fall back to best overall match)
             trigger_score_str = ""
             trigger_phrase_str = ""
             trigger_color = "gray"
             if ev.event_type == EventType.STEP_TRIGGERED and latest_user_idx is not None and score_lookup:
                 topic = ev.topic_name or ""
                 scores = score_lookup.get(latest_user_idx, {})
-                score = scores.get(topic)
+                score = _resolve_score_for_topic(topic, scores, name_map)
+                score_topic = topic
+                if score is None and scores:
+                    # No match for this specific topic — show best overall match
+                    score, score_topic = _best_score_and_topic(scores)
                 if score is not None:
                     trigger_score_str = _format_trigger_score(score)
                     trigger_color = _trigger_score_color(score)
                 if profile is not None and latest_user_text:
-                    trigger_phrase_str = _best_trigger_phrase(latest_user_text, topic, profile.components)
+                    resolved_name = name_map.get(score_topic.lower().strip(), score_topic)
+                    trigger_phrase_str = _best_trigger_phrase(latest_user_text, resolved_name, profile.components)
 
             items.append({
                 "kind": "step",
@@ -1038,8 +1110,10 @@ def build_plan_evolution(
 
     # Build score lookup for per-step scores
     score_lookup: dict[int, dict[str, float]] = {}
+    name_map: dict[str, str] = {}
     if profile is not None:
         score_lookup = _build_trigger_score_lookup(timeline, profile)
+        name_map = _build_component_name_map(profile)
 
     # Map plan events to their event index for user message lookup
     plan_event_indices: list[int] = []
@@ -1075,7 +1149,7 @@ def build_plan_evolution(
                 scores = score_lookup.get(user_idx, {})
                 scored_parts = []
                 for step_name in ev.plan_steps:
-                    score = scores.get(step_name)
+                    score = _resolve_score_for_topic(step_name, scores, name_map)
                     if score is not None:
                         scored_parts.append(f"{step_name} ({score:.0%})")
                 if scored_parts:
