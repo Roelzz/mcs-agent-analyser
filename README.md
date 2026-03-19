@@ -315,6 +315,35 @@ Built-in check categories:
 
 Custom rules (from your YAML file) also run during solution checks alongside these built-in categories.
 
+## Dataverse Connection (App Registration)
+
+You need an **Entra ID app registration** to use the Dataverse integration. There's no way around it — Microsoft 365 username/password authentication for Dataverse is deprecated, and any non-.NET application must authenticate via OAuth against the OData RESTful Web API.
+
+**What to set up**
+
+1. Register an app in **Entra ID** (Azure Portal → App registrations → New registration)
+2. Add **Dynamics CRM / `user_impersonation`** as a delegated permission (no admin consent needed)
+3. Enable **public client** flows (Authentication → Allow public client flows → Yes)
+4. Note the **Application (client) ID** — you'll enter this in Agent Analyser
+
+**What you do NOT need**
+
+- No client secret (this is a public client, not a confidential one)
+- No admin consent (`user_impersonation` is a delegated permission)
+- No special Dataverse configuration
+
+The user logging in just needs a valid Dataverse license and the right security role in the target environment. The app registration handles the OAuth flow; actual data access is controlled by the user's Dataverse security roles.
+
+**The flow in Agent Analyser**
+
+1. Enter your Dataverse environment URL and app registration client ID
+2. Agent Analyser initiates a device-code login flow
+3. You authenticate in your browser with your org credentials
+4. The token is used as a Bearer header against `https://<your-env>.crm.dynamics.com/api/data/v9.x/`
+5. Bot config, components, and conversation transcripts are fetched automatically
+
+One app registration, one delegated permission. That's it.
+
 ## Configuration
 
 | Variable | Default | Description |
