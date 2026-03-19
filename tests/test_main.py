@@ -4723,19 +4723,21 @@ def test_duration_stats_helper():
 
 
 def test_event_mix_includes_step_durations():
-    """Timeline with 2 phases -> Steps row has correct min/avg/max and severity color."""
+    """Steps row uses non-search phases; KnowledgeSource phases are excluded."""
     timeline = ConversationTimeline(
         events=[
             TimelineEvent(event_type=EventType.STEP_TRIGGERED, summary="Step A", timestamp="2024-01-01T00:00:00Z"),
             TimelineEvent(event_type=EventType.STEP_TRIGGERED, summary="Step B", timestamp="2024-01-01T00:00:05Z"),
         ],
         phases=[
-            ExecutionPhase(label="Phase A", duration_ms=2000.0),
-            ExecutionPhase(label="Phase B", duration_ms=58100.0),
+            ExecutionPhase(label="Phase A", phase_type="CustomTopic", duration_ms=2000.0),
+            ExecutionPhase(label="Phase B", phase_type="CustomTopic", duration_ms=58100.0),
+            ExecutionPhase(label="KS Phase", phase_type="KnowledgeSource", duration_ms=21000.0),
         ],
     )
     result = build_conversation_visual_summary(timeline)
     steps_row = next(r for r in result["event_mix"] if r["label"] == "Steps")
+    # KnowledgeSource phase (21s) should NOT be in steps
     assert steps_row["min_fmt"] == "2.0s"
     assert steps_row["max_fmt"] == "58.1s"
     assert steps_row["avg_fmt"] == "30.1s"
@@ -4743,15 +4745,15 @@ def test_event_mix_includes_step_durations():
 
 
 def test_event_mix_includes_search_durations():
-    """Timeline with knowledge_searches -> Search row has correct stats and severity color."""
+    """Search durations come from phases with phase_type=KnowledgeSource, not knowledge_searches."""
     timeline = ConversationTimeline(
         events=[
             TimelineEvent(event_type=EventType.KNOWLEDGE_SEARCH, summary="KS 1", timestamp="2024-01-01T00:00:00Z"),
             TimelineEvent(event_type=EventType.KNOWLEDGE_SEARCH, summary="KS 2", timestamp="2024-01-01T00:00:05Z"),
         ],
-        knowledge_searches=[
-            KnowledgeSearchInfo(execution_time="00:00:01.5000000"),
-            KnowledgeSearchInfo(execution_time="00:00:03.0000000"),
+        phases=[
+            ExecutionPhase(label="KS Phase 1", phase_type="KnowledgeSource", duration_ms=1500.0),
+            ExecutionPhase(label="KS Phase 2", phase_type="KnowledgeSource", duration_ms=3000.0),
         ],
     )
     result = build_conversation_visual_summary(timeline)
@@ -4791,20 +4793,39 @@ def test_event_mix_errors_no_duration():
 
 
 def test_event_mix_search_includes_custom_search_steps():
-    """Custom search steps (e.g. Universal Search Tool) should be included in Search durations."""
+    """Custom search steps match phases by display_name and are included in Search durations."""
     timeline = ConversationTimeline(
         events=[
             TimelineEvent(event_type=EventType.KNOWLEDGE_SEARCH, summary="KS 1", timestamp="2024-01-01T00:00:00Z"),
         ],
-        knowledge_searches=[
-            KnowledgeSearchInfo(execution_time="00:00:00.9000000"),
+        phases=[
+            ExecutionPhase(label="KS Phase", phase_type="KnowledgeSource", duration_ms=900.0),
+            ExecutionPhase(label="Universal Search Tool", phase_type="CustomTopic", duration_ms=21400.0),
         ],
         custom_search_steps=[
-            CustomSearchStep(task_dialog_id="ust1", display_name="Universal Search Tool", execution_time="00:00:21.4000000"),
+            CustomSearchStep(task_dialog_id="ust1", display_name="Universal Search Tool"),
         ],
     )
     result = build_conversation_visual_summary(timeline)
     search_row = next(r for r in result["event_mix"] if r["label"] == "Search")
+    # Both KnowledgeSource phase (900ms) and custom search phase (21.4s) are search durations
     assert search_row["min_fmt"] == "900ms"
     assert search_row["max_fmt"] == "21.4s"
     assert search_row["bar_color"] == "var(--red-9)"  # avg ~11s = red
+    # Search count includes custom_search_steps
+    assert search_row["count"] == "2"
+
+
+def test_visual_summary_missing_timestamps():
+    """Events with timestamp=None should show '—' for latency KPIs, not '0 ms'."""
+    timeline = ConversationTimeline(events=[
+        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp=None),
+        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hello", timestamp=None),
+    ])
+    result = build_conversation_visual_summary(timeline)
+    avg_kpi = next(k for k in result["kpis"] if k["label"] == "Avg Turn Latency")
+    p95_kpi = next(k for k in result["kpis"] if k["label"] == "P95 Turn Latency")
+    assert avg_kpi["value"] == "—"
+    assert p95_kpi["value"] == "—"
+    assert avg_kpi["tone"] == "neutral"
+    assert p95_kpi["tone"] == "neutral"

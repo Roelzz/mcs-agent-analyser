@@ -9,6 +9,7 @@ from models import (
     ConversationTimeline,
     CreditEstimate,
     EventType,
+    ExecutionPhase,
 )
 
 from model_comparison import build_comparison_markdown
@@ -31,7 +32,7 @@ from .profile import (
     render_topic_inventory,
     render_trigger_overlaps,
 )
-from ._helpers import _format_duration, _parse_execution_time_ms
+from ._helpers import _format_duration
 from .report import render_credit_estimate
 from .timeline_render import render_orchestrator_reasoning, render_timeline
 
@@ -338,7 +339,10 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
     user_msgs = sum(1 for e in timeline.events if e.event_type == EventType.USER_MESSAGE)
     bot_msgs = sum(1 for e in timeline.events if e.event_type in (EventType.BOT_MESSAGE, EventType.ACTION_SEND_ACTIVITY))
     errors = sum(1 for e in timeline.events if e.event_type == EventType.ERROR)
-    searches = sum(1 for e in timeline.events if e.event_type == EventType.KNOWLEDGE_SEARCH)
+    searches = (
+        sum(1 for e in timeline.events if e.event_type == EventType.KNOWLEDGE_SEARCH)
+        + len(timeline.custom_search_steps)
+    )
 
     started_steps = [e for e in timeline.events if e.event_type == EventType.STEP_TRIGGERED]
     finished_steps = {e.step_id for e in timeline.events if e.event_type == EventType.STEP_FINISHED and e.step_id}
@@ -349,14 +353,17 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
     avg_latency = sum(latencies) / len(latencies) if latencies else 0.0
     p95_latency = sorted(latencies)[int(len(latencies) * 0.95)] if latencies else 0.0
 
-    step_durations = [p.duration_ms for p in timeline.phases if p.duration_ms > 0]
-    search_durations = [
-        d for ks in timeline.knowledge_searches
-        if (d := _parse_execution_time_ms(ks.execution_time)) is not None
-    ] + [
-        d for cs in timeline.custom_search_steps
-        if (d := _parse_execution_time_ms(cs.execution_time)) is not None
-    ]
+    custom_search_names = {cs.display_name for cs in timeline.custom_search_steps}
+
+    def _is_search_phase(p: ExecutionPhase) -> bool:
+        return p.phase_type == "KnowledgeSource" or p.label in custom_search_names
+
+    search_durations = [p.duration_ms for p in timeline.phases if p.duration_ms > 0 and _is_search_phase(p)]
+    step_durations = [p.duration_ms for p in timeline.phases if p.duration_ms > 0 and not _is_search_phase(p)]
+
+    # KPI values
+    avg_latency_str = f"{avg_latency:.0f} ms" if latencies else "—"
+    p95_latency_str = f"{p95_latency:.0f} ms" if latencies else "—"
 
     # KPIs
     kpis = [
@@ -364,15 +371,15 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
         {"label": "Bot Responses", "value": str(bot_msgs), "hint": "Delivered answers", "tone": "neutral"},
         {
             "label": "Avg Turn Latency",
-            "value": f"{avg_latency:.0f} ms",
+            "value": avg_latency_str,
             "hint": "User -> bot response",
-            "tone": "neutral" if avg_latency < 4000 else "warn",
+            "tone": "neutral" if not latencies or avg_latency < 4000 else "warn",
         },
         {
             "label": "P95 Turn Latency",
-            "value": f"{p95_latency:.0f} ms",
+            "value": p95_latency_str,
             "hint": "Worst typical latency",
-            "tone": "warn" if p95_latency >= 6000 else "neutral",
+            "tone": "warn" if latencies and p95_latency >= 6000 else "neutral",
         },
     ]
 
