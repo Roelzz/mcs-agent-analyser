@@ -48,7 +48,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 ```bash
 git clone https://github.com/Roelzz/Agent_analyser.git
 cd Agent_analyser
-cp .env.example .env       # works out of the box, or edit credentials
+cp .env.example .env       # default login: inspector / underthehood
 uv sync
 uv run reflex run
 ```
@@ -58,7 +58,7 @@ uv run reflex run
 ```powershell
 git clone https://github.com/Roelzz/Agent_analyser.git
 cd Agent_analyser
-Copy-Item .env.example .env   # works out of the box, or edit credentials
+Copy-Item .env.example .env   # default login: inspector / underthehood
 uv sync
 uv run reflex run
 ```
@@ -68,12 +68,12 @@ uv run reflex run
 ```cmd
 git clone https://github.com/Roelzz/Agent_analyser.git
 cd Agent_analyser
-copy .env.example .env        REM works out of the box, or edit credentials
+copy .env.example .env        REM default login: inspector / underthehood
 uv sync
 uv run reflex run
 ```
 
-Open http://localhost:3000 and sign in with `inspector` / `underthehood`. Upload a `.zip` bot export or connect to Dataverse.
+Open http://localhost:3000, sign in with **`inspector`** / **`underthehood`**, and upload a `.zip` bot export or connect to Dataverse.
 
 > **Privacy note:** Deploy this locally or self-host in your own Azure tenant. Bot exports and Dataverse data never leave your machine. The only external call is to OpenAI or Anthropic if you use the Instruction Lint feature.
 
