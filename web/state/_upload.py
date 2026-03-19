@@ -292,7 +292,7 @@ class UploadMixin(rx.State, mixin=True):
 
         # Conversation flow
         if timeline is not None:
-            self.mcs_conversation_flow = build_conversation_flow_items(timeline)  # type: ignore[attr-defined]
+            self.mcs_conversation_flow = build_conversation_flow_items(timeline, profile=profile)  # type: ignore[attr-defined]
         else:
             self.mcs_conversation_flow = []  # type: ignore[attr-defined]
         self.mcs_conversation_flow_source = source  # type: ignore[attr-defined]
@@ -863,8 +863,8 @@ class UploadMixin(rx.State, mixin=True):
         if timeline is not None:
             self.mcs_topics_trigger_matches = build_trigger_match_items(timeline, profile)  # type: ignore[attr-defined]
             self.mcs_routing_lifecycles = build_topic_lifecycles(timeline)  # type: ignore[attr-defined]
-            self.mcs_routing_decisions = build_orchestrator_decision_timeline(timeline)  # type: ignore[attr-defined]
-            self.mcs_routing_plan_evolution = build_plan_evolution(timeline)  # type: ignore[attr-defined]
+            self.mcs_routing_decisions = build_orchestrator_decision_timeline(timeline, profile=profile)  # type: ignore[attr-defined]
+            self.mcs_routing_plan_evolution = build_plan_evolution(timeline, profile=profile)  # type: ignore[attr-defined]
         else:
             self.mcs_topics_trigger_matches = []  # type: ignore[attr-defined]
             self.mcs_routing_lifecycles = []  # type: ignore[attr-defined]

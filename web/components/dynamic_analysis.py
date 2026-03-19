@@ -64,6 +64,15 @@ def info_row(lbl: str, value) -> rx.Component:
     )
 
 
+def _trigger_score_badge(score_str, color_str) -> rx.Component:
+    """Colored badge for trigger match score. Color is pre-computed in the backend."""
+    return rx.cond(
+        score_str != "",
+        rx.badge(score_str, color_scheme=color_str, variant="soft", size="1"),
+        rx.box(),
+    )
+
+
 # ── Sub-tab bar ───────────────────────────────────────────────────────────────
 
 
@@ -321,6 +330,16 @@ def _flow_event_detail_accordion(item: dict) -> rx.Component:
                     ),
                     rx.box(),
                 ),
+                rx.cond(
+                    item["trigger_phrase"] != "",
+                    rx.text(
+                        rx.text.span("Best trigger phrase: ", font_weight="600", color="var(--gray-a8)"),
+                        rx.text.span(item["trigger_phrase"], font_style="italic"),
+                        font_size="11px",
+                        color="var(--gray-a9)",
+                    ),
+                    rx.box(),
+                ),
                 spacing="1",
                 width="100%",
                 padding_top="4px",
@@ -343,6 +362,7 @@ def _has_flow_details(item: dict) -> rx.Var:
         | (item["plan_used_outputs"] != "")
         | (item["plan_identifier"] != "")
         | (item["orchestrator_ask"] != "")
+        | (item["trigger_phrase"] != "")
     )
 
 
@@ -398,6 +418,7 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                                 ),
                                 rx.box(),
                             ),
+                            _trigger_score_badge(item["trigger_score"], item["trigger_score_color"]),
                             rx.cond(
                                 item["timestamp"] != "",
                                 rx.text(item["timestamp"], font_size="11px", color="var(--gray-a8)"),
@@ -1534,6 +1555,7 @@ def _mcs_decision_item(item: dict) -> rx.Component:
                         rx.badge(item.get("used_outputs", ""), color_scheme="blue", variant="outline", size="1"),
                         rx.box(),
                     ),
+                    _trigger_score_badge(item.get("trigger_score", ""), item.get("trigger_score_color", "gray")),
                     spacing="2",
                     align="center",
                     flex_wrap="wrap",
@@ -1547,6 +1569,18 @@ def _mcs_decision_item(item: dict) -> rx.Component:
                         color="var(--gray-a7)",
                         padding_left="22px",
                         padding_top="2px",
+                    ),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item.get("trigger_phrase", "") != "",
+                    rx.text(
+                        item.get("trigger_phrase", ""),
+                        font_size="10px",
+                        color="var(--gray-a6)",
+                        padding_left="22px",
+                        padding_top="1px",
+                        font_style="italic",
                     ),
                     rx.box(),
                 ),
@@ -1662,6 +1696,16 @@ def _mcs_plan_evolution_card(item: dict) -> rx.Component:
                     rx.text.span(item["removed_steps"]),
                     font_size="11px",
                     color="var(--red-11)",
+                ),
+                rx.box(),
+            ),
+            rx.cond(
+                item["step_scores"] != "",
+                rx.text(
+                    rx.text.span("Trigger scores: ", font_weight="600", color="var(--gray-a8)"),
+                    rx.text.span(item["step_scores"]),
+                    font_size="11px",
+                    color="var(--teal-11)",
                 ),
                 rx.box(),
             ),

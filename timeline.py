@@ -453,6 +453,27 @@ def _process_trace_event(
                 state.pending_ks_results = []
                 state.pending_ks_errors = []
 
+        elif value_type == "IntentRecognition":
+            matched_intent = value.get("matchedIntent") or value.get("intent", "")
+            confidence = value.get("confidence") or value.get("score")
+            intent_score = None
+            if confidence is not None:
+                try:
+                    intent_score = float(confidence)
+                except (ValueError, TypeError):
+                    pass
+            topic = matched_intent or "Unknown"
+            state.events.append(
+                TimelineEvent(
+                    timestamp=timestamp,
+                    position=position,
+                    event_type=EventType.INTENT_RECOGNITION,
+                    topic_name=topic,
+                    summary=f"Intent: {topic} ({intent_score:.0%})" if intent_score is not None else f"Intent: {topic}",
+                    intent_score=intent_score,
+                )
+            )
+
         elif value_type == "ErrorCode":
             error_code = value.get("ErrorCode", "Unknown")
             state.errors.append(f"ErrorCode: {error_code}")

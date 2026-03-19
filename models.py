@@ -123,6 +123,7 @@ class EventType(str, Enum):
     ACTION_BEGIN_DIALOG = "ActionBeginDialog"
     ACTION_SEND_ACTIVITY = "ActionSendActivity"
     ORCHESTRATOR_THINKING = "OrchestratorThinking"
+    INTENT_RECOGNITION = "IntentRecognition"
     ERROR = "Error"
     OTHER = "Other"
 
@@ -144,6 +145,7 @@ class TimelineEvent(BaseModel):
     plan_used_outputs: str | None = None
     orchestrator_ask: str | None = None
     plan_steps: list[str] = Field(default_factory=list)
+    intent_score: float | None = None
 
 
 class ExecutionPhase(BaseModel):

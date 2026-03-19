@@ -66,6 +66,7 @@ from renderer import (
 )
 from renderer.sections import (
     _active_duration,
+    _build_trigger_score_lookup,
     _duration_stats,
     build_conversation_flow_items,
     build_conversation_visual_summary,
@@ -5103,3 +5104,155 @@ def test_gantt_shows_orchestrator_thinking_bars():
     gantt = render_gantt_chart(timeline)
     assert "Processing - Search" in gantt
     assert "section Orchestrator" in gantt
+
+
+# --- Trigger score surface tests ---
+
+
+def _make_profile_with_triggers() -> BotProfile:
+    """Helper: profile with two topics that have trigger phrases."""
+    return BotProfile(
+        display_name="TestBot",
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Billing",
+                schema_name="cr123_billing",
+                trigger_queries=["billing question", "invoice help", "payment issue"],
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Support",
+                schema_name="cr123_support",
+                trigger_queries=["get support", "help me", "technical issue"],
+            ),
+        ],
+    )
+
+
+def _make_timeline_with_steps() -> ConversationTimeline:
+    """Helper: timeline with user message followed by step triggered events."""
+    return ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "billing question"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="Billing",
+                summary="Step start: Billing (CustomTopic)",
+                state="inProgress",
+                step_id="s1",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                topic_name="Billing",
+                summary="Step end: Billing [completed] (500ms)",
+                state="completed",
+                step_id="s1",
+                timestamp="2024-01-01T00:00:01.500Z",
+            ),
+        ],
+    )
+
+
+def test_trigger_score_lookup_basic():
+    """Score lookup returns correct scores per user message."""
+    profile = _make_profile_with_triggers()
+    timeline = _make_timeline_with_steps()
+    lookup = _build_trigger_score_lookup(timeline, profile)
+    # Index 0 is the user message
+    assert 0 in lookup
+    scores = lookup[0]
+    # "billing question" should match "Billing" topic with a high score
+    assert "Billing" in scores
+    assert scores["Billing"] > 0.5
+
+
+def test_orchestrator_decisions_include_trigger_score():
+    """Step items in decision timeline should have trigger_score field."""
+    profile = _make_profile_with_triggers()
+    timeline = _make_timeline_with_steps()
+    items = build_orchestrator_decision_timeline(timeline, profile=profile)
+    step_items = [i for i in items if i.get("kind") == "step" and i.get("event_subtype") == "triggered"]
+    assert len(step_items) >= 1
+    triggered = step_items[0]
+    assert "trigger_score" in triggered
+    assert triggered["trigger_score"] != ""
+    assert "trigger_score_color" in triggered
+
+
+def test_conversation_flow_includes_trigger_score():
+    """Flow items for step events should have trigger_score field."""
+    profile = _make_profile_with_triggers()
+    timeline = _make_timeline_with_steps()
+    items = build_conversation_flow_items(timeline, profile=profile)
+    step_events = [i for i in items if i.get("kind") == "event" and i.get("event_type") in ("StepTriggered", "StepFinished")]
+    assert len(step_events) >= 1
+    for ev in step_events:
+        assert "trigger_score" in ev
+        assert "trigger_score_color" in ev
+
+
+def test_plan_evolution_includes_step_scores():
+    """Plan items should have step_scores field when profile is provided."""
+    profile = _make_profile_with_triggers()
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "billing question"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                summary="Plan: [Billing, Support]",
+                plan_steps=["Billing", "Support"],
+                plan_identifier="p1",
+                is_final_plan=False,
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                summary="Plan: [Billing]",
+                plan_steps=["Billing"],
+                plan_identifier="p2",
+                is_final_plan=True,
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+    )
+    items = build_plan_evolution(timeline, profile=profile)
+    assert len(items) == 2
+    for item in items:
+        assert "step_scores" in item
+    # At least one plan should have scores for "Billing"
+    has_billing_score = any("Billing" in item["step_scores"] for item in items)
+    assert has_billing_score
+
+
+def test_intent_recognition_event_parsed():
+    """IntentRecognition valueType should create event with intent_score."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "IntentRecognition",
+            "value": {
+                "matchedIntent": "Billing",
+                "confidence": 0.85,
+            },
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "channelData": {"webchat:internal:position": 1},
+        },
+    ]
+    timeline = build_timeline(activities, {})
+    intent_events = [e for e in timeline.events if e.event_type == EventType.INTENT_RECOGNITION]
+    assert len(intent_events) == 1
+    ev = intent_events[0]
+    assert ev.topic_name == "Billing"
+    assert ev.intent_score == 0.85
+    assert "85%" in ev.summary

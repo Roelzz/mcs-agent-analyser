@@ -15,6 +15,90 @@ from models import (
 from model_comparison import build_comparison_markdown
 from parser import detect_trigger_overlaps, match_query_to_triggers
 
+# ---------------------------------------------------------------------------
+# Trigger score lookup (shared by multiple builders)
+# ---------------------------------------------------------------------------
+
+
+def _build_trigger_score_lookup(
+    timeline: ConversationTimeline,
+    profile: BotProfile,
+) -> dict[int, dict[str, float]]:
+    """Map user_message_index -> {topic_name: score} for trigger matching.
+
+    For each user message, runs ``match_query_to_triggers`` against profile
+    components. Also checks for native IntentRecognition events — those take
+    precedence over computed scores when both exist.
+    """
+    events = timeline.events
+    lookup: dict[int, dict[str, float]] = {}
+
+    # Collect user message indices
+    user_indices: list[int] = []
+    for idx, ev in enumerate(events):
+        if ev.event_type == EventType.USER_MESSAGE:
+            user_indices.append(idx)
+
+    for pos, ui in enumerate(user_indices):
+        ev = events[ui]
+        user_text = (ev.summary or "").replace("User: ", "", 1).strip().strip('"')
+        if not user_text:
+            continue
+
+        next_ui = user_indices[pos + 1] if pos + 1 < len(user_indices) else len(events)
+
+        # Computed scores from trigger matching
+        matches = match_query_to_triggers(user_text, profile.components, threshold=0.0)
+        scores: dict[str, float] = {}
+        for m in matches:
+            scores[m["display_name"]] = m["score"]
+
+        # Override with native IntentRecognition events if present
+        for between_ev in events[ui + 1 : next_ui]:
+            if between_ev.event_type == EventType.INTENT_RECOGNITION and between_ev.intent_score is not None:
+                topic = between_ev.topic_name or ""
+                if topic:
+                    scores[topic] = between_ev.intent_score
+
+        lookup[ui] = scores
+
+    return lookup
+
+
+def _find_latest_user_index(events: list, current_idx: int) -> int | None:
+    """Walk backwards from current_idx to find the most recent USER_MESSAGE index."""
+    for i in range(current_idx - 1, -1, -1):
+        if events[i].event_type == EventType.USER_MESSAGE:
+            return i
+    return None
+
+
+def _format_trigger_score(score: float | None) -> str:
+    """Format a 0-1 score as a percentage string, or empty if None."""
+    if score is None:
+        return ""
+    return f"{score:.0%}"
+
+
+def _trigger_score_color(score: float | None) -> str:
+    """Return a Radix color scheme name for a trigger score."""
+    if score is None:
+        return "gray"
+    if score >= 0.7:
+        return "green"
+    if score >= 0.4:
+        return "amber"
+    return "red"
+
+
+def _best_trigger_phrase(user_text: str, topic_name: str, components: list) -> str:
+    """Find the best matching trigger phrase for a topic given a user query."""
+    matches = match_query_to_triggers(user_text, components, threshold=0.0)
+    for m in matches:
+        if m["display_name"] == topic_name:
+            return m.get("best_phrase", "")
+    return ""
+
 from .knowledge import render_knowledge_search_section
 from .profile import (
     render_ai_config,
@@ -157,9 +241,17 @@ def _strip_prefix(text: str, prefix: str) -> str:
     return text
 
 
-def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
+def build_conversation_flow_items(
+    timeline: ConversationTimeline,
+    profile: BotProfile | None = None,
+) -> list[dict]:
     """Build chat-style flow items from timeline events for UI rendering."""
     items: list[dict] = []
+
+    # Build trigger score lookup if profile is available
+    score_lookup: dict[int, dict[str, float]] = {}
+    if profile is not None:
+        score_lookup = _build_trigger_score_lookup(timeline, profile)
 
     # Extra detail keys required by rx.foreach (must be uniform across all dicts)
     _detail_defaults = {
@@ -170,13 +262,19 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
         "error": "",
         "is_final_plan": "",
         "orchestrator_ask": "",
+        "trigger_score": "",
+        "trigger_phrase": "",
+        "trigger_score_color": "gray",
     }
 
-    for ev in timeline.events:
+    latest_user_idx: int | None = None
+
+    for idx, ev in enumerate(timeline.events):
         summary = (ev.summary or "").strip()
         timestamp = _format_clock(ev.timestamp)
 
         if ev.event_type == EventType.USER_MESSAGE:
+            latest_user_idx = idx
             items.append(
                 {
                     "kind": "message",
@@ -251,6 +349,22 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
             if ev.event_type == EventType.KNOWLEDGE_SEARCH and query:
                 detail = f'Query: "{query}"'
 
+            # Add trigger scores for step triggered/finished events
+            trigger_score_str = ""
+            trigger_phrase_str = ""
+            trigger_color = "gray"
+            if ev.event_type in {EventType.STEP_TRIGGERED, EventType.STEP_FINISHED} and latest_user_idx is not None and score_lookup:
+                topic = ev.topic_name or ""
+                scores = score_lookup.get(latest_user_idx, {})
+                score = scores.get(topic)
+                if score is not None:
+                    trigger_score_str = _format_trigger_score(score)
+                    trigger_color = _trigger_score_color(score)
+                if profile is not None:
+                    user_text = (timeline.events[latest_user_idx].summary or "").replace("User: ", "", 1).strip().strip('"')
+                    if user_text:
+                        trigger_phrase_str = _best_trigger_phrase(user_text, topic, profile.components)
+
             items.append(
                 {
                     "kind": "event",
@@ -272,6 +386,9 @@ def build_conversation_flow_items(timeline: ConversationTimeline) -> list[dict]:
                     "error": ev.error or "",
                     "is_final_plan": str(ev.is_final_plan) if ev.is_final_plan is not None else "",
                     "orchestrator_ask": ev.orchestrator_ask or "",
+                    "trigger_score": trigger_score_str,
+                    "trigger_phrase": trigger_phrase_str,
+                    "trigger_score_color": trigger_color,
                 }
             )
 
@@ -758,7 +875,10 @@ def build_trigger_match_items(
 # ---------------------------------------------------------------------------
 
 
-def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list[dict]:
+def build_orchestrator_decision_timeline(
+    timeline: ConversationTimeline,
+    profile: BotProfile | None = None,
+) -> list[dict]:
     """Build a flat list of orchestrator decision items grouped by user-message turns.
 
     Each dict has a ``kind`` key: user_message, interpreted, plan, step, plan_finished.
@@ -767,10 +887,17 @@ def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list
     items: list[dict] = []
     events = timeline.events
     latest_user_text: str = ""
+    latest_user_idx: int | None = None
 
-    for ev in events:
+    # Build trigger score lookup if profile is available
+    score_lookup: dict[int, dict[str, float]] = {}
+    if profile is not None:
+        score_lookup = _build_trigger_score_lookup(timeline, profile)
+
+    for idx, ev in enumerate(events):
         if ev.event_type == EventType.USER_MESSAGE:
             latest_user_text = (ev.summary or "").replace("User: ", "", 1).strip()
+            latest_user_idx = idx
             items.append({
                 "kind": "user_message",
                 "text": latest_user_text,
@@ -816,6 +943,21 @@ def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list
                 used_outputs = ev.plan_used_outputs or ""
             if ev.has_recommendations is True:
                 has_recs = "true"
+
+            # Look up trigger score for this step's topic
+            trigger_score_str = ""
+            trigger_phrase_str = ""
+            trigger_color = "gray"
+            if ev.event_type == EventType.STEP_TRIGGERED and latest_user_idx is not None and score_lookup:
+                topic = ev.topic_name or ""
+                scores = score_lookup.get(latest_user_idx, {})
+                score = scores.get(topic)
+                if score is not None:
+                    trigger_score_str = _format_trigger_score(score)
+                    trigger_color = _trigger_score_color(score)
+                if profile is not None and latest_user_text:
+                    trigger_phrase_str = _best_trigger_phrase(latest_user_text, topic, profile.components)
+
             items.append({
                 "kind": "step",
                 "event_subtype": "triggered" if ev.event_type == EventType.STEP_TRIGGERED else "finished",
@@ -829,6 +971,9 @@ def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list
                 "plan_identifier": ev.plan_identifier or "",
                 "step_type": step_type,
                 "error": error,
+                "trigger_score": trigger_score_str,
+                "trigger_phrase": trigger_phrase_str,
+                "trigger_score_color": trigger_color,
             })
             continue
 
@@ -877,7 +1022,10 @@ def build_orchestrator_decision_timeline(timeline: ConversationTimeline) -> list
 # ---------------------------------------------------------------------------
 
 
-def build_plan_evolution(timeline: ConversationTimeline) -> list[dict]:
+def build_plan_evolution(
+    timeline: ConversationTimeline,
+    profile: BotProfile | None = None,
+) -> list[dict]:
     """Compare consecutive PLAN_RECEIVED events to show how plans evolved.
 
     Only returns data when >1 plan exists in the conversation.
@@ -887,6 +1035,17 @@ def build_plan_evolution(timeline: ConversationTimeline) -> list[dict]:
     ]
     if len(plan_events) <= 1:
         return []
+
+    # Build score lookup for per-step scores
+    score_lookup: dict[int, dict[str, float]] = {}
+    if profile is not None:
+        score_lookup = _build_trigger_score_lookup(timeline, profile)
+
+    # Map plan events to their event index for user message lookup
+    plan_event_indices: list[int] = []
+    for i, ev in enumerate(timeline.events):
+        if ev.event_type == EventType.PLAN_RECEIVED:
+            plan_event_indices.append(i)
 
     results: list[dict] = []
     for idx, ev in enumerate(plan_events):
@@ -907,6 +1066,21 @@ def build_plan_evolution(timeline: ConversationTimeline) -> list[dict]:
                 parts.append(f"-{len(removed_set)} removed")
             change_summary = ", ".join(parts) if parts else "No changes"
 
+        # Compute per-step scores
+        step_scores_str = ""
+        if score_lookup and idx < len(plan_event_indices):
+            plan_ev_idx = plan_event_indices[idx]
+            user_idx = _find_latest_user_index(timeline.events, plan_ev_idx)
+            if user_idx is not None:
+                scores = score_lookup.get(user_idx, {})
+                scored_parts = []
+                for step_name in ev.plan_steps:
+                    score = scores.get(step_name)
+                    if score is not None:
+                        scored_parts.append(f"{step_name} ({score:.0%})")
+                if scored_parts:
+                    step_scores_str = ", ".join(scored_parts)
+
         results.append({
             "plan_index": str(idx + 1),
             "plan_identifier": ev.plan_identifier or "",
@@ -916,6 +1090,7 @@ def build_plan_evolution(timeline: ConversationTimeline) -> list[dict]:
             "removed_steps": removed,
             "change_summary": change_summary,
             "timestamp": _format_clock(ev.timestamp),
+            "step_scores": step_scores_str,
         })
 
     return results
