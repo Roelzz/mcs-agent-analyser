@@ -65,6 +65,7 @@ from renderer import (
     render_transcript_report,
 )
 from renderer.sections import (
+    _active_duration,
     _duration_stats,
     build_conversation_flow_items,
     build_conversation_visual_summary,
@@ -4829,3 +4830,129 @@ def test_visual_summary_missing_timestamps():
     assert p95_kpi["value"] == "—"
     assert avg_kpi["tone"] == "neutral"
     assert p95_kpi["tone"] == "neutral"
+
+
+# --- Phase type propagation from Triggered to Finished ---
+
+
+def test_phase_type_propagated_from_trigger():
+    """phase_type should come from StepTriggered type, not StepFinished value."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepTriggered",
+            "value": {
+                "taskDialogId": "P:UniversalSearchTool",
+                "type": "KnowledgeSource",
+                "stepId": "step-ks-1",
+            },
+            "timestamp": "2024-01-01T00:00:01Z",
+            "channelData": {"webchat:internal:position": 1},
+            "from": {"role": "bot"},
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "value": {
+                "taskDialogId": "P:UniversalSearchTool",
+                "state": "completed",
+                "stepId": "step-ks-1",
+                # type is NOT present in Finished events — this is the bug
+            },
+            "timestamp": "2024-01-01T00:00:02Z",
+            "channelData": {"webchat:internal:position": 2},
+            "from": {"role": "bot"},
+        },
+    ]
+    from timeline import build_timeline
+
+    timeline = build_timeline(activities, {})
+    assert len(timeline.phases) == 1
+    assert timeline.phases[0].phase_type == "KnowledgeSource"
+
+
+# --- Active duration (idle subtraction) ---
+
+
+def test_active_duration_subtracts_idle():
+    """Phase spanning an idle gap gets reduced duration."""
+    phase = ExecutionPhase(
+        label="Test",
+        phase_type="CustomTopic",
+        start="2024-01-01T00:00:00Z",
+        end="2024-01-01T00:01:00Z",
+        duration_ms=60000.0,
+    )
+    # Idle gap from 10s to 50s (40s idle)
+    idle_gaps = [
+        (
+            int(1704067200000 + 10000),  # 2024-01-01T00:00:10Z
+            int(1704067200000 + 50000),  # 2024-01-01T00:00:50Z
+        )
+    ]
+    result = _active_duration(phase, idle_gaps)
+    assert result == 20000.0  # 60s - 40s = 20s
+
+
+def test_active_duration_no_gaps():
+    """Without idle gaps, returns original duration."""
+    phase = ExecutionPhase(
+        label="Test",
+        phase_type="CustomTopic",
+        start="2024-01-01T00:00:00Z",
+        end="2024-01-01T00:00:05Z",
+        duration_ms=5000.0,
+    )
+    assert _active_duration(phase, []) == 5000.0
+
+
+def test_step_durations_exclude_idle_time():
+    """build_conversation_visual_summary subtracts idle time from step durations."""
+    timeline = ConversationTimeline(
+        events=[
+            # Step triggered with HITL topic
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Step start: Human in the Loop Approval (CustomTopic)",
+                topic_name="Human in the Loop Approval",
+                timestamp="2024-01-01T00:00:00Z",
+                step_id="hitl-1",
+            ),
+            # Bot sends message (start of idle)
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: Please approve",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            # User responds after 52s (end of idle)
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary="User: approved",
+                timestamp="2024-01-01T00:00:53Z",
+            ),
+            # Step finishes
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                summary="Step end: Human in the Loop Approval [completed] (53000ms)",
+                topic_name="Human in the Loop Approval",
+                timestamp="2024-01-01T00:00:53Z",
+                step_id="hitl-1",
+                state="completed",
+            ),
+        ],
+        phases=[
+            ExecutionPhase(
+                label="Human in the Loop Approval",
+                phase_type="CustomTopic",
+                start="2024-01-01T00:00:00Z",
+                end="2024-01-01T00:00:53Z",
+                duration_ms=53000.0,
+            ),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    steps_row = next(r for r in result["event_mix"] if r["label"] == "Steps")
+    # The 52s idle gap (bot message at 1s -> user message at 53s) should be subtracted
+    # Active time should be much less than 53s
+    max_val = float(steps_row["max_fmt"].replace("ms", "").replace("s", "").replace("m ", ""))
+    assert max_val < 10  # Active time should be a few seconds, not 53

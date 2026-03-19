@@ -32,7 +32,7 @@ from .profile import (
     render_topic_inventory,
     render_trigger_overlaps,
 )
-from ._helpers import _format_duration
+from ._helpers import _compute_idle_gaps, _format_duration, _parse_timestamp_to_epoch_ms
 from .report import render_credit_estimate
 from .timeline_render import render_orchestrator_reasoning, render_timeline
 
@@ -305,6 +305,22 @@ def _severity_color(avg_ms: float) -> str:
     return "var(--red-9)"
 
 
+def _active_duration(phase: ExecutionPhase, idle_gaps: list[tuple[int, int]]) -> float:
+    """Phase duration minus any idle time that falls within its span."""
+    if not phase.start or not phase.end or not idle_gaps:
+        return phase.duration_ms
+    p_start = _parse_timestamp_to_epoch_ms(phase.start)
+    p_end = _parse_timestamp_to_epoch_ms(phase.end)
+    if p_start is None or p_end is None:
+        return phase.duration_ms
+    idle_in_phase = sum(
+        min(gap_end, p_end) - max(gap_start, p_start)
+        for gap_start, gap_end in idle_gaps
+        if gap_start < p_end and gap_end > p_start
+    )
+    return max(phase.duration_ms - idle_in_phase, 0)
+
+
 def _pair_message_turns(timeline: ConversationTimeline) -> list[dict]:
     """Pair user messages with the next bot message to form chat turns."""
     turns: list[dict] = []
@@ -358,8 +374,19 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
     def _is_search_phase(p: ExecutionPhase) -> bool:
         return p.phase_type == "KnowledgeSource" or p.label in custom_search_names
 
-    search_durations = [p.duration_ms for p in timeline.phases if p.duration_ms > 0 and _is_search_phase(p)]
-    step_durations = [p.duration_ms for p in timeline.phases if p.duration_ms > 0 and not _is_search_phase(p)]
+    idle_gaps = _compute_idle_gaps(timeline.events)
+    search_durations = [
+        d for d in (
+            _active_duration(p, idle_gaps)
+            for p in timeline.phases if p.duration_ms > 0 and _is_search_phase(p)
+        ) if d > 0
+    ]
+    step_durations = [
+        d for d in (
+            _active_duration(p, idle_gaps)
+            for p in timeline.phases if p.duration_ms > 0 and not _is_search_phase(p)
+        ) if d > 0
+    ]
 
     # KPI values
     avg_latency_str = f"{avg_latency:.0f} ms" if latencies else "—"

@@ -37,7 +37,7 @@ class _TimelineState:
     latest_user_text: str | None = None
     first_timestamp: str | None = None
     last_timestamp: str | None = None
-    step_triggers: dict[str, str] = field(default_factory=dict)
+    step_triggers: dict[str, tuple[str, str]] = field(default_factory=dict)  # step_id -> (ts, type)
     tool_display_names: dict[str, str] = field(default_factory=dict)
     pending_custom_searches: dict[str, CustomSearchStep] = field(default_factory=dict)
 
@@ -149,11 +149,12 @@ def _build_phase(
     end_ts: str | None,
     duration_ms: float,
     state_str: str,
+    trigger_type: str = "",
 ) -> ExecutionPhase:
     """Construct an ExecutionPhase from step trigger/finish data."""
     return ExecutionPhase(
         label=topic,
-        phase_type=value.get("type", "") if "type" in value else "",
+        phase_type=trigger_type or (value.get("type", "") if "type" in value else ""),
         start=trigger_ts,
         end=end_ts,
         duration_ms=duration_ms,
@@ -222,7 +223,7 @@ def _process_trace_event(
             step_id = value.get("stepId", "")
 
             if step_id and timestamp:
-                state.step_triggers[step_id] = timestamp
+                state.step_triggers[step_id] = (timestamp, step_type)
 
             state.events.append(
                 TimelineEvent(
@@ -298,7 +299,9 @@ def _process_trace_event(
             error = value.get("error")
 
             duration_ms = 0.0
-            trigger_ts = state.step_triggers.get(step_id)
+            trigger_info = state.step_triggers.get(step_id)
+            trigger_ts = trigger_info[0] if trigger_info else None
+            trigger_type = trigger_info[1] if trigger_info else ""
             if trigger_ts and timestamp:
                 duration_ms = _ms_between(trigger_ts, timestamp)
 
@@ -335,7 +338,7 @@ def _process_trace_event(
                 )
             )
 
-            state.phases.append(_build_phase(topic, value, trigger_ts, timestamp, duration_ms, step_state))
+            state.phases.append(_build_phase(topic, value, trigger_ts, timestamp, duration_ms, step_state, trigger_type))
 
         elif value_type == "DynamicPlanFinished":
             was_cancelled = value.get("wasCancelled", False)

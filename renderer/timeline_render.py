@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from models import (
     ConversationTimeline,
     EventType,
@@ -10,7 +8,9 @@ from ._helpers import (
     ACTOR_NAMES,
     IDLE_THRESHOLD_MS,
     _format_duration,
+    _is_genuine_idle,
     _make_participant_id,
+    _parse_timestamp_to_epoch_ms,
     _pct,
     _sanitize_mermaid,
     _topic_display,
@@ -257,20 +257,6 @@ def render_errors(timeline: ConversationTimeline) -> str:
     return "\n".join(lines)
 
 
-def _parse_timestamp_to_epoch_ms(ts: str) -> int | None:
-    """Parse ISO timestamp to epoch milliseconds."""
-    if not ts:
-        return None
-    try:
-        # Handle various ISO formats
-        cleaned = ts.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(cleaned)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return int(dt.timestamp() * 1000)
-    except (ValueError, OSError):
-        return None
-
 
 def _gantt_label(event: TimelineEvent) -> str:
     """Short label for a Gantt task."""
@@ -349,26 +335,6 @@ def _gantt_tag(event: TimelineEvent) -> str:
         return "crit, "
     return _GANTT_TAG_MAP.get(event.event_type, "")
 
-
-def _is_genuine_idle(prev_event: TimelineEvent, next_event: TimelineEvent) -> bool:
-    """Determine if a gap between two events is genuine idle (waiting for user/human).
-
-    Returns True only when:
-    - prev is BOT_MESSAGE or ACTION_SEND_ACTIVITY and next is USER_MESSAGE (user thinking)
-    - prev is STEP_TRIGGERED with a "human in the loop" topic (HITL approval wait)
-    """
-    if (
-        prev_event.event_type in (EventType.BOT_MESSAGE, EventType.ACTION_SEND_ACTIVITY)
-        and next_event.event_type == EventType.USER_MESSAGE
-    ):
-        return True
-    if (
-        prev_event.event_type == EventType.STEP_TRIGGERED
-        and prev_event.topic_name
-        and "human in the loop" in prev_event.topic_name.lower()
-    ):
-        return True
-    return False
 
 
 def render_gantt_chart(timeline: ConversationTimeline) -> str:
