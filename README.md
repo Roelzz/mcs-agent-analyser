@@ -25,7 +25,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 | --- | --- |
 | **Upload bot export** | Drop a `.zip`, or `botContent.yml` + `dialog.json` — get a full architecture report with quick wins |
 | **Connect to Dataverse** | Device-code auth to your environment, auto-analyses your bot the moment you connect |
-| **Routing analysis** | Orchestrator decision timeline, topic lifecycles with redirect tracking, trigger phrase similarity, plan evolution |
+| **Routing analysis** | Orchestrator decision timeline with routing scores, topic lifecycles with redirect tracking, trigger phrase similarity, plan evolution with per-step confidence |
 | **Conversation transcripts** | Upload or fetch transcripts from Dataverse — sequence diagrams, Gantt charts, event logs |
 | **Single conversation lookup** | Fetch and analyse a specific conversation by ID directly from Dataverse |
 | **Batch analytics** | Aggregate multiple transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
@@ -48,7 +48,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 ```bash
 git clone https://github.com/Roelzz/Agent_analyser.git
 cd Agent_analyser
-cp .env.example .env       # edit credentials in .env
+cp .env.example .env       # works out of the box, or edit credentials
 uv sync
 uv run reflex run
 ```
@@ -58,7 +58,7 @@ uv run reflex run
 ```powershell
 git clone https://github.com/Roelzz/Agent_analyser.git
 cd Agent_analyser
-Copy-Item .env.example .env   # edit credentials in .env
+Copy-Item .env.example .env   # works out of the box, or edit credentials
 uv sync
 uv run reflex run
 ```
@@ -68,12 +68,12 @@ uv run reflex run
 ```cmd
 git clone https://github.com/Roelzz/Agent_analyser.git
 cd Agent_analyser
-copy .env.example .env        REM edit credentials in .env
+copy .env.example .env        REM works out of the box, or edit credentials
 uv sync
 uv run reflex run
 ```
 
-Open http://localhost:3000, sign in, upload a `.zip` bot export or connect to Dataverse.
+Open http://localhost:3000 and sign in with `inspector` / `underthehood`. Upload a `.zip` bot export or connect to Dataverse.
 
 > **Privacy note:** Deploy this locally or self-host in your own Azure tenant. Bot exports and Dataverse data never leave your machine. The only external call is to OpenAI or Anthropic if you use the Instruction Lint feature.
 
@@ -214,6 +214,7 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 
 **From `dialog.json`:**
 - Full conversation timeline (user messages, bot responses, plan steps, knowledge searches, errors)
+- Routing scores — per-step trigger match confidence shown in decision timeline, conversation flow, and plan evolution
 - Execution phases with duration and status
 - Mermaid sequence diagram of the conversation flow
 - Mermaid Gantt chart of execution timing
@@ -255,7 +256,7 @@ Each generated report contains:
 11. **Integration Map** — Mermaid diagram of external connections
 12. **Credit Estimate** — MCS message credit estimation based on bot features
 13. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log, errors
-14. **Routing Analysis** — orchestrator decision timeline, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution, trigger phrase similarity analysis, condition evaluations
+14. **Routing Analysis** — orchestrator decision timeline with routing scores, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution with per-step confidence, trigger phrase similarity analysis, condition evaluations
 
 Transcript reports contain:
 
@@ -342,7 +343,7 @@ Configure these env vars in your platform:
 ```bash
 REFLEX_ENV=prod
 PORT=2009
-USERS=admin:secret
+USERS=inspector:underthehood
 OPENAI_API_KEY=sk-...        # optional, enables Lint for OpenAI-model bots
 ANTHROPIC_API_KEY=sk-ant-... # optional, enables Lint for Anthropic-model bots
 ```
@@ -363,7 +364,7 @@ Make sure `.env` contains at least `REFLEX_ENV=prod` and `PORT=2009`.
 ```bash
 cp .env.example .env          # edit credentials
 uv sync
-uv run pytest              # 262 tests
+uv run pytest              # 289 tests
 uv run ruff check .
 uv run ruff format .
 uv run reflex run          # dev server — frontend :3000, backend :8000
@@ -394,7 +395,7 @@ renderer/                Markdown + Mermaid rendering
   knowledge.py           Knowledge source rendering
   profile.py             Bot profile rendering
   report.py              Main report assembly
-  sections.py            Routing tab builders (lifecycles, decision timeline, trigger analysis, plan evolution)
+  sections.py            Routing tab builders (lifecycles, decision timeline, trigger analysis, plan evolution, routing scores)
   timeline_render.py     Timeline / conversation trace rendering
 
 solution_checker/        Solution health checker
@@ -441,7 +442,7 @@ data/
 
 best_practices/          GPT model best-practice reference docs
 samples/                 Sample reports
-tests/                   Test suite (262 tests)
+tests/                   Test suite (289 tests)
 ```
 
 ## License
