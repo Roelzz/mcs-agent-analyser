@@ -5182,6 +5182,7 @@ def test_orchestrator_decisions_include_trigger_score():
     triggered = step_items[0]
     assert "trigger_score" in triggered
     assert triggered["trigger_score"] != ""
+    assert triggered["trigger_score"].startswith("Routing score: ")
     assert "trigger_score_color" in triggered
 
 

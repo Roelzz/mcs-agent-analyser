@@ -333,7 +333,7 @@ def _flow_event_detail_accordion(item: dict) -> rx.Component:
                 rx.cond(
                     item["trigger_phrase"] != "",
                     rx.text(
-                        rx.text.span("Best trigger phrase: ", font_weight="600", color="var(--gray-a8)"),
+                        rx.text.span("Best routing phrase: ", font_weight="600", color="var(--gray-a8)"),
                         rx.text.span(item["trigger_phrase"], font_style="italic"),
                         font_size="11px",
                         color="var(--gray-a9)",
@@ -1702,7 +1702,7 @@ def _mcs_plan_evolution_card(item: dict) -> rx.Component:
             rx.cond(
                 item["step_scores"] != "",
                 rx.text(
-                    rx.text.span("Trigger scores: ", font_weight="600", color="var(--gray-a8)"),
+                    rx.text.span("Routing scores: ", font_weight="600", color="var(--gray-a8)"),
                     rx.text.span(item["step_scores"]),
                     font_size="11px",
                     color="var(--teal-11)",

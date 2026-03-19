@@ -133,10 +133,10 @@ def _best_score_and_topic(scores: dict[str, float]) -> tuple[float | None, str]:
 
 
 def _format_trigger_score(score: float | None) -> str:
-    """Format a 0-1 score as a percentage string, or empty if None."""
+    """Format a 0-1 score as a labelled percentage string, or empty if None."""
     if score is None:
         return ""
-    return f"{score:.0%}"
+    return f"Routing score: {score:.0%}"
 
 
 def _trigger_score_color(score: float | None) -> str:
