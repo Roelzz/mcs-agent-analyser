@@ -20,6 +20,7 @@ from .profile import (
     render_integration_map,
     render_knowledge_coverage,
     render_knowledge_inventory,
+    render_knowledge_source_details,
     render_quick_wins,
     render_security_summary,
     render_tool_inventory,
@@ -53,6 +54,7 @@ def render_report(
     profile: BotProfile,
     timeline: ConversationTimeline | None = None,
     instruction_diff: InstructionDiff | None = None,
+    custom_findings: list[dict] | None = None,
 ) -> str:
     """Render complete Markdown report.
 
@@ -112,8 +114,20 @@ def render_report(
     if trigger_overlap_section:
         sections.append(trigger_overlap_section)
 
-    # Marker for custom rules insertion (rendered as Reflex component in UI)
-    sections.append("<!-- custom-rules-insert -->")
+    # Custom rule findings
+    if custom_findings:
+        cf_lines = ["## Custom Rule Findings\n"]
+        for f in custom_findings:
+            sev = f.get("severity", "info")
+            cat = f.get("category", "")
+            text = f.get("text", f.get("message", ""))
+            badge = {"fail": "\U0001f534", "warning": "\U0001f7e1", "info": "\U0001f535"}.get(sev, "\u26aa")
+            cat_str = f" [{cat}]" if cat else ""
+            cf_lines.append(f"- {badge} **{sev}**{cat_str} — {text}")
+        cf_lines.append("")
+        sections.append("\n".join(cf_lines))
+    else:
+        sections.append("<!-- custom-rules-insert -->")
 
     # 3. AI Config (includes system instructions)
     ai_config = render_ai_config(profile)
@@ -206,6 +220,11 @@ def render_report(
     kcm = render_knowledge_coverage(profile)
     if kcm:
         sections.append(kcm)
+
+    # 14.6 Knowledge Source Details
+    ksd = render_knowledge_source_details(profile)
+    if ksd:
+        sections.append(ksd)
 
     # --- Deep dive (runtime trace detail) ---
 

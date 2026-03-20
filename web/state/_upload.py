@@ -199,6 +199,15 @@ class UploadMixin(rx.State, mixin=True):
 
             self._populate_dynamic_sections(profile, timeline, "snapshot")
 
+            if instruction_diff and instruction_diff.is_significant:
+                self.mcs_profile_instruction_drift = {  # type: ignore[attr-defined]
+                    "change_ratio": f"{instruction_diff.change_ratio:.0%}",
+                    "unified_diff": instruction_diff.unified_diff or "",
+                    "is_significant": "true",
+                }
+            else:
+                self.mcs_profile_instruction_drift = {}  # type: ignore[attr-defined]
+
     async def _process_bot_files(self, files: list[rx.UploadFile]):
         if len(files) != 2:
             self.upload_error = "Upload exactly 2 files: botContent.yml and dialog.json."
@@ -239,6 +248,15 @@ class UploadMixin(rx.State, mixin=True):
                 self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
 
             self._populate_dynamic_sections(profile, timeline, "snapshot")
+
+            if instruction_diff and instruction_diff.is_significant:
+                self.mcs_profile_instruction_drift = {  # type: ignore[attr-defined]
+                    "change_ratio": f"{instruction_diff.change_ratio:.0%}",
+                    "unified_diff": instruction_diff.unified_diff or "",
+                    "is_significant": "true",
+                }
+            else:
+                self.mcs_profile_instruction_drift = {}  # type: ignore[attr-defined]
 
     async def _process_transcript(self, files: list[rx.UploadFile]):
         if len(files) != 1:
@@ -344,6 +362,38 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_credit_rows = rows  # type: ignore[attr-defined]
             self.mcs_credit_total = credit_estimate.total_credits  # type: ignore[attr-defined]
             self.mcs_credit_assumptions = credit_estimate.warnings  # type: ignore[attr-defined]
+            # Per-step breakdown rows
+            step_rows = []
+            for i, item in enumerate(credit_estimate.line_items, 1):
+                step_rows.append({
+                    "index": str(i),
+                    "step_name": item.step_name,
+                    "step_type": item.step_type,
+                    "credits": f"{item.credits:.0f}",
+                    "detail": item.detail or "",
+                })
+            self.mcs_credit_step_rows = step_rows  # type: ignore[attr-defined]
+            # Credit flow Mermaid
+            from renderer.report import render_credit_estimate as _render_credit_md
+
+            credit_md = _render_credit_md(credit_estimate, timeline) if timeline else ""
+            # Extract mermaid source from the markdown
+            mermaid_src = ""
+            if "```mermaid" in credit_md:
+                _lines = credit_md.split("\n")
+                _in_fence = False
+                _mermaid_lines: list[str] = []
+                for _line in _lines:
+                    if _line.strip() == "```mermaid":
+                        _in_fence = True
+                        continue
+                    if _line.strip() == "```" and _in_fence:
+                        _in_fence = False
+                        continue
+                    if _in_fence:
+                        _mermaid_lines.append(_line)
+                mermaid_src = "\n".join(_mermaid_lines)
+            self.mcs_credit_mermaid = mermaid_src  # type: ignore[attr-defined]
             logger.info(
                 f"State after set: mcs_credit_total={self.mcs_credit_total}, "  # type: ignore[attr-defined]
                 f"mcs_credit_rows={self.mcs_credit_rows}"  # type: ignore[attr-defined]
@@ -353,6 +403,8 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_credit_rows = []  # type: ignore[attr-defined]
             self.mcs_credit_total = 0.0  # type: ignore[attr-defined]
             self.mcs_credit_assumptions = []  # type: ignore[attr-defined]
+            self.mcs_credit_step_rows = []  # type: ignore[attr-defined]
+            self.mcs_credit_mermaid = ""  # type: ignore[attr-defined]
 
         # Custom findings for dynamic view
         self.mcs_custom_findings = self.report_custom_findings  # type: ignore[attr-defined]
@@ -393,7 +445,7 @@ class UploadMixin(rx.State, mixin=True):
         quick_wins: list[dict] = []
         for comp in profile.components:
             if comp.kind == "DialogComponent" and comp.state != "Active":
-                quick_wins.append({"severity": "warn", "icon": "alert-triangle", "text": f'Disabled topic: "{comp.display_name}"'})
+                quick_wins.append({"severity": "warn", "icon": "alert-triangle", "text": f'Disabled topic: "{comp.display_name}"', "detail": "Topic is inactive. Enable or remove to reduce clutter."})
         for comp in profile.components:
             if (
                 comp.kind == "DialogComponent"
@@ -402,7 +454,7 @@ class UploadMixin(rx.State, mixin=True):
                 and comp.trigger_kind not in _SYSTEM_TRIGGERS
                 and comp.trigger_kind not in _AUTOMATION_TRIGGERS
             ):
-                quick_wins.append({"severity": "warn", "icon": "alert-triangle", "text": f'No trigger queries: "{comp.display_name}"'})
+                quick_wins.append({"severity": "warn", "icon": "alert-triangle", "text": f'No trigger queries: "{comp.display_name}"', "detail": "User topic has no trigger phrases. It may never be matched by the recognizer."})
         for comp in profile.components:
             if comp.kind == "DialogComponent":
                 desc = comp.description
@@ -413,15 +465,35 @@ class UploadMixin(rx.State, mixin=True):
                         _reason = f'too short: "{desc}"'
                     else:
                         _reason = "matches display name"
-                    quick_wins.append({"severity": "info", "icon": "info", "text": f'Weak description: "{comp.display_name}" — {_reason}'})
+                    quick_wins.append({"severity": "info", "icon": "info", "text": f'Weak description: "{comp.display_name}" — {_reason}', "detail": "A clear model description helps the orchestrator choose the right topic. Aim for 20+ chars that explain what the topic handles."})
         trigger_kinds = {c.trigger_kind for c in profile.components if c.trigger_kind}
         for trigger in ("OnError", "OnUnknownIntent", "OnEscalate"):
             if trigger not in trigger_kinds:
-                quick_wins.append({"severity": "warn", "icon": "alert-triangle", "text": f"Missing system topic: {trigger}"})
+                quick_wins.append({"severity": "warn", "icon": "alert-triangle", "text": f"Missing system topic: {trigger}", "detail": "No handler for this lifecycle event. The bot may fail silently when this event occurs."})
         conn_issues = validate_connections(profile)
         for issue in conn_issues:
             sev = "warn" if issue["severity"] == "warning" else "info"
-            quick_wins.append({"severity": sev, "icon": "alert-triangle" if sev == "warn" else "info", "text": issue["message"]})
+            quick_wins.append({"severity": sev, "icon": "alert-triangle" if sev == "warn" else "info", "text": issue["message"], "detail": issue.get("detail", "")})
+
+        # Unused global variables (heuristic)
+        global_vars = [c for c in profile.components if c.kind == "GlobalVariableComponent"]
+        if global_vars:
+            other_schemas = set()
+            for c in profile.components:
+                if c.kind != "GlobalVariableComponent":
+                    if c.description:
+                        other_schemas.add(c.description)
+                    if c.schema_name:
+                        other_schemas.add(c.schema_name)
+            all_text = " ".join(other_schemas)
+            for gv in global_vars:
+                if gv.schema_name and gv.schema_name not in all_text:
+                    quick_wins.append({
+                        "severity": "info",
+                        "icon": "info",
+                        "text": f'Possibly unused variable: "{gv.display_name}"',
+                        "detail": "Schema name not found in other component references (heuristic). May be safe to remove.",
+                    })
 
         # KPIs
         total_comps = sum(len(v) for k, v in by_cat.items() if k in _CATEGORY_ORDER)
@@ -444,10 +516,17 @@ class UploadMixin(rx.State, mixin=True):
                 ai_config.append({"property": "Knowledge Sources", "value": gpt.knowledge_sources_kind})
             ai_config.append({"property": "Web Browsing", "value": "Yes" if gpt.web_browsing else "No"})
             ai_config.append({"property": "Code Interpreter", "value": "Yes" if gpt.code_interpreter else "No"})
+            if gpt.description:
+                ai_config.append({"property": "Description", "value": gpt.description[:500]})
             if gpt.instructions:
                 instructions_len = f"{len(gpt.instructions):,} chars"
                 ai_config.append({"property": "Instructions", "value": instructions_len})
+                self.mcs_profile_instructions_text = gpt.instructions  # type: ignore[attr-defined]
+            else:
+                self.mcs_profile_instructions_text = ""  # type: ignore[attr-defined]
             starters = [{"title": s.get("title", "—"), "message": s.get("message", "—")} for s in gpt.conversation_starters]
+        else:
+            self.mcs_profile_instructions_text = ""  # type: ignore[attr-defined]
         self.mcs_profile_ai_config = ai_config  # type: ignore[attr-defined]
         self.mcs_profile_instructions_len = instructions_len  # type: ignore[attr-defined]
         self.mcs_profile_starters = starters  # type: ignore[attr-defined]
@@ -472,6 +551,22 @@ class UploadMixin(rx.State, mixin=True):
             {"property": "Authentication", "value": auth_display},
             {"property": "Generative Actions", "value": "Enabled" if profile.generative_actions_enabled else "Disabled"},
         ]
+        meta.append({"property": "Access Control", "value": profile.access_control_policy})
+        meta.append({"property": "Lightweight Bot", "value": "Yes" if getattr(profile, 'is_lightweight_bot', False) else "No"})
+        if profile.app_insights:
+            ai_obj = profile.app_insights
+            flags = []
+            if ai_obj.log_activities:
+                flags.append("log activities")
+            if ai_obj.log_sensitive_properties:
+                flags.append("log sensitive")
+            detail = f"Configured ({', '.join(flags)})" if flags else "Configured"
+            meta.append({"property": "Application Insights", "value": detail})
+        if profile.ai_settings:
+            meta.append({"property": "Use Model Knowledge", "value": str(profile.ai_settings.use_model_knowledge)})
+            meta.append({"property": "File Analysis", "value": str(profile.ai_settings.file_analysis)})
+            meta.append({"property": "Semantic Search", "value": str(profile.ai_settings.semantic_search)})
+            meta.append({"property": "Content Moderation", "value": str(profile.ai_settings.content_moderation)})
         self.mcs_profile_bot_meta = meta  # type: ignore[attr-defined]
 
         # Environment variables
@@ -686,9 +781,23 @@ class UploadMixin(rx.State, mixin=True):
             if c.description or c.source_kind
         ]
 
-        # Search results
+        # Search results — grouped by user message
         search_rows: list[dict] = []
+        current_user_msg: str | None = None
         for i, ks in enumerate(searches, 1):
+            msg = ks.triggering_user_message or ""
+            if msg != current_user_msg:
+                current_user_msg = msg
+                search_rows.append({
+                    "kind": "header",
+                    "user_message": msg if msg else "System-initiated",
+                    # Pad remaining fields for type consistency
+                    "index": "", "query": "", "keywords": "", "sources": "",
+                    "duration": "", "grounding_label": "", "grounding_tone": "",
+                    "thought": "", "output_sources": "", "efficiency": "",
+                    "errors": "", "result_count": "", "results_text": "",
+                    "has_urls": "",
+                })
             badge, label = _grounding_score(ks)
             grounding_tone = "good" if label == "Strong" else ("info" if label == "Moderate" else "bad")
             dur_ms = _parse_execution_time_ms(ks.execution_time)
@@ -697,18 +806,23 @@ class UploadMixin(rx.State, mixin=True):
             # Flatten results into a displayable summary string
             result_count = len(ks.search_results)
             result_lines: list[str] = []
+            url_parts: list[str] = []
             for j, r in enumerate(ks.search_results[:5], 1):
                 title = r.name or r.url or f"Result {j}"
                 snippet_len = len(r.text or "")
                 quality_icon = "🟢" if snippet_len >= 200 else ("🟡" if snippet_len >= 50 else "🔴")
                 snippet = (r.text or "").replace("\n", " ")
                 result_lines.append(f"{quality_icon} {j}. {title}" + (f" — {snippet}" if snippet else ""))
+                if r.url:
+                    url_parts.append(r.url)
             results_text = "\n".join(result_lines) if result_lines else ""
             # Clean up efficiency string (strip markdown)
             eff_clean = ""
             if eff:
                 eff_clean = eff.replace("**", "").replace("`", "").replace("🟢 ", "").replace("🟡 ", "").replace("🔴 ", "").replace("⚫ ", "")
             search_rows.append({
+                "kind": "search",
+                "user_message": "",
                 "index": str(i),
                 "query": ks.search_query or "—",
                 "keywords": ks.search_keywords or "—",
@@ -722,6 +836,7 @@ class UploadMixin(rx.State, mixin=True):
                 "errors": "; ".join(ks.search_errors) if ks.search_errors else "",
                 "result_count": str(result_count),
                 "results_text": results_text,
+                "has_urls": ", ".join(url_parts) if url_parts else "",
             })
         self.mcs_knowledge_searches = search_rows  # type: ignore[attr-defined]
 
@@ -1092,6 +1207,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_profile_kpis = []  # type: ignore[attr-defined]
         self.mcs_profile_ai_config = []  # type: ignore[attr-defined]
         self.mcs_profile_instructions_len = ""  # type: ignore[attr-defined]
+        self.mcs_profile_instructions_text = ""  # type: ignore[attr-defined]
+        self.mcs_profile_instruction_drift = {}  # type: ignore[attr-defined]
         self.mcs_profile_starters = []  # type: ignore[attr-defined]
         self.mcs_profile_security_chips = []  # type: ignore[attr-defined]
         self.mcs_profile_bot_meta = []  # type: ignore[attr-defined]
@@ -1140,6 +1257,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_reasoning = []  # type: ignore[attr-defined]
         self.mcs_conv_sequence_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_conv_gantt_mermaid = ""  # type: ignore[attr-defined]
+        self.mcs_credit_step_rows = []  # type: ignore[attr-defined]
+        self.mcs_credit_mermaid = ""  # type: ignore[attr-defined]
 
     def new_upload(self):
         self.report_markdown = ""  # type: ignore[attr-defined]
@@ -1170,6 +1289,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_credit_rows = []  # type: ignore[attr-defined]
         self.mcs_credit_total = 0.0  # type: ignore[attr-defined]
         self.mcs_credit_assumptions = []  # type: ignore[attr-defined]
+        self.mcs_credit_step_rows = []  # type: ignore[attr-defined]
+        self.mcs_credit_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_custom_findings = []  # type: ignore[attr-defined]
         self.mcs_conv_metadata = []  # type: ignore[attr-defined]
         self.mcs_conv_phases = []  # type: ignore[attr-defined]

@@ -1167,14 +1167,21 @@ def render_topic_lifecycles_md(timeline: ConversationTimeline) -> str:
         return ""
     lines = [
         "## Topic Lifecycles\n",
-        "| Topic | Status | Duration | Start → End | Thought |",
-        "| --- | --- | --- | --- | --- |",
+        "| Topic | Status | Duration | Start → End | Thought | Children | Plan |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     for lc in items:
-        thought = (lc.get("thought") or "—")[:80].replace("|", "\\|").replace("\n", " ")
+        thought = (lc.get("thought") or "—").replace("|", "\\|").replace("\n", " ")
         time_range = f"{lc.get('start', '')} → {lc.get('end', '')}" if lc.get("start") else "—"
+        child_summary = (lc.get("child_summary") or "—").replace("|", "\\|").replace("\n", " ")
+        child_count = lc.get("child_count", "")
+        if child_count:
+            child_str = f"{child_summary} ({child_count})"
+        else:
+            child_str = child_summary
+        plan_id = (lc.get("plan_identifier") or "—").replace("|", "\\|")
         lines.append(
-            f"| {lc['name']} | {lc['status']} | {lc.get('duration_label') or '—'} | {time_range} | {thought} |"
+            f"| {lc['name']} | {lc['status']} | {lc.get('duration_label') or '—'} | {time_range} | {thought} | {child_str} | {plan_id} |"
         )
     lines.append("")
     return "\n".join(lines)
@@ -1200,8 +1207,10 @@ def render_decision_timeline_md(timeline: ConversationTimeline) -> str:
             topic = item.get("topic_name", "")
             if subtype == "triggered":
                 thought = item.get("thought", "")
+                score = item.get("trigger_score", "")
                 prefix = f" — *{thought}*" if thought else ""
-                lines.append(f"  - ▶ {topic}{prefix}")
+                score_suffix = f" [{score}]" if score else ""
+                lines.append(f"  - ▶ {topic}{score_suffix}{prefix}")
             else:
                 duration = item.get("duration", "")
                 status = item.get("status", "")
@@ -1225,14 +1234,15 @@ def render_plan_evolution_md(timeline: ConversationTimeline) -> str:
         return ""
     lines = [
         "## Plan Evolution\n",
-        "| Plan # | Final? | Steps | Changes |",
-        "| --- | --- | --- | --- |",
+        "| Plan # | Final? | Steps | Changes | Routing Scores |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for p in items:
         final = "Yes" if p.get("is_final") == "True" else "No" if p.get("is_final") else "—"
         steps = (p.get("steps") or "—").replace("|", "\\|")
         changes = p.get("change_summary") or "—"
-        lines.append(f"| {p['plan_index']} | {final} | {steps} | {changes} |")
+        scores = (p.get("step_scores") or "—").replace("|", "\\|")
+        lines.append(f"| {p['plan_index']} | {final} | {steps} | {changes} | {scores} |")
     lines.append("")
     return "\n".join(lines)
 

@@ -144,6 +144,29 @@ def _mcs_credit_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_credit_step_row(item: dict) -> rx.Component:
+    return rx.grid(
+        rx.text(item["index"], font_size="13px", color="var(--gray-a9)", text_align="right"),
+        rx.text(item["step_name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+        rx.badge(item["step_type"], color_scheme=rx.match(
+            item["step_type"],
+            ("generative_answer", "green"),
+            ("agent_action", "purple"),
+            ("classic_answer", "blue"),
+            ("flow_action", "amber"),
+            "gray",
+        ), variant="soft", size="1"),
+        rx.text(item["credits"], font_size="13px", color="var(--gray-11)", font_weight="600", text_align="right"),
+        rx.text(item["detail"], font_size="12px", color="var(--gray-a9)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+        columns="0.5fr 2fr 1fr 0.5fr 3fr",
+        gap="8px",
+        align="center",
+        padding_y="6px",
+        border_bottom="1px solid var(--gray-a4)",
+        width="100%",
+    )
+
+
 def _mcs_credits_panel() -> rx.Component:
     return card(
         rx.hstack(
@@ -202,6 +225,28 @@ def _mcs_credits_panel() -> rx.Component:
             margin_top="14px",
             width="100%",
         ),
+        # Per-step breakdown
+        rx.cond(
+            State.mcs_credit_step_rows.length() > 0,  # type: ignore[union-attr]
+            rx.vstack(
+                sub_heading("Per-Step Breakdown"),
+                rx.box(
+                    _grid_header("#", "Step", "Type", "Credits", "Detail", template="0.5fr 2fr 1fr 0.5fr 3fr"),
+                    rx.foreach(State.mcs_credit_step_rows, _mcs_credit_step_row),
+                    width="100%",
+                    border="1px solid var(--gray-a4)",
+                    border_radius="8px",
+                    padding_x="12px",
+                    background="var(--gray-a2)",
+                    overflow_x="auto",
+                ),
+                spacing="2",
+                margin_top="14px",
+                width="100%",
+            ),
+        ),
+        # Credit flow diagram
+        _mermaid_block(State.mcs_credit_mermaid),
         width="100%",
     )
 
@@ -819,17 +864,30 @@ def _mcs_profile_conn_def_row(item: dict) -> rx.Component:
 
 
 def _mcs_profile_quick_win_row(item: dict) -> rx.Component:
-    return rx.hstack(
-        rx.badge(
-            item["severity"],
-            color_scheme=rx.match(item["severity"], ("warn", "amber"), ("info", "blue"), "gray"),
-            variant="soft",
-            size="1",
+    return rx.vstack(
+        rx.hstack(
+            rx.badge(
+                item["severity"],
+                color_scheme=rx.match(item["severity"], ("warn", "amber"), ("info", "blue"), "gray"),
+                variant="soft",
+                size="1",
+            ),
+            rx.text(item["text"], font_size="13px", color="var(--gray-12)"),
+            width="100%",
+            align="center",
+            spacing="2",
         ),
-        rx.text(item["text"], font_size="13px", color="var(--gray-12)"),
+        rx.cond(
+            item["detail"] != "",
+            rx.text(
+                item["detail"],
+                font_size="12px",
+                color="var(--gray-a9)",
+                padding_left="32px",
+            ),
+        ),
         width="100%",
-        align="center",
-        spacing="2",
+        spacing="1",
         padding_y="4px",
     )
 
@@ -848,6 +906,33 @@ def _mcs_profile_overlap_row(item: dict) -> rx.Component:
 
 def _mcs_profile_panel() -> rx.Component:
     return rx.vstack(
+        # Instruction drift warning
+        rx.cond(
+            State.mcs_profile_instruction_drift.length() > 0,  # type: ignore[union-attr]
+            rx.box(
+                rx.hstack(
+                    rx.icon("triangle-alert", size=16, color="var(--amber-9)"),
+                    rx.text("Instruction Drift Detected", font_size="14px", font_weight="700", color="var(--amber-11)"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    rx.cond(
+                        State.mcs_profile_instruction_drift.contains("change_ratio"),  # type: ignore[union-attr]
+                        State.mcs_profile_instruction_drift["change_ratio"].to(str),
+                        "",
+                    ),
+                    font_size="13px",
+                    color="var(--amber-11)",
+                    margin_top="4px",
+                ),
+                background="var(--amber-a2)",
+                border="1px solid var(--amber-a5)",
+                border_radius="8px",
+                padding="12px 16px",
+                width="100%",
+            ),
+        ),
         # KPI grid
         rx.grid(
             rx.foreach(State.mcs_profile_kpis, _mcs_kpi_card),
@@ -880,6 +965,40 @@ def _mcs_profile_panel() -> rx.Component:
                         padding_top="12px",
                         width="100%",
                     ),
+                ),
+                width="100%",
+            ),
+        ),
+        # System Instructions (accordion)
+        rx.cond(
+            State.mcs_profile_instructions_text != "",
+            card(
+                rx.accordion.root(
+                    rx.accordion.item(
+                        header=rx.hstack(
+                            rx.text("System Instructions", font_size="13px", font_weight="600", color="var(--gray-12)"),
+                            rx.text(State.mcs_profile_instructions_len, font_size="12px", color="var(--gray-a9)"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        content=rx.el.pre(
+                            State.mcs_profile_instructions_text,
+                            font_size="12px",
+                            color="var(--gray-11)",
+                            white_space="pre-wrap",
+                            word_break="break-word",
+                            font_family="var(--font-mono)",
+                            background="var(--gray-a2)",
+                            border="1px solid var(--gray-a4)",
+                            border_radius="6px",
+                            padding="12px",
+                            max_height="400px",
+                            overflow_y="auto",
+                        ),
+                    ),
+                    collapsible=True,
+                    variant="ghost",
+                    width="100%",
                 ),
                 width="100%",
             ),
@@ -1123,6 +1242,23 @@ def _mcs_ks_coverage_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_ks_item(item: dict) -> rx.Component:
+    """Dispatch between group header and search card."""
+    return rx.cond(
+        item["kind"] == "header",
+        rx.hstack(
+            rx.icon("message-circle", size=14, color=PRIMARY),
+            rx.text(item["user_message"], font_size="14px", font_weight="600", color="var(--gray-12)"),
+            spacing="2",
+            align="center",
+            padding_y="8px",
+            padding_top="12px",
+            width="100%",
+        ),
+        _mcs_ks_search_card(item),
+    )
+
+
 def _mcs_ks_search_card(item: dict) -> rx.Component:
     return card(
         rx.vstack(
@@ -1216,6 +1352,19 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                     padding="8px 10px",
                     width="100%",
                     overflow="hidden",
+                ),
+            ),
+            # Source URLs
+            rx.cond(
+                item["has_urls"] != "",
+                rx.hstack(
+                    rx.icon("external-link", size=12, color="var(--gray-a8)"),
+                    rx.text("Sources:", font_size="11px", color="var(--gray-a9)", font_weight="600"),
+                    rx.text(item["has_urls"], font_size="11px", color=PRIMARY, word_break="break-all"),
+                    spacing="2",
+                    align="start",
+                    flex_wrap="wrap",
+                    padding_top="4px",
                 ),
             ),
             spacing="2",
@@ -1317,7 +1466,7 @@ def _mcs_knowledge_panel() -> rx.Component:
                     spacing="2",
                     align="center",
                 ),
-                rx.foreach(State.mcs_knowledge_searches, _mcs_ks_search_card),
+                rx.foreach(State.mcs_knowledge_searches, _mcs_ks_item),
                 spacing="3",
                 width="100%",
             ),
