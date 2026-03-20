@@ -12,6 +12,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from model_registry import get_validator_key
 from utils import safe_extractall
 
 try:
@@ -22,43 +23,6 @@ except ImportError:  # pragma: no cover
     _YAML_AVAILABLE = False
 
 BEST_PRACTICES_DIR = Path(__file__).parent / "best_practices"
-
-# ── Model catalogue ────────────────────────────────────────────────────────────
-
-# Power Platform modelNameHint values -> internal key (None = below GPT-4.1 threshold)
-_HINT_TO_KEY: dict[str, str | None] = {
-    # GPT-4.1 family
-    "GPT41": "gpt41",
-    "gpt-4.1": "gpt41",
-    "gpt41": "gpt41",
-    "GPT41Mini": "gpt41mini",
-    "gpt-4.1-mini": "gpt41mini",
-    "gpt41mini": "gpt41mini",
-    "GPT41Nano": "gpt41nano",
-    "gpt-4.1-nano": "gpt41nano",
-    "gpt41nano": "gpt41nano",
-    # GPT-5 family
-    "GPT5": "gpt5",
-    "gpt-5": "gpt5",
-    "gpt5": "gpt5",
-    "GPT5Chat": "gpt5chat",
-    "gpt-5-chat": "gpt5chat",
-    "gpt5chat": "gpt5chat",
-    # o-series reasoning models
-    "o1": "o1",
-    "o1-preview": "o1",
-    "o1-mini": "o1",
-    "o3": "o3",
-    "o3-mini": "o3",
-    "o4-mini": "o4mini",
-    "o4mini": "o4mini",
-    # Below threshold — not assessed
-    "GPT4o": None,
-    "gpt-4o": None,
-    "gpt-4o-mini": None,
-    "gpt-4": None,
-    "GPT4": None,
-}
 
 # Per-model validation parameters
 _MODEL_META: dict[str, dict] = {
@@ -145,16 +109,7 @@ def _resolve_model_key(hint: str | None) -> str | None:
 
     Returns None when the hint is unknown or the model is below the GPT-4.1 threshold.
     """
-    if hint is None:
-        return None
-    if hint in _HINT_TO_KEY:
-        return _HINT_TO_KEY[hint]
-    # Case-insensitive fallback
-    lower = hint.lower()
-    for k, v in _HINT_TO_KEY.items():
-        if k.lower() == lower:
-            return v
-    return None
+    return get_validator_key(hint)
 
 
 def _load_best_practices(model_key: str) -> str:

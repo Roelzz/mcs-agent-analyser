@@ -18,6 +18,7 @@ import os
 
 import httpx
 
+from model_registry import get_openai_model_id, get_validator_key
 from models import BotProfile
 
 # ---------------------------------------------------------------------------
@@ -183,36 +184,6 @@ _MODEL_CATALOGUE: dict[str, dict] = {
     },
 }
 
-_HINT_TO_OPENAI_MODEL: dict[str, str] = {
-    "GPT41": "gpt-4.1",
-    "gpt-4.1": "gpt-4.1",
-    "gpt41": "gpt-4.1",
-    "GPT41Mini": "gpt-4.1-mini",
-    "gpt-4.1-mini": "gpt-4.1-mini",
-    "gpt41mini": "gpt-4.1-mini",
-    "GPT41Nano": "gpt-4.1-nano",
-    "gpt-4.1-nano": "gpt-4.1-nano",
-    "gpt41nano": "gpt-4.1-nano",
-    "GPT5": "gpt-5",
-    "gpt-5": "gpt-5",
-    "gpt5": "gpt-5",
-    "GPT5Chat": "gpt-5-chat",
-    "gpt-5-chat": "gpt-5-chat",
-    "gpt5chat": "gpt-5-chat",
-    "o1": "o1",
-    "o1-preview": "o1-preview",
-    "o1-mini": "o1-mini",
-    "o3": "o3",
-    "o3-mini": "o3-mini",
-    "o4-mini": "o4-mini",
-    "o4mini": "o4-mini",
-    "GPT4o": "gpt-4o",
-    "gpt-4o": "gpt-4o",
-    "gpt-4o-mini": "gpt-4o-mini",
-    "gpt-4": "gpt-4",
-    "GPT4": "gpt-4",
-}
-
 _LEGACY_HINTS = {"GPT4o", "gpt-4o", "gpt-4o-mini", "gpt-4", "GPT4", "gpt-35-turbo", "gpt-3.5-turbo"}
 
 _SAMPLE_QUERIES: list[str] = [
@@ -238,9 +209,7 @@ def _resolve_catalogue_key(hint: str | None) -> str | None:
     normalized = hint.strip()
     if normalized in _MODEL_CATALOGUE:
         return normalized
-    from validator import _HINT_TO_KEY  # type: ignore[attr-defined]
-
-    key = _HINT_TO_KEY.get(normalized)
+    key = get_validator_key(normalized)
     if key and key in _MODEL_CATALOGUE:
         return key
     return None
@@ -505,7 +474,7 @@ def build_comparison_markdown(profile: BotProfile) -> str:
             "",
         ]
     else:
-        configured_openai = _HINT_TO_OPENAI_MODEL.get(hint, "gpt-4o") if hint else "gpt-4o"
+        configured_openai = get_openai_model_id(hint) or "gpt-4o"
         comparison_models = _choose_comparison_models(catalogue_key, configured_openai)
 
         instructions = (gpt_info.instructions or "") if gpt_info else ""
