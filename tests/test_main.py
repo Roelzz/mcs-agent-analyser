@@ -4570,8 +4570,8 @@ def test_action_details_connector_resolution():
     assert detail["connector_display_name"] == "Office 365 Outlook"
 
 
-def test_profile_kpi_excludes_orchestrator():
-    """Components KPI should exclude orchestrator_topics from count."""
+def test_profile_kpi_includes_orchestrator():
+    """Components KPI should include orchestrator_topics in count."""
     from renderer.profile import _classify_component, _CATEGORY_ORDER
 
     comps = [
@@ -4585,13 +4585,9 @@ def test_profile_kpi_excludes_orchestrator():
         if cat is not None:
             by_cat.setdefault(cat, []).append(c)
 
-    # Old way (includes orchestrator_topics)
-    total_old = sum(len(v) for v in by_cat.values())
-    # New way (excludes orchestrator_topics)
-    total_new = sum(len(v) for k, v in by_cat.items() if k in _CATEGORY_ORDER)
+    total = sum(len(v) for k, v in by_cat.items() if k in _CATEGORY_ORDER)
 
-    assert total_old == 3  # user + orch + variable
-    assert total_new == 2  # user + variable (orchestrator excluded)
+    assert total == 3  # user + orchestrator + variable
 
 
 def test_render_report_has_routing_sections():

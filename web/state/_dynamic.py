@@ -50,6 +50,8 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_credit_rows: list[dict] = []
     mcs_credit_total: float = 0.0
     mcs_credit_assumptions: list[str] = []
+    mcs_credit_step_rows: list[dict] = []
+    mcs_credit_mermaid: str = ""
 
     # Conversation flow
     mcs_conversation_flow: list[dict] = []
@@ -62,6 +64,8 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_profile_kpis: list[dict] = []
     mcs_profile_ai_config: list[dict] = []
     mcs_profile_instructions_len: str = ""
+    mcs_profile_instructions_text: str = ""
+    mcs_profile_instruction_drift: dict = {}
     mcs_profile_starters: list[dict] = []
     mcs_profile_security_chips: list[dict] = []
     mcs_profile_bot_meta: list[dict] = []

@@ -22,8 +22,13 @@ def render_timeline(timeline: ConversationTimeline, *, skip_diagrams: bool = Fal
     if not timeline.events:
         return "## Conversation Trace\n\nNo dialog events recorded.\n"
 
+    user_msgs = sum(1 for e in timeline.events if e.event_type == EventType.USER_MESSAGE)
+    bot_msgs = sum(1 for e in timeline.events if e.event_type == EventType.BOT_MESSAGE)
+    elapsed = _format_duration(timeline.total_elapsed_ms) if timeline.total_elapsed_ms else "—"
+
     lines = [
         "## Conversation Trace\n",
+        f"**{len(timeline.events)} events** | {user_msgs} user messages | {bot_msgs} bot messages | {elapsed} total\n",
         "| Property | Value |",
         "| --- | --- |",
         f"| Bot Name | {timeline.bot_name} |",
@@ -453,23 +458,71 @@ def render_gantt_chart(timeline: ConversationTimeline) -> str:
 
 def render_orchestrator_reasoning(timeline: ConversationTimeline) -> str:
     """Render orchestrator reasoning chain from STEP_TRIGGERED thoughts."""
-    rows: list[tuple[int, str, str]] = []
+    import re as _re_reason
+
+    from renderer.sections import _ms_between_iso
+
+    # Build finish lookup by step_id
+    finish_lookup: dict[str, object] = {}
+    for ev in timeline.events:
+        if ev.event_type == EventType.STEP_FINISHED and ev.step_id:
+            finish_lookup[ev.step_id] = ev
+
+    rows: list[dict] = []
     step_num = 0
+    last_ask = ""
     for event in timeline.events:
-        if event.event_type == EventType.STEP_TRIGGERED:
+        if event.event_type == EventType.PLAN_RECEIVED_DEBUG and event.orchestrator_ask:
+            last_ask = event.orchestrator_ask
+        if event.event_type == EventType.STEP_TRIGGERED and event.thought:
             step_num += 1
-            if event.thought:
-                topic = event.topic_name or "Unknown"
-                reasoning = event.thought.replace("|", "\\|").replace("\n", " ")
-                rows.append((step_num, topic, reasoning))
+            _st_m = _re_reason.search(r"\((\w+)\)", event.summary or "")
+            step_type = _st_m.group(1) if _st_m else ""
+
+            fin_ev = finish_lookup.get(event.step_id) if event.step_id else None
+            fin_status = ""
+            fin_error = ""
+            duration_label = ""
+            has_recs = ""
+            used_outputs = ""
+            if fin_ev:
+                fin_status = fin_ev.state or ""
+                fin_error = fin_ev.error or ""
+                if fin_ev.has_recommendations:
+                    has_recs = "Yes"
+                used_outputs = fin_ev.plan_used_outputs or ""
+                dur_ms = _ms_between_iso(event.timestamp, fin_ev.timestamp)
+                if dur_ms > 0:
+                    duration_label = _format_duration(dur_ms)
+
+            if event.has_recommendations and not has_recs:
+                has_recs = "Yes"
+
+            rows.append({
+                "step": step_num,
+                "topic": event.topic_name or "Unknown",
+                "step_type": step_type,
+                "status": fin_status,
+                "duration": duration_label,
+                "reasoning": event.thought.replace("|", "\\|").replace("\n", " "),
+                "error": fin_error.replace("|", "\\|").replace("\n", " ") if fin_error else "",
+                "ask": last_ask.replace("|", "\\|").replace("\n", " ")[:100] if last_ask else "",
+                "has_recs": has_recs,
+                "used_outputs": used_outputs.replace("|", "\\|").replace("\n", " ")[:100] if used_outputs else "",
+            })
+
     if not rows:
         return ""
+
     lines = [
         "### Orchestrator Reasoning\n",
-        "| Step | Topic | Reasoning |",
-        "| --- | --- | --- |",
+        "| Step | Topic | Type | Status | Duration | Reasoning | Error | Ask | Recs | Used Outputs |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
-    for num, topic, reasoning in rows:
-        lines.append(f"| {num} | {topic} | {reasoning} |")
+    for r in rows:
+        lines.append(
+            f"| {r['step']} | {r['topic']} | {r['step_type']} | {r['status']} | {r['duration']} "
+            f"| {r['reasoning']} | {r['error']} | {r['ask']} | {r['has_recs']} | {r['used_outputs']} |"
+        )
     lines.append("")
     return "\n".join(lines)

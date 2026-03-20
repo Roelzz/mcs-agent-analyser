@@ -130,6 +130,10 @@ def _apply_operator(actual: Any, op: str, expected: Any) -> bool:
         return True
     if op == "matches":
         if isinstance(actual, str) and isinstance(expected, str):
+            if len(expected) > 500:
+                return False
+            if re.search(r"\(.+[*+]\)[*+]", expected):
+                return False
             try:
                 return re.search(expected, actual) is not None
             except re.error:

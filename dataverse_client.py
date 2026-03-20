@@ -22,6 +22,8 @@ _ODATA_HEADERS = {
     "OData-Version": "4.0",
 }
 
+_SCHEMA_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
+
 
 class DataverseClient:
     def __init__(
@@ -37,6 +39,23 @@ class DataverseClient:
         self.client_id = client_id
         self.client_secret = client_secret
         self._token: str | None = _prefetched_token or None
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient()
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
+
+    async def __aenter__(self) -> "DataverseClient":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self.aclose()
 
     async def _get_token(self) -> str:
         if self._token:
@@ -57,19 +76,26 @@ class DataverseClient:
             raise RuntimeError(f"Dataverse token acquisition failed: {error}")
 
         logger.info("Dataverse token acquired")
-        return result["access_token"]
+        self._token = result["access_token"]
+        return self._token
 
     async def resolve_bot_guid(self, bot_identifier: str) -> str:
         """Return bot GUID, resolving from schema name if needed."""
         if _UUID_RE.match(bot_identifier):
             return bot_identifier
 
+        if not _SCHEMA_NAME_RE.match(bot_identifier):
+            raise ValueError(
+                f"Invalid bot schema name '{bot_identifier}'. "
+                "Must start with a letter or underscore and contain only alphanumeric characters, underscores, and dots."
+            )
+
         token = await self._get_token()
         url = f"{self.org_url}/api/data/v9.2/bots?$filter=schemaname eq '{bot_identifier}'&$select=botid,name"
         headers = {"Authorization": f"Bearer {token}", **_ODATA_HEADERS}
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers, timeout=30)
+        client = await self._get_client()
+        resp = await client.get(url, headers=headers, timeout=30)
 
         if resp.status_code == 403:
             logger.warning("403 on bots table for '{}' — falling back to auto-detect", bot_identifier)
@@ -95,8 +121,8 @@ class DataverseClient:
         )
         headers = {"Authorization": f"Bearer {token}", **_ODATA_HEADERS}
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers, timeout=30)
+        client = await self._get_client()
+        resp = await client.get(url, headers=headers, timeout=30)
 
         if resp.status_code == 403:
             raise RuntimeError(
@@ -127,8 +153,8 @@ class DataverseClient:
         url = f"{self.org_url}/api/data/v9.2/conversationtranscripts({conversation_id})"
         headers = {"Authorization": f"Bearer {token}", **_ODATA_HEADERS}
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers, timeout=30)
+        client = await self._get_client()
+        resp = await client.get(url, headers=headers, timeout=30)
 
         if resp.status_code == 404:
             raise RuntimeError(
@@ -143,8 +169,8 @@ class DataverseClient:
         url = f"{self.org_url}/api/data/v9.2/bots({bot_guid})?$select=botid,name,schemaname,configuration"
         headers = {"Authorization": f"Bearer {token}", **_ODATA_HEADERS}
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, headers=headers, timeout=30)
+        client = await self._get_client()
+        resp = await client.get(url, headers=headers, timeout=30)
 
         if resp.status_code == 403:
             raise RuntimeError("Access denied. Your account needs read access to the bots table in Dataverse.")
@@ -193,19 +219,19 @@ class DataverseClient:
     async def _paginated_get(self, url: str | None, headers: dict) -> list[dict]:
         """Execute a paginated OData GET, following @odata.nextLink."""
         all_records: list[dict] = []
-        async with httpx.AsyncClient() as client:
-            while url:
-                resp = await client.get(url, headers=headers, timeout=60)
+        client = await self._get_client()
+        while url:
+            resp = await client.get(url, headers=headers, timeout=60)
 
-                if resp.status_code == 403:
-                    raise RuntimeError(
-                        "Access denied. Your account needs read access to the botcomponents table in Dataverse."
-                    )
-                resp.raise_for_status()
+            if resp.status_code == 403:
+                raise RuntimeError(
+                    "Access denied. Your account needs read access to the botcomponents table in Dataverse."
+                )
+            resp.raise_for_status()
 
-                data = resp.json()
-                all_records.extend(data.get("value", []))
-                url = data.get("@odata.nextLink")
+            data = resp.json()
+            all_records.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
         return all_records
 
     async def _enrich_component_content(self, records: list[dict], headers: dict) -> list[dict]:
@@ -236,8 +262,8 @@ class DataverseClient:
         drop_select = False
         if first_id:
             probe_url = f"{self.org_url}/api/data/v9.2/botcomponents({first_id})"
-            async with httpx.AsyncClient() as client:
-                probe = await client.get(probe_url, headers=headers, timeout=30)
+            client = await self._get_client()
+            probe = await client.get(probe_url, headers=headers, timeout=30)
             if probe.status_code == 200:
                 probe_data = probe.json()
                 non_null_keys = [k for k, v in probe_data.items() if v is not None and not k.startswith("@")]
@@ -267,27 +293,27 @@ class DataverseClient:
                         )
 
         # --- Fetch all components individually ---
-        async with httpx.AsyncClient() as client:
-            for record in records:
-                comp_id = record.get("botcomponentid", "")
-                if not comp_id:
-                    continue
-                # Drop $select if probe showed content is available without it,
-                # otherwise select the discovered content field
-                if drop_select:
-                    url = f"{self.org_url}/api/data/v9.2/botcomponents({comp_id})"
-                else:
-                    url = f"{self.org_url}/api/data/v9.2/botcomponents({comp_id})?$select={content_field}"
-                resp = await client.get(url, headers=headers, timeout=30)
-                if resp.status_code == 200:
-                    value = resp.json().get(content_field, "")
-                    record["content"] = value or ""
-                else:
-                    logger.warning(
-                        "Individual fetch for {} returned status {}",
-                        comp_id,
-                        resp.status_code,
-                    )
+        client = await self._get_client()
+        for record in records:
+            comp_id = record.get("botcomponentid", "")
+            if not comp_id:
+                continue
+            # Drop $select if probe showed content is available without it,
+            # otherwise select the discovered content field
+            if drop_select:
+                url = f"{self.org_url}/api/data/v9.2/botcomponents({comp_id})"
+            else:
+                url = f"{self.org_url}/api/data/v9.2/botcomponents({comp_id})?$select={content_field}"
+            resp = await client.get(url, headers=headers, timeout=30)
+            if resp.status_code == 200:
+                value = resp.json().get(content_field, "")
+                record["content"] = value or ""
+            else:
+                logger.warning(
+                    "Individual fetch for {} returned status {}",
+                    comp_id,
+                    resp.status_code,
+                )
 
         enriched = sum(1 for r in records if r.get("content"))
         logger.info("Enriched {}/{} components with content", enriched, len(records))
@@ -313,9 +339,9 @@ class DataverseClient:
         )
         headers = {"Authorization": f"Bearer {token}", **_ODATA_HEADERS}
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
+        client = await self._get_client()
+        response = await client.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
 
         data = response.json()
         records = data.get("value", [])

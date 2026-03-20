@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from loguru import logger
+
 from ._helpers import (
     _INJECTION_PATTERNS,
     _SECRET_PATTERNS,
@@ -35,7 +37,8 @@ def _check_security(work_dir: Path, schema: str) -> list[dict]:  # noqa: C901
                 continue
             try:
                 text = data_path.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to read {}: {}", data_path, exc)
                 continue
             for pat in _INJECTION_PATTERNS:
                 m = pat.search(text)
@@ -86,7 +89,8 @@ def _check_security(work_dir: Path, schema: str) -> list[dict]:  # noqa: C901
                 continue
             try:
                 text = data_path.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except Exception as exc:
+                logger.debug("Failed to read {}: {}", data_path, exc)
                 continue
             for pat in _SECRET_PATTERNS:
                 m = pat.search(text)
@@ -136,8 +140,8 @@ def _check_security(work_dir: Path, schema: str) -> list[dict]:  # noqa: C901
             config = json.loads(config_path.read_text(encoding="utf-8"))
             ai_settings = config.get("aISettings", {}) or {}
             file_analysis_enabled = bool(ai_settings.get("isFileAnalysisEnabled", False))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to parse config {}: {}", config_path, exc)
 
     if file_analysis_enabled:
         results.append(

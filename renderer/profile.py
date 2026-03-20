@@ -32,6 +32,7 @@ _CATEGORY_ORDER: list[str] = [
     "user_topics",
     "system_topics",
     "automation_topics",
+    "orchestrator_topics",
     "skills",
     "custom_entities",
     "variables",
@@ -634,6 +635,7 @@ def render_security_summary(profile: BotProfile) -> str:
 
     lines = [
         "## Security Inventory\n",
+        f"**Auth:** {auth_display} | **Access:** {profile.access_control_policy} | **Agent Connectable:** {'Yes' if profile.is_agent_connectable else 'No'}\n",
         "| Property | Value |",
         "| --- | --- |",
         f"| Authentication | {auth_display} |",
@@ -652,9 +654,13 @@ def render_tool_inventory(profile: BotProfile) -> str:
     if not tools:
         return ""
 
+    connector_tools = sum(1 for t in tools if t.tool_type == "ConnectorTool")
+    agent_tools = sum(1 for t in tools if t.tool_type in ("ChildAgent", "ConnectedAgent", "A2AAgent"))
+    mcp_servers = sum(1 for t in tools if t.tool_type == "MCPServer")
+
     lines = [
         "## Tool Inventory\n",
-        f"**{len(tools)}** tools configured\n",
+        f"**{len(tools)} tools** | {connector_tools} connector | {agent_tools} agent | {mcp_servers} MCP\n",
         "| Tool | Type | Connector | Mode | State | Description |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
@@ -934,7 +940,21 @@ def render_topic_graph(profile: BotProfile) -> str:
         if color.get(nid) == WHITE:
             _dfs(nid)
 
-    lines = ["## Topic Connection Graph\n", "```mermaid", '%%{init: {"useMaxWidth": false}}%%', "graph TD"]
+    lines = ["## Topic Connection Graph\n"]
+
+    # Anomaly summary before diagram
+    anomalies = detect_topic_graph_anomalies(profile)
+    anomaly_parts = []
+    if anomalies["orphaned"]:
+        anomaly_parts.append(f"{anomalies['orphaned']} orphaned")
+    if anomalies["dead_ends"]:
+        anomaly_parts.append(f"{anomalies['dead_ends']} dead ends")
+    if anomalies["cycles"]:
+        anomaly_parts.append(f"{anomalies['cycles']} cycles")
+    if anomaly_parts:
+        lines.append(f"> **Anomalies:** {', '.join(anomaly_parts)}\n")
+
+    lines.extend(["```mermaid", '%%{init: {"useMaxWidth": false}}%%', "graph TD"])
     lines.append("    classDef warning fill:#fef3cd,stroke:#856404,color:#856404")
     lines.append("    classDef danger fill:#f8d7da,stroke:#842029,color:#842029")
 
