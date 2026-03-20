@@ -334,72 +334,78 @@ class UploadMixin(rx.State, mixin=True):
             f"line_items={len(credit_estimate.line_items) if credit_estimate else 'N/A'}, "
             f"total={credit_estimate.total_credits if credit_estimate else 'N/A'}"
         )
-        if credit_estimate and credit_estimate.line_items:
-            type_counts: dict[str, int] = {}
-            type_credits: dict[str, float] = {}
-            for item in credit_estimate.line_items:
-                type_counts[item.step_type] = type_counts.get(item.step_type, 0) + 1
-                type_credits[item.step_type] = type_credits.get(item.step_type, 0) + item.credits
-
-            rows = []
-            meter_defs = [
-                ("classic_answer", "Classic answer", "1"),
-                ("generative_answer", "Generative answer", "2"),
-                ("agent_action", "Agent action", "5"),
-                ("flow_action", "Agent flow actions", "13 / 100"),
-            ]
-            for step_type, meter_label, rate in meter_defs:
-                if step_type in type_counts:
-                    rows.append(
-                        {
-                            "meter": meter_label,
-                            "count": str(type_counts[step_type]),
-                            "rate": rate,
-                            "credits": f"{type_credits[step_type]:.0f}",
-                        }
-                    )
-            logger.info(f"Credits panel: {len(rows)} rows, total={credit_estimate.total_credits}, rows={rows}")
-            self.mcs_credit_rows = rows  # type: ignore[attr-defined]
+        if credit_estimate:
             self.mcs_credit_total = credit_estimate.total_credits  # type: ignore[attr-defined]
             self.mcs_credit_assumptions = credit_estimate.warnings  # type: ignore[attr-defined]
-            # Per-step breakdown rows
-            step_rows = []
-            for i, item in enumerate(credit_estimate.line_items, 1):
-                step_rows.append({
-                    "index": str(i),
-                    "step_name": item.step_name,
-                    "step_type": item.step_type,
-                    "credits": f"{item.credits:.0f}",
-                    "detail": item.detail or "",
-                })
-            self.mcs_credit_step_rows = step_rows  # type: ignore[attr-defined]
-            # Credit flow Mermaid
-            from renderer.report import render_credit_estimate as _render_credit_md
+            if credit_estimate.line_items:
+                type_counts: dict[str, int] = {}
+                type_credits: dict[str, float] = {}
+                for item in credit_estimate.line_items:
+                    type_counts[item.step_type] = type_counts.get(item.step_type, 0) + 1
+                    type_credits[item.step_type] = type_credits.get(item.step_type, 0) + item.credits
 
-            credit_md = _render_credit_md(credit_estimate, timeline) if timeline else ""
-            # Extract mermaid source from the markdown
-            mermaid_src = ""
-            if "```mermaid" in credit_md:
-                _lines = credit_md.split("\n")
-                _in_fence = False
-                _mermaid_lines: list[str] = []
-                for _line in _lines:
-                    if _line.strip() == "```mermaid":
-                        _in_fence = True
-                        continue
-                    if _line.strip() == "```" and _in_fence:
-                        _in_fence = False
-                        continue
-                    if _in_fence:
-                        _mermaid_lines.append(_line)
-                mermaid_src = "\n".join(_mermaid_lines)
-            self.mcs_credit_mermaid = mermaid_src  # type: ignore[attr-defined]
-            logger.info(
-                f"State after set: mcs_credit_total={self.mcs_credit_total}, "  # type: ignore[attr-defined]
-                f"mcs_credit_rows={self.mcs_credit_rows}"  # type: ignore[attr-defined]
-            )
+                rows = []
+                meter_defs = [
+                    ("classic_answer", "Classic answer", "1"),
+                    ("generative_answer", "Generative answer", "2"),
+                    ("agent_action", "Agent action", "5"),
+                    ("flow_action", "Agent flow actions", "13 / 100"),
+                ]
+                for step_type, meter_label, rate in meter_defs:
+                    if step_type in type_counts:
+                        rows.append(
+                            {
+                                "meter": meter_label,
+                                "count": str(type_counts[step_type]),
+                                "rate": rate,
+                                "credits": f"{type_credits[step_type]:.0f}",
+                            }
+                        )
+                logger.info(f"Credits panel: {len(rows)} rows, total={credit_estimate.total_credits}, rows={rows}")
+                self.mcs_credit_rows = rows  # type: ignore[attr-defined]
+                # Per-step breakdown rows
+                step_rows = []
+                for i, item in enumerate(credit_estimate.line_items, 1):
+                    step_rows.append({
+                        "index": str(i),
+                        "step_name": item.step_name,
+                        "step_type": item.step_type,
+                        "credits": f"{item.credits:.0f}",
+                        "detail": item.detail or "",
+                    })
+                self.mcs_credit_step_rows = step_rows  # type: ignore[attr-defined]
+                # Credit flow Mermaid
+                from renderer.report import render_credit_estimate as _render_credit_md
+
+                credit_md = _render_credit_md(credit_estimate, timeline) if timeline else ""
+                # Extract mermaid source from the markdown
+                mermaid_src = ""
+                if "```mermaid" in credit_md:
+                    _lines = credit_md.split("\n")
+                    _in_fence = False
+                    _mermaid_lines: list[str] = []
+                    for _line in _lines:
+                        if _line.strip() == "```mermaid":
+                            _in_fence = True
+                            continue
+                        if _line.strip() == "```" and _in_fence:
+                            _in_fence = False
+                            continue
+                        if _in_fence:
+                            _mermaid_lines.append(_line)
+                    mermaid_src = "\n".join(_mermaid_lines)
+                self.mcs_credit_mermaid = mermaid_src  # type: ignore[attr-defined]
+                logger.info(
+                    f"State after set: mcs_credit_total={self.mcs_credit_total}, "  # type: ignore[attr-defined]
+                    f"mcs_credit_rows={self.mcs_credit_rows}"  # type: ignore[attr-defined]
+                )
+            else:
+                logger.info("Credits panel: no line_items, warnings preserved")
+                self.mcs_credit_rows = []  # type: ignore[attr-defined]
+                self.mcs_credit_step_rows = []  # type: ignore[attr-defined]
+                self.mcs_credit_mermaid = ""  # type: ignore[attr-defined]
         else:
-            logger.info("Credits panel: no credit_estimate or empty line_items, setting defaults")
+            logger.info("Credits panel: no credit_estimate, setting defaults")
             self.mcs_credit_rows = []  # type: ignore[attr-defined]
             self.mcs_credit_total = 0.0  # type: ignore[attr-defined]
             self.mcs_credit_assumptions = []  # type: ignore[attr-defined]

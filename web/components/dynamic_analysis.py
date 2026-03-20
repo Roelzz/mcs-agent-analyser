@@ -201,6 +201,17 @@ def _mcs_credits_panel() -> rx.Component:
                 width="100%",
             ),
             rx.foreach(State.mcs_credit_rows, _mcs_credit_row),
+            rx.cond(
+                State.mcs_credit_rows.length() == 0,  # type: ignore[union-attr]
+                rx.text(
+                    "No billable events detected in this conversation. "
+                    "Credits are estimated from orchestrator steps "
+                    "(knowledge searches, agent actions, topic transitions).",
+                    font_size="13px",
+                    color="var(--gray-a9)",
+                    padding="12px",
+                ),
+            ),
             width="100%",
             border=f"1px solid {SURFACE_BORDER}",
             border_radius="8px",
