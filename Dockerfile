@@ -11,6 +11,9 @@ RUN pip install uv && uv sync
 
 RUN uv run reflex export --no-zip
 
+RUN useradd -m appuser
+USER appuser
+
 EXPOSE 2009 8000
 
 CMD ["uv", "run", "reflex", "run", "--env", "prod"]

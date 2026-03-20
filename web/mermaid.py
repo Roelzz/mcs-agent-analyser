@@ -1,3 +1,4 @@
+import html
 import re
 
 import reflex as rx
@@ -154,7 +155,7 @@ def build_standalone_html(markdown: str, title: str) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{title}</title>
+<title>{html.escape(title)}</title>
 <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <style>

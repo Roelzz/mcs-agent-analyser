@@ -2,9 +2,9 @@ import os
 import re
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
+import httpx
 import reflex as rx
 from dotenv import load_dotenv
 from loguru import logger
@@ -29,15 +29,14 @@ def _fetch_community_count() -> int:
     if now - _community_count_cache["fetched_at"] < 30:
         return int(_community_count_cache["count"])
     try:
-        req = urllib.request.Request(_KOMAREV_URL, headers={"User-Agent": "AgentAnalyser/1.0"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            svg = resp.read().decode()
-            numbers = re.findall(r">(\d+)</", svg)
-            if numbers:
-                count = int(numbers[-1])
-                _community_count_cache["count"] = count
-                _community_count_cache["fetched_at"] = now
-                return count
+        resp = httpx.get(_KOMAREV_URL, headers={"User-Agent": "AgentAnalyser/1.0"}, timeout=5)
+        svg = resp.text
+        numbers = re.findall(r">(\d+)</", svg)
+        if numbers:
+            count = int(numbers[-1])
+            _community_count_cache["count"] = count
+            _community_count_cache["fetched_at"] = now
+            return count
     except Exception as e:
         logger.warning(f"Failed to fetch community count: {e}")
     return int(_community_count_cache["count"])

@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import json
 import os
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+
+import httpx
 
 from models import BotProfile
 
@@ -253,32 +253,30 @@ def _call_openai_chat(
     api_key: str,
     timeout_s: float = 30.0,
 ) -> str | None:
-    payload = json.dumps(
-        {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system or "You are a helpful assistant."},
-                {"role": "user", "content": user},
-            ],
-            "max_tokens": _MAX_TOKENS,
-            "temperature": 0.2,
-        }
-    ).encode()
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system or "You are a helpful assistant."},
+            {"role": "user", "content": user},
+        ],
+        "max_tokens": _MAX_TOKENS,
+        "temperature": 0.2,
+    }
 
-    req = Request(
-        url=_OPENAI_API_URL,
-        data=payload,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urlopen(req, timeout=timeout_s) as resp:  # noqa: S310
-            body = json.loads(resp.read())
-            return body["choices"][0]["message"]["content"]
-    except (URLError, KeyError, json.JSONDecodeError, IndexError):
+        resp = httpx.post(
+            _OPENAI_API_URL,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=timeout_s,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        return body["choices"][0]["message"]["content"]
+    except (httpx.HTTPError, KeyError, json.JSONDecodeError, IndexError):
         return None
 
 
