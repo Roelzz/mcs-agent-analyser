@@ -81,6 +81,14 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_tools_rows: list[dict] = []
     mcs_tools_mermaid: str = ""
     mcs_tools_external_calls: list[dict] = []
+    # Runtime tool call analysis
+    mcs_tools_call_count: int = 0
+    mcs_tools_stats_rows: list[dict] = []
+    mcs_tools_chain_rows: list[dict] = []
+    mcs_tools_reasoning_rows: list[dict] = []
+    mcs_tools_detail_rows: list[dict] = []
+    mcs_tools_flow_mermaid: str = ""
+    mcs_tools_inventory_rows: list[dict] = []
 
     # ── Knowledge tab ────────────────────────────────────────────────────────
     mcs_knowledge_kpis: list[dict] = []
@@ -167,6 +175,10 @@ class DynamicMixin(rx.State, mixin=True):
     @rx.var
     def has_mcs_conv_detail(self) -> bool:
         return bool(self.mcs_conv_metadata)
+
+    @rx.var
+    def has_mcs_tools_runtime(self) -> bool:
+        return self.mcs_tools_call_count > 0
 
     @rx.event
     def set_mcs_analyse_tab(self, tab: str):

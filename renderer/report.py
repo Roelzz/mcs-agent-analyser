@@ -13,6 +13,7 @@ from ._helpers import (
 )
 from model_comparison import build_comparison_markdown
 from .knowledge import render_knowledge_search_section
+from .tools import render_tool_analysis
 from .profile import (
     render_ai_config,
     render_bot_metadata,
@@ -196,6 +197,12 @@ def render_report(
     if tool_inv:
         sections.append(tool_inv)
 
+    # 11.5 Tool Call Analysis (runtime — from dialog.json)
+    if timeline.tool_calls:
+        tool_analysis = render_tool_analysis(timeline, profile)
+        if tool_analysis:
+            sections.append(tool_analysis)
+
     # 12. Integration Map
     int_map = render_integration_map(profile)
     if int_map:
@@ -279,6 +286,12 @@ def render_transcript_report(
         sections.append("\n".join(lines))
 
     sections.append(render_knowledge_search_section(timeline))
+
+    # Tool call analysis (runtime)
+    if timeline.tool_calls:
+        tool_analysis = render_tool_analysis(timeline)
+        if tool_analysis:
+            sections.append(tool_analysis)
 
     reasoning = render_orchestrator_reasoning(timeline)
     if reasoning:

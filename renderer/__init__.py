@@ -39,6 +39,13 @@ from .report import (
     render_tldr,
     render_transcript_report,
 )
+from .tools import (
+    build_tool_call_analysis_data,
+    build_tool_inventory as build_tool_inventory_cross_ref,
+    compute_tool_statistics,
+    detect_async_chains,
+    render_tool_analysis,
+)
 from .timeline_render import (
     render_errors,
     render_event_log,
@@ -85,7 +92,12 @@ __all__ = [
     "render_security_summary",
     "render_timeline",
     "render_tldr",
+    "render_tool_analysis",
     "render_tool_inventory",
+    "build_tool_call_analysis_data",
+    "build_tool_inventory_cross_ref",
+    "compute_tool_statistics",
+    "detect_async_chains",
     "render_topic_details",
     "render_topic_graph",
     "render_topic_inventory",

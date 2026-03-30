@@ -13,6 +13,8 @@ from models import (
     KnowledgeSearchInfo,
     SearchResult,
     TimelineEvent,
+    ToolCall,
+    ToolCallObservation,
 )
 
 
@@ -38,8 +40,11 @@ class _TimelineState:
     first_timestamp: str | None = None
     last_timestamp: str | None = None
     step_triggers: dict[str, tuple[str, str]] = field(default_factory=dict)  # step_id -> (ts, type)
+    step_trigger_thoughts: dict[str, str | None] = field(default_factory=dict)  # step_id -> thought
     tool_display_names: dict[str, str] = field(default_factory=dict)
     pending_custom_searches: dict[str, CustomSearchStep] = field(default_factory=dict)
+    pending_tool_args: dict[str, dict[str, str]] = field(default_factory=dict)  # step_id -> arguments
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
 
 def _parse_timestamp(ts: str | None) -> datetime | None:
@@ -224,6 +229,8 @@ def _process_trace_event(
 
             if step_id and timestamp:
                 state.step_triggers[step_id] = (timestamp, step_type)
+            if step_id:
+                state.step_trigger_thoughts[step_id] = value.get("thought")
 
             state.events.append(
                 TimelineEvent(
@@ -340,6 +347,54 @@ def _process_trace_event(
 
             state.phases.append(_build_phase(topic, value, trigger_ts, timestamp, duration_ms, step_state, trigger_type))
 
+            # Build ToolCall for all non-knowledge-search tools
+            if task_dialog_id != "P:UniversalSearchTool":
+                raw_observation = value.get("observation")
+                tc_observation = None
+                if raw_observation is not None:
+                    import json as _json
+
+                    raw_json = None
+                    try:
+                        raw_json = _json.dumps(raw_observation, indent=2, default=str)
+                    except (TypeError, ValueError):
+                        pass
+                    obs_content = raw_observation.get("content", []) if isinstance(raw_observation, dict) else []
+                    obs_structured = raw_observation.get("structuredContent") if isinstance(raw_observation, dict) else None
+                    tc_observation = ToolCallObservation(
+                        content=obs_content,
+                        structured_content=obs_structured,
+                        raw_json=raw_json,
+                    )
+
+                # Build a readable display name for tool calls
+                tc_display = topic
+                if task_dialog_id.startswith("MCP:"):
+                    # MCP:<schema>:<tool_name> — extract just the tool function name
+                    mcp_parts = task_dialog_id.split(":")
+                    if len(mcp_parts) >= 3:
+                        tc_display = mcp_parts[-1]
+
+                state.tool_calls.append(
+                    ToolCall(
+                        step_id=step_id,
+                        plan_identifier=value.get("planIdentifier"),
+                        task_dialog_id=task_dialog_id,
+                        display_name=tc_display,
+                        step_type=trigger_type,
+                        thought=state.step_trigger_thoughts.get(step_id),
+                        arguments=state.pending_tool_args.pop(step_id, {}),
+                        observation=tc_observation,
+                        state=step_state,
+                        error=error_msg,
+                        execution_time=value.get("executionTime"),
+                        duration_ms=duration_ms,
+                        trigger_timestamp=trigger_ts,
+                        finish_timestamp=timestamp,
+                        position=position,
+                    )
+                )
+
         elif value_type == "DynamicPlanFinished":
             was_cancelled = value.get("wasCancelled", False)
             state.events.append(
@@ -399,11 +454,23 @@ def _process_trace_event(
                     )
                 )
 
-        elif value_type == "DynamicPlanStepBindUpdate" and value.get("taskDialogId") == "P:UniversalSearchTool":
-            state.pending_ks_query = {
-                "search_query": value.get("arguments", {}).get("search_query"),
-                "search_keywords": value.get("arguments", {}).get("search_keywords"),
-            }
+        elif value_type == "DynamicPlanStepBindUpdate":
+            bind_task_dialog_id = value.get("taskDialogId", "")
+            bind_step_id = value.get("stepId", "")
+            bind_arguments = value.get("arguments", {}) or {}
+
+            # Generic: capture arguments for any tool
+            if bind_step_id and bind_arguments:
+                state.pending_tool_args[bind_step_id] = {
+                    k: str(v) for k, v in bind_arguments.items()
+                }
+
+            # Existing knowledge search argument capture (preserve exactly)
+            if bind_task_dialog_id == "P:UniversalSearchTool":
+                state.pending_ks_query = {
+                    "search_query": bind_arguments.get("search_query"),
+                    "search_keywords": bind_arguments.get("search_keywords"),
+                }
 
         elif value_type == "UniversalSearchToolTraceData":
             sources = value.get("knowledgeSources", [])
@@ -696,6 +763,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         total_elapsed_ms=total_elapsed,
         knowledge_searches=state.knowledge_searches,
         custom_search_steps=state.custom_search_steps,
+        tool_calls=state.tool_calls,
     )
 
 
@@ -727,6 +795,27 @@ def _build_tool_type_lookup(profile: BotProfile) -> dict[str, str]:
         if comp.tool_type and comp.schema_name:
             lookup[comp.schema_name] = comp.tool_type
     return lookup
+
+
+def resolve_tool_types(timeline: ConversationTimeline, profile: BotProfile) -> None:
+    """Resolve tool_type on each ToolCall by matching taskDialogId against profile components."""
+    lookup = _build_tool_type_lookup(profile)
+    for tc in timeline.tool_calls:
+        if tc.tool_type:
+            continue
+        # Direct match
+        if tc.task_dialog_id in lookup:
+            tc.tool_type = lookup[tc.task_dialog_id]
+            continue
+        # MCP format: MCP:<schema>:<tool_name> — extract schema between first and last colon
+        if tc.task_dialog_id.startswith("MCP:"):
+            parts = tc.task_dialog_id.split(":")
+            if len(parts) >= 3:
+                mcp_schema = ":".join(parts[1:-1])
+                for schema, tt in lookup.items():
+                    if mcp_schema == schema or mcp_schema.endswith(f".{schema}"):
+                        tc.tool_type = tt
+                        break
 
 
 def estimate_credits(timeline: ConversationTimeline, profile: BotProfile) -> CreditEstimate:

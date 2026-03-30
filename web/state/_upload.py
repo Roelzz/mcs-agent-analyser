@@ -420,12 +420,24 @@ class UploadMixin(rx.State, mixin=True):
             self._populate_conversation_data(timeline)
         if profile is not None:
             self._populate_profile_data(profile)
-            self._populate_tools_data(profile)
+            self._populate_tools_data(profile, timeline)
             self._populate_knowledge_data(profile, timeline)
             self._populate_topics_data(profile, timeline)
             self._populate_model_data(profile)
         else:
             self._clear_panel_data()
+            # Transcript-only: still populate runtime tool call data if available
+            if timeline is not None and timeline.tool_calls:
+                from renderer.tools import build_tool_call_analysis_data
+
+                tool_data = build_tool_call_analysis_data(timeline)
+                self.mcs_tools_call_count = len(timeline.tool_calls)  # type: ignore[attr-defined]
+                self.mcs_tools_stats_rows = tool_data["stats_rows"]  # type: ignore[attr-defined]
+                self.mcs_tools_chain_rows = tool_data["chain_rows"]  # type: ignore[attr-defined]
+                self.mcs_tools_reasoning_rows = tool_data["reasoning_rows"]  # type: ignore[attr-defined]
+                self.mcs_tools_detail_rows = tool_data["detail_rows"]  # type: ignore[attr-defined]
+                self.mcs_tools_flow_mermaid = tool_data["flow_mermaid"]  # type: ignore[attr-defined]
+                self.mcs_tools_kpis = tool_data["kpis"]  # type: ignore[attr-defined]
 
         # Set default tab based on profile presence
         if profile is not None:
@@ -635,7 +647,7 @@ class UploadMixin(rx.State, mixin=True):
 
     # ── Tools tab data extraction ────────────────────────────────────────────
 
-    def _populate_tools_data(self, profile) -> None:
+    def _populate_tools_data(self, profile, timeline=None) -> None:
         """Extract structured data for the Tools tab."""
         tools = [c for c in profile.components if c.tool_type]
         connector_tools = sum(1 for t in tools if t.tool_type == "ConnectorTool")
@@ -712,6 +724,31 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_tools_mermaid = "\n".join(mermaid_lines)  # type: ignore[attr-defined]
         else:
             self.mcs_tools_mermaid = ""  # type: ignore[attr-defined]
+
+        # Runtime tool call analysis
+        if timeline is not None and timeline.tool_calls:
+            from renderer.tools import build_tool_call_analysis_data
+            from timeline import resolve_tool_types
+
+            resolve_tool_types(timeline, profile)
+            tool_data = build_tool_call_analysis_data(timeline, profile)
+            self.mcs_tools_call_count = len(timeline.tool_calls)  # type: ignore[attr-defined]
+            self.mcs_tools_stats_rows = tool_data["stats_rows"]  # type: ignore[attr-defined]
+            self.mcs_tools_chain_rows = tool_data["chain_rows"]  # type: ignore[attr-defined]
+            self.mcs_tools_reasoning_rows = tool_data["reasoning_rows"]  # type: ignore[attr-defined]
+            self.mcs_tools_detail_rows = tool_data["detail_rows"]  # type: ignore[attr-defined]
+            self.mcs_tools_flow_mermaid = tool_data["flow_mermaid"]  # type: ignore[attr-defined]
+            self.mcs_tools_inventory_rows = tool_data["inventory_rows"]  # type: ignore[attr-defined]
+            # Extend KPIs with runtime data
+            self.mcs_tools_kpis.extend(tool_data["kpis"])  # type: ignore[attr-defined]
+        else:
+            self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
+            self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
+            self.mcs_tools_chain_rows = []  # type: ignore[attr-defined]
+            self.mcs_tools_reasoning_rows = []  # type: ignore[attr-defined]
+            self.mcs_tools_detail_rows = []  # type: ignore[attr-defined]
+            self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]
+            self.mcs_tools_inventory_rows = []  # type: ignore[attr-defined]
 
     # ── Knowledge tab data extraction ────────────────────────────────────────
 
@@ -1228,6 +1265,13 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_tools_rows = []  # type: ignore[attr-defined]
         self.mcs_tools_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_tools_external_calls = []  # type: ignore[attr-defined]
+        self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
+        self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
+        self.mcs_tools_chain_rows = []  # type: ignore[attr-defined]
+        self.mcs_tools_reasoning_rows = []  # type: ignore[attr-defined]
+        self.mcs_tools_detail_rows = []  # type: ignore[attr-defined]
+        self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]
+        self.mcs_tools_inventory_rows = []  # type: ignore[attr-defined]
         self.mcs_knowledge_kpis = []  # type: ignore[attr-defined]
         self.mcs_knowledge_sources = []  # type: ignore[attr-defined]
         self.mcs_knowledge_files = []  # type: ignore[attr-defined]

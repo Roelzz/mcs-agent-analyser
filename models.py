@@ -188,6 +188,67 @@ class CustomSearchStep(BaseModel):
     execution_time: str | None = None
 
 
+# --- Tool call analysis models ---
+
+
+class ToolCallObservation(BaseModel):
+    """Parsed tool response from DynamicPlanStepFinished."""
+
+    content: list = Field(default_factory=list)
+    structured_content: dict | None = None
+    raw_json: str | None = None
+
+
+class ToolCall(BaseModel):
+    """A single tool invocation correlated from Triggered -> BindUpdate -> Finished."""
+
+    step_id: str = ""
+    plan_identifier: str | None = None
+    task_dialog_id: str = ""
+    display_name: str = ""
+    tool_type: str | None = None  # MCPServer, ConnectorTool, ChildAgent, etc.
+    step_type: str = ""  # LlmSkill, CustomTopic, Agent, KnowledgeSource
+    thought: str | None = None
+    arguments: dict[str, str] = Field(default_factory=dict)
+    observation: ToolCallObservation | None = None
+    state: str = ""  # completed, failed, inProgress
+    error: str | None = None
+    execution_time: str | None = None  # .NET TimeSpan
+    duration_ms: float = 0.0
+    trigger_timestamp: str | None = None
+    finish_timestamp: str | None = None
+    position: int = 0
+    chain_id: str | None = None  # set by async chain detection
+
+
+class ToolCallChain(BaseModel):
+    """A group of related tool calls detected as an async/polling pattern."""
+
+    chain_id: str
+    task_dialog_id: str
+    display_name: str
+    calls: list[ToolCall] = Field(default_factory=list)
+    correlation_keys: list[str] = Field(default_factory=list)
+    total_duration_ms: float = 0.0
+    final_state: str = ""
+    status_progression: list[str] = Field(default_factory=list)
+
+
+class ToolStatistics(BaseModel):
+    """Per-tool aggregate statistics."""
+
+    tool_name: str
+    tool_type: str | None = None
+    call_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    success_rate: float = 0.0
+    avg_duration_ms: float = 0.0
+    min_duration_ms: float = 0.0
+    max_duration_ms: float = 0.0
+    total_duration_ms: float = 0.0
+
+
 class ConversationTimeline(BaseModel):
     bot_name: str = ""
     conversation_id: str = ""
@@ -198,6 +259,7 @@ class ConversationTimeline(BaseModel):
     total_elapsed_ms: float = 0.0
     knowledge_searches: list[KnowledgeSearchInfo] = Field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)
+    tool_calls: list[ToolCall] = Field(default_factory=list)
 
 
 # --- Credit estimation models ---

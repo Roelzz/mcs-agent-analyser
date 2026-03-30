@@ -1165,6 +1165,208 @@ def _mcs_tools_ext_detail_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_tools_stats_row(item: dict) -> rx.Component:
+    """Statistics table row for tool call analysis."""
+    return _grid_row(
+        [
+            rx.text(item["tool"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+            rx.badge(item["type"], color_scheme="gray", variant="soft", size="1"),
+            rx.text(item["calls"], font_size="13px", color="var(--gray-11)"),
+            rx.badge(
+                item["success_rate"],
+                color_scheme=item["success_color"],
+                variant="soft",
+                size="1",
+            ),
+            rx.text(item["avg_duration"], font_size="13px", color="var(--gray-11)"),
+            rx.text(item["total_duration"], font_size="13px", color="var(--gray-a9)"),
+        ],
+        template="2fr 1fr 0.5fr 1fr 1fr 1fr",
+    )
+
+
+def _mcs_tools_chain_card(item: dict) -> rx.Component:
+    """Summary card for an async/polling chain."""
+    return rx.box(
+        rx.hstack(
+            rx.text(item["tool"], font_size="13px", font_weight="600", color="var(--gray-12)"),
+            rx.badge(item["call_count_label"], color_scheme="purple", variant="soft", size="1"),
+            rx.text(item["total_duration"], font_size="12px", color="var(--gray-a9)"),
+            rx.badge(item["final_state"], color_scheme=rx.cond(item["final_state"] == "completed", "green", "red"), variant="soft", size="1"),
+            spacing="2",
+            align="center",
+        ),
+        rx.cond(
+            item["status_label"] != "",
+            rx.hstack(
+                rx.text("Status:", font_size="11px", color="var(--gray-a8)"),
+                rx.badge(item["status_label"], color_scheme="blue", variant="outline", size="1"),
+                spacing="1",
+                align="center",
+                padding_top="4px",
+            ),
+        ),
+        rx.cond(
+            item["correlation_label"] != "",
+            rx.text(
+                rx.text.span("Correlation: ", font_weight="600", color="var(--gray-a8)"),
+                rx.text.span(item["correlation_label"], font_size="11px", color="var(--gray-11)"),
+                font_size="11px",
+                padding_top="2px",
+            ),
+        ),
+        padding="10px 14px",
+        border=f"1px solid {SURFACE_BORDER}",
+        border_radius="8px",
+        background="var(--gray-a2)",
+        width="100%",
+    )
+
+
+def _mcs_tools_reasoning_row(item: dict) -> rx.Component:
+    """Reasoning table row."""
+    return _grid_row(
+        [
+            rx.text(item["index"], font_size="13px", color="var(--gray-a9)"),
+            rx.text(item["tool"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+            rx.text(item["thought"], font_size="12px", color="var(--gray-11)", overflow="hidden", text_overflow="ellipsis"),
+        ],
+        template="0.3fr 2fr 5fr",
+    )
+
+
+def _mcs_tools_detail_card(item: dict) -> rx.Component:
+    """Expandable detail card for a single tool call."""
+    status_color = rx.cond(item["state"] == "completed", "green", "red")
+
+    header = rx.hstack(
+        rx.text(item["index_label"], font_size="12px", color="var(--gray-a8)", font_weight="600"),
+        rx.text(item["tool"], font_size="13px", font_weight="600", color="var(--gray-12)"),
+        rx.cond(
+            item["tool_type"] != "",
+            rx.badge(item["tool_type"], color_scheme="gray", variant="soft", size="1"),
+        ),
+        rx.badge(item["state"], color_scheme=status_color, variant="soft", size="1"),
+        rx.text(item["duration"], font_size="12px", color="var(--gray-a9)"),
+        rx.cond(
+            item["chain_id"] != "",
+            rx.badge("chain", color_scheme="purple", variant="outline", size="1"),
+        ),
+        spacing="2",
+        align="center",
+        width="100%",
+    )
+
+    # Build content sections
+    content_parts = []
+
+    # Thought
+    content_parts.append(
+        rx.cond(
+            item["thought"] != "",
+            rx.box(
+                rx.text(item["thought"], font_size="12px", font_style="italic", color="var(--gray-a9)", line_height="1.4"),
+                padding="8px 12px",
+                border_left="3px solid var(--green-a6)",
+                background="var(--green-a2)",
+                border_radius="0 6px 6px 0",
+                width="100%",
+            ),
+        )
+    )
+
+    # Arguments — pre-computed as formatted text
+    content_parts.append(
+        rx.cond(
+            item["arguments_text"] != "",
+            rx.vstack(
+                rx.text("Arguments", font_size="11px", font_weight="600", color="var(--gray-a8)"),
+                rx.box(
+                    rx.el.pre(
+                        item["arguments_text"],
+                        font_size="11px",
+                        color="var(--gray-11)",
+                        white_space="pre-wrap",
+                        font_family="var(--font-mono)",
+                    ),
+                    width="100%",
+                    padding="6px 10px",
+                    border=f"1px solid {SURFACE_BORDER}",
+                    border_radius="6px",
+                    background="var(--gray-a2)",
+                ),
+                spacing="1",
+                width="100%",
+            ),
+        )
+    )
+
+    # Observation summary
+    content_parts.append(
+        rx.cond(
+            item["observation_summary"] != "",
+            rx.vstack(
+                rx.text("Response", font_size="11px", font_weight="600", color="var(--gray-a8)"),
+                rx.text(item["observation_summary"], font_size="12px", color="var(--gray-11)"),
+                spacing="1",
+                width="100%",
+            ),
+        )
+    )
+
+    # Raw JSON (interactive tree viewer)
+    content_parts.append(
+        rx.cond(
+            item["observation_json"] != "",
+            rx.vstack(
+                rx.text("Response JSON", font_size="11px", font_weight="600", color="var(--gray-a8)"),
+                rx.box(
+                    rx.el.div(
+                        class_name="json-tree-viewer",
+                        custom_attrs={"data-json": item["observation_json"]},
+                    ),
+                    max_height="400px",
+                    overflow_y="auto",
+                    width="100%",
+                    padding="10px 14px",
+                    background="var(--gray-a2)",
+                    border=f"1px solid {SURFACE_BORDER}",
+                    border_radius="8px",
+                ),
+                spacing="1",
+                width="100%",
+            ),
+        )
+    )
+
+    # Error
+    content_parts.append(
+        rx.cond(
+            item["error"] != "",
+            rx.text(item["error"], font_size="12px", color="var(--red-9)", font_weight="500"),
+        )
+    )
+
+    return rx.accordion.root(
+        rx.accordion.item(
+            header=header,
+            content=rx.vstack(
+                *content_parts,
+                spacing="3",
+                width="100%",
+                padding_top="8px",
+            ),
+            value=item["accordion_value"],
+        ),
+        collapsible=True,
+        width="100%",
+        variant="ghost",
+        border=f"1px solid {SURFACE_BORDER}",
+        border_radius="10px",
+        background="var(--gray-a2)",
+    )
+
+
 def _mcs_tools_panel() -> rx.Component:
     return rx.vstack(
         # KPI grid
@@ -1174,7 +1376,7 @@ def _mcs_tools_panel() -> rx.Component:
             gap="10px",
             width="100%",
         ),
-        # Tool table
+        # Tool table (static — from YAML)
         rx.cond(
             State.mcs_tools_rows.length() > 0,  # type: ignore[union-attr]
             card(
@@ -1205,6 +1407,72 @@ def _mcs_tools_panel() -> rx.Component:
                     State.mcs_tools_external_calls,
                     _mcs_tools_ext_detail_row,
                 ),
+                width="100%",
+            ),
+        ),
+        # ── Runtime tool call analysis ──────────────────────────────────────
+        rx.cond(
+            State.has_mcs_tools_runtime,
+            rx.vstack(
+                rx.divider(color_scheme="green", size="4", margin_y="8px"),
+                rx.text("Runtime Tool Call Analysis", font_size="15px", font_weight="700", color="var(--gray-12)"),
+                # Tool call flow (Mermaid)
+                _mermaid_block(State.mcs_tools_flow_mermaid),
+                # Tool statistics
+                rx.cond(
+                    State.mcs_tools_stats_rows.length() > 0,  # type: ignore[union-attr]
+                    card(
+                        section_heading("Tool Statistics"),
+                        _data_table(
+                            ["Tool", "Type", "Calls", "Success", "Avg Duration", "Total"],
+                            "2fr 1fr 0.5fr 1fr 1fr 1fr",
+                            State.mcs_tools_stats_rows,
+                            _mcs_tools_stats_row,
+                        ),
+                        width="100%",
+                    ),
+                ),
+                # Async chains
+                rx.cond(
+                    State.mcs_tools_chain_rows.length() > 0,  # type: ignore[union-attr]
+                    card(
+                        section_heading("Async / Polling Chains"),
+                        rx.vstack(
+                            rx.foreach(State.mcs_tools_chain_rows, _mcs_tools_chain_card),
+                            spacing="2",
+                            width="100%",
+                        ),
+                        width="100%",
+                    ),
+                ),
+                # Orchestrator reasoning
+                rx.cond(
+                    State.mcs_tools_reasoning_rows.length() > 0,  # type: ignore[union-attr]
+                    card(
+                        section_heading("Orchestrator Reasoning"),
+                        _data_table(
+                            ["#", "Tool", "Thought"],
+                            "0.3fr 2fr 5fr",
+                            State.mcs_tools_reasoning_rows,
+                            _mcs_tools_reasoning_row,
+                        ),
+                        width="100%",
+                    ),
+                ),
+                # Tool call details (expandable)
+                rx.cond(
+                    State.mcs_tools_detail_rows.length() > 0,  # type: ignore[union-attr]
+                    card(
+                        section_heading("Tool Call Details"),
+                        rx.vstack(
+                            rx.foreach(State.mcs_tools_detail_rows, _mcs_tools_detail_card),
+                            spacing="2",
+                            width="100%",
+                        ),
+                        width="100%",
+                    ),
+                ),
+                spacing="4",
                 width="100%",
             ),
         ),

@@ -32,6 +32,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 | **Bot comparison** | Compare two bot profiles — components added/removed/changed, instructions diff, topic connections, settings |
 | **Custom rules** | 18 default best-practice rules + user-defined YAML rules, evaluated during analysis and solution checks |
 | **Solution tools** | Check, validate, analyse dependencies, or rename Power Platform solution ZIP exports |
+| **Tool call analysis** | Runtime tool call tracing — per-tool statistics, async chain detection, orchestrator reasoning, Mermaid flow diagrams. Supports MCP servers, connectors, child/connected agents, A2A, flows, CUA |
 | **Instruction lint** | AI-powered audit of bot instructions and architecture (supports OpenAI and Anthropic models) |
 | **Dark / Light mode** | Respects your OS preference, green accent theme throughout |
 | **Analysis counter** | Tracks how many analyses you've run, with cat-themed gamification milestones |
@@ -263,6 +264,22 @@ Transcript reports contain:
 1. **Title** — derived from the JSON filename
 2. **Session Summary** — start/end time, session type, outcome, turn count, implied success
 3. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log
+
+## Tool Call Analysis
+
+When a conversation includes orchestrator-driven tool invocations (MCP servers, connectors, child agents, etc.), Agent Analyser traces every call from trigger to finish and presents runtime analysis in the Tools tab.
+
+**Supported tool types:** MCP Server, Connector Tool, Child Agent, Connected Agent, A2A Agent, Flow Tool, CUA Tool.
+
+**What it shows:**
+- **Tool Call Flow** — Mermaid sequence diagram showing Orchestrator dispatching to tools
+- **Tool Statistics** — per-tool call counts, success rates, avg/min/max/total timing
+- **Async Chain Detection** — automatically identifies polling/retry patterns (e.g. Databricks Genie query + poll cycles) with status progression tracking
+- **Orchestrator Reasoning** — the LLM's `thought` for each tool selection
+- **Tool Call Details** — expandable cards with arguments, observation summaries, and raw JSON responses
+- **Configured vs Called** — cross-reference tools defined in `botContent.yml` against tools actually invoked in `dialog.json`
+
+Tool call data is captured from `DynamicPlanStepTriggered`, `DynamicPlanStepBindUpdate`, and `DynamicPlanStepFinished` events in the conversation trace. Works with both full bot exports (ZIP) and transcript-only uploads.
 
 ## Batch Analytics
 

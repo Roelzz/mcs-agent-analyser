@@ -242,6 +242,200 @@ def md_to_segments(md: str) -> list[dict]:
     return segments
 
 
+def json_tree_script() -> rx.Component:
+    """Client-side interactive JSON tree viewer.
+
+    Finds all elements with class 'json-tree-viewer' and renders an interactive
+    collapsible tree with search/filter. Auto-initialises via MutationObserver.
+    """
+    return rx.script(
+        r"""
+(function(){
+  /* ── CSS ────────────────────────────────────────────────── */
+  var s=document.createElement('style');
+  s.textContent=[
+    '.jt{font-family:var(--font-mono,"JetBrains Mono",monospace);font-size:12px;line-height:1.55}',
+    '.jt-row{display:flex;align-items:flex-start;padding:1px 0}',
+    '.jt-toggle{cursor:pointer;user-select:none;width:14px;flex-shrink:0;color:var(--gray-a8);font-size:10px;text-align:center;line-height:18px}',
+    '.jt-toggle:hover{color:var(--green-11)}',
+    '.jt-key{color:var(--green-11);margin-right:4px}',
+    '.jt-str{color:var(--amber-11)}',
+    '.jt-num{color:var(--blue-11)}',
+    '.jt-bool{color:var(--purple-11);font-weight:600}',
+    '.jt-null{color:var(--gray-a8);font-style:italic}',
+    '.jt-brace{color:var(--gray-a8)}',
+    '.jt-children{padding-left:18px}',
+    '.jt-collapsed>.jt-children{display:none}',
+    '.jt-preview{color:var(--gray-a7);font-style:italic;font-size:11px}',
+    '.jt-search{width:100%;padding:5px 8px;font-size:11px;border:1px solid var(--gray-a5);border-radius:6px;background:var(--gray-a1);color:var(--gray-12);margin-bottom:6px;font-family:inherit;outline:none}',
+    '.jt-search:focus{border-color:var(--green-8)}',
+    '.jt-toolbar{display:flex;gap:6px;margin-bottom:6px;align-items:center}',
+    '.jt-btn{font-size:10px;padding:2px 8px;border:1px solid var(--gray-a5);border-radius:4px;background:var(--gray-a2);color:var(--gray-11);cursor:pointer;font-family:inherit}',
+    '.jt-btn:hover{background:var(--green-a3);border-color:var(--green-a6)}',
+    '.jt-hidden{display:none}',
+    '.jt-match>.jt-key,.jt-match>.jt-str,.jt-match>.jt-num{background:var(--amber-a4);border-radius:2px}',
+  ].join('\n');
+  document.head.appendChild(s);
+
+  /* ── Build tree DOM ─────────────────────────────────────── */
+  function preview(v){
+    if(v===null)return'null';
+    if(Array.isArray(v))return'['+v.length+']';
+    if(typeof v==='object'){var k=Object.keys(v);return'{'+k.length+'}'}
+    var s=JSON.stringify(v);return s.length>40?s.slice(0,37)+'...':s;
+  }
+  function buildNode(key,val,depth){
+    var row=document.createElement('div');
+    row.className='jt-row';
+    var isObj=val!==null&&typeof val==='object';
+    var isArr=Array.isArray(val);
+
+    /* toggle */
+    var tog=document.createElement('span');
+    tog.className='jt-toggle';
+    if(isObj){
+      tog.textContent=depth<2?'▼':'▶';
+    }
+    row.appendChild(tog);
+
+    /* key */
+    if(key!==null){
+      var k=document.createElement('span');
+      k.className='jt-key';
+      k.textContent=JSON.stringify(key)+': ';
+      row.appendChild(k);
+    }
+
+    var wrap=document.createElement('div');
+    wrap.style.display='inline';
+
+    if(!isObj){
+      /* leaf value */
+      var sp=document.createElement('span');
+      if(val===null){sp.className='jt-null';sp.textContent='null'}
+      else if(typeof val==='string'){sp.className='jt-str';sp.textContent=JSON.stringify(val.length>200?val.slice(0,197)+'...':val)}
+      else if(typeof val==='number'){sp.className='jt-num';sp.textContent=String(val)}
+      else if(typeof val==='boolean'){sp.className='jt-bool';sp.textContent=String(val)}
+      else{sp.textContent=String(val)}
+      wrap.appendChild(sp);
+    }else{
+      /* brace + preview + children */
+      var ob=document.createElement('span');ob.className='jt-brace';
+      ob.textContent=isArr?'[':'{';
+      wrap.appendChild(ob);
+
+      var pv=document.createElement('span');pv.className='jt-preview';
+      var entries=isArr?val:Object.keys(val);
+      pv.textContent=' '+entries.length+(isArr?' items':' keys')+' ';
+      wrap.appendChild(pv);
+
+      var children=document.createElement('div');children.className='jt-children';
+      if(isArr){
+        for(var i=0;i<val.length;i++)children.appendChild(buildNode(i,val[i],depth+1));
+      }else{
+        var keys=Object.keys(val);
+        for(var j=0;j<keys.length;j++)children.appendChild(buildNode(keys[j],val[keys[j]],depth+1));
+      }
+      wrap.appendChild(children);
+
+      var cb=document.createElement('span');cb.className='jt-brace';
+      cb.textContent=isArr?']':'}';
+      wrap.appendChild(cb);
+
+      /* collapse by default if depth >= 2 */
+      if(depth>=2){row.classList.add('jt-collapsed');pv.style.display=''}
+      else{pv.style.display='none'}
+
+      tog.addEventListener('click',function(){
+        var c=row.classList.toggle('jt-collapsed');
+        tog.textContent=c?'▶':'▼';
+        pv.style.display=c?'':'none';
+      });
+    }
+    row.appendChild(wrap);
+    return row;
+  }
+
+  /* ── Search ─────────────────────────────────────────────── */
+  function searchTree(root,term){
+    var rows=root.querySelectorAll('.jt-row');
+    if(!term){
+      rows.forEach(function(r){r.classList.remove('jt-hidden','jt-match')});
+      return;
+    }
+    var lower=term.toLowerCase();
+    rows.forEach(function(r){
+      var txt=r.textContent.toLowerCase();
+      if(txt.indexOf(lower)!==-1){r.classList.remove('jt-hidden');r.classList.add('jt-match');
+        /* uncollapse parents */
+        var p=r.parentElement;
+        while(p&&!p.classList.contains('jt')){
+          if(p.parentElement&&p.parentElement.classList.contains('jt-collapsed')){
+            p.parentElement.classList.remove('jt-collapsed');
+            var t=p.parentElement.querySelector(':scope>.jt-toggle');if(t)t.textContent='▼';
+            var pv2=p.parentElement.querySelector(':scope>div>.jt-preview');if(pv2)pv2.style.display='none';
+          }
+          p=p.parentElement;
+        }
+      }else{r.classList.add('jt-hidden');r.classList.remove('jt-match')}
+    });
+  }
+
+  /* ── Init ───────────────────────────────────────────────── */
+  function initViewers(){
+    document.querySelectorAll('.json-tree-viewer:not([data-jt-init])').forEach(function(el){
+      el.setAttribute('data-jt-init','1');
+      var raw=el.getAttribute('data-json')||'{}';
+      var data;
+      try{data=JSON.parse(raw)}catch(e){
+        el.textContent='Invalid JSON: '+e.message;return;
+      }
+
+      /* toolbar */
+      var toolbar=document.createElement('div');toolbar.className='jt-toolbar';
+      var search=document.createElement('input');search.className='jt-search';
+      search.placeholder='Filter JSON...';search.type='text';
+      toolbar.appendChild(search);
+
+      var colBtn=document.createElement('button');colBtn.className='jt-btn';colBtn.textContent='Collapse all';
+      var expBtn=document.createElement('button');expBtn.className='jt-btn';expBtn.textContent='Expand all';
+      toolbar.appendChild(colBtn);toolbar.appendChild(expBtn);
+      el.appendChild(toolbar);
+
+      /* tree */
+      var tree=document.createElement('div');tree.className='jt';
+      tree.appendChild(buildNode(null,data,0));
+      el.appendChild(tree);
+
+      search.addEventListener('input',function(){searchTree(tree,search.value)});
+      colBtn.addEventListener('click',function(){
+        tree.querySelectorAll('.jt-row').forEach(function(r){
+          if(r.querySelector(':scope>.jt-toggle')&&r.querySelector(':scope>.jt-toggle').textContent){
+            r.classList.add('jt-collapsed');
+            var t=r.querySelector(':scope>.jt-toggle');if(t&&t.textContent!=='')t.textContent='▶';
+            var pv3=r.querySelector(':scope>div>.jt-preview');if(pv3)pv3.style.display='';
+          }
+        });
+      });
+      expBtn.addEventListener('click',function(){
+        tree.querySelectorAll('.jt-collapsed').forEach(function(r){
+          r.classList.remove('jt-collapsed');
+          var t=r.querySelector(':scope>.jt-toggle');if(t)t.textContent='▼';
+          var pv4=r.querySelector(':scope>div>.jt-preview');if(pv4)pv4.style.display='none';
+        });
+      });
+    });
+  }
+
+  initViewers();
+  new MutationObserver(function(m){
+    for(var i=0;i<m.length;i++){if(m[i].addedNodes.length){initViewers();return}}
+  }).observe(document.body,{childList:true,subtree:true});
+})();
+"""
+    )
+
+
 def render_segment_styled(segment: dict) -> rx.Component:
     """Render a segment with green-themed styling for the dynamic view."""
     return rx.cond(

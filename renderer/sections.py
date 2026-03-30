@@ -221,6 +221,13 @@ def render_report_sections(
     int_map = render_integration_map(profile)
     if int_map:
         tools_parts.append(int_map)
+    # Runtime tool call analysis
+    if timeline.tool_calls:
+        from .tools import render_tool_analysis
+
+        tool_analysis = render_tool_analysis(timeline, profile)
+        if tool_analysis:
+            tools_parts.append(tool_analysis)
 
     # Topics section (includes graph + trigger overlaps)
     topics_parts = [render_topic_inventory(profile)]

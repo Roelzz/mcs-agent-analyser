@@ -13,7 +13,7 @@ from web.components import (
     upload_form,
 )
 from web.components.dynamic_analysis import dynamic_analysis_viewer
-from web.mermaid import mermaid_script
+from web.mermaid import json_tree_script, mermaid_script
 from web.state import State
 
 _BODY_FONT = "Outfit, sans-serif"
@@ -141,6 +141,7 @@ def dynamic_analysis_page() -> rx.Component:
     return rx.vstack(
         navbar(),
         mermaid_script(),
+        json_tree_script(),
         _counter_styles(),
         dynamic_analysis_viewer(),
         width="100%",
