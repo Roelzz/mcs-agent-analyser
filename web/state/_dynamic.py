@@ -182,7 +182,6 @@ class DynamicMixin(rx.State, mixin=True):
             "knowledge": self.mcs_section_knowledge,
             "tools": self.mcs_section_tools,
             "topics": self.mcs_section_topics,
-            "model_comparison": self.mcs_section_model_comparison,
             "conversation": self.mcs_section_conversation,
             "credits": self.mcs_section_credits,
         }
@@ -210,13 +209,14 @@ class DynamicMixin(rx.State, mixin=True):
         return self.mcs_tools_call_count > 0
 
     @rx.var
-    def has_mcs_insights(self) -> bool:
+    def has_mcs_quality(self) -> bool:
         return bool(
-            self.mcs_ins_turn_kpis
+            self.mcs_credit_rows
             or self.mcs_ins_quality_kpis
             or self.mcs_ins_dead_rows
             or self.mcs_ins_dead_summary
-            or self.mcs_ins_plan_diffs
+            or self.mcs_ins_align_kpis
+            or self.mcs_profile_quick_wins
         )
 
     @rx.event

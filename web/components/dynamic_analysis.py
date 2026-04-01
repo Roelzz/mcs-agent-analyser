@@ -101,14 +101,12 @@ def _mcs_section_tab_bar() -> rx.Component:
         # Profile data exists: all tabs
         rx.hstack(
             _btn("profile", "user-round", "Profile"),
-            _btn("knowledge", "database", "Knowledge"),
-            _btn("tools", "wrench", "Tools"),
             _btn("topics", "list", "Topics"),
-            _btn("model_comparison", "bar-chart-2", "Model"),
-            _btn("credits", "coins", "Credits"),
+            _btn("tools", "wrench", "Tools"),
+            _btn("knowledge", "database", "Knowledge"),
             _btn("routing", "route", "Routing"),
             _btn("conversation", "message-square", "Conversation"),
-            _btn("insights", "lightbulb", "Insights"),
+            _btn("quality", "shield-check", "Quality"),
             spacing="0",
             border_bottom=f"1px solid {SURFACE_BORDER}",
             width="100%",
@@ -117,9 +115,9 @@ def _mcs_section_tab_bar() -> rx.Component:
         # No profile: limited tabs
         rx.hstack(
             _btn("conversation", "message-square", "Conversation"),
+            _btn("tools", "wrench", "Tools"),
             _btn("routing", "route", "Routing"),
-            _btn("credits", "coins", "Credits"),
-            _btn("insights", "lightbulb", "Insights"),
+            _btn("quality", "shield-check", "Quality"),
             spacing="0",
             border_bottom=f"1px solid {SURFACE_BORDER}",
             width="100%",
@@ -1090,21 +1088,35 @@ def _mcs_profile_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Quick Wins
+        # Model Configuration (absorbed from Model tab)
         rx.cond(
-            State.mcs_profile_quick_wins.length() > 0,  # type: ignore[union-attr]
+            State.mcs_model_kpis.length() > 0,  # type: ignore[union-attr]
             card(
-                rx.hstack(
-                    rx.icon("zap", size=16, color="var(--amber-9)"),
-                    section_heading("Quick Wins"),
-                    spacing="2",
-                    align="center",
+                rx.hstack(rx.icon("bar-chart-2", size=16, color="var(--violet-9)"), section_heading("Model Configuration"), spacing="2", align="center"),
+                rx.hstack(rx.foreach(State.mcs_model_kpis, _mcs_kpi_card), spacing="3", width="100%", overflow_x="auto", padding_y="8px"),
+                rx.cond(
+                    State.mcs_model_strengths.length() > 0,  # type: ignore[union-attr]
+                    rx.grid(
+                        rx.box(
+                            rx.hstack(rx.icon("check-circle", size=14, color=PRIMARY), rx.text("Strengths", font_size="12px", font_weight="700", color="var(--gray-a9)"), spacing="2", align="center"),
+                            rx.vstack(rx.foreach(State.mcs_model_strengths, lambda s: rx.text(f"• {s}", font_size="12px", color="var(--gray-11)")), spacing="1", padding_top="6px"),
+                            padding="12px", border=f"1px solid {SURFACE_BORDER}", border_radius="10px",
+                        ),
+                        rx.box(
+                            rx.hstack(rx.icon("alert-triangle", size=14, color="var(--amber-9)"), rx.text("Limitations", font_size="12px", font_weight="700", color="var(--gray-a9)"), spacing="2", align="center"),
+                            rx.vstack(rx.foreach(State.mcs_model_limitations, lambda s: rx.text(f"• {s}", font_size="12px", color="var(--gray-11)")), spacing="1", padding_top="6px"),
+                            padding="12px", border=f"1px solid {SURFACE_BORDER}", border_radius="10px",
+                        ),
+                        columns="1fr 1fr", gap="12px", width="100%", padding_top="8px",
+                    ),
                 ),
-                rx.vstack(
-                    rx.foreach(State.mcs_profile_quick_wins, _mcs_profile_quick_win_row),
-                    spacing="1",
-                    width="100%",
-                    padding_top="8px",
+                rx.cond(
+                    State.mcs_model_recommendation != "",
+                    rx.box(
+                        rx.hstack(rx.icon("lightbulb", size=14, color="var(--amber-9)"), rx.text("Recommendation", font_size="12px", font_weight="700", color="var(--gray-a9)"), spacing="2", align="center"),
+                        rx.text(State.mcs_model_recommendation, font_size="13px", color="var(--gray-11)", padding_top="4px"),
+                        padding="12px", border=f"1px solid {SURFACE_BORDER}", border_radius="10px", margin_top="8px",
+                    ),
                 ),
                 width="100%",
             ),
@@ -1478,6 +1490,33 @@ def _mcs_tools_panel() -> rx.Component:
                 width="100%",
             ),
         ),
+        # Multi-Agent Delegation (moved from Insights)
+        rx.cond(
+            State.mcs_ins_deleg_kpis.length() > 0,  # type: ignore[union-attr]
+            card(
+                _ins_card_header("network", "var(--cyan-9)", "Multi-Agent Delegation", "How the orchestrator delegates to child and connected agents."),
+                rx.hstack(rx.foreach(State.mcs_ins_deleg_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                rx.cond(
+                    State.mcs_ins_deleg_rows.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.grid(
+                            rx.text("Agent", **_INS_HEADER_CELL), rx.text("Type", **_INS_HEADER_CELL),
+                            rx.text("State", **_INS_HEADER_CELL), rx.text("Duration", **_INS_HEADER_CELL, text_align="right"),
+                            rx.text("Reasoning", **_INS_HEADER_CELL),
+                            columns="1.2fr 0.8fr 0.8fr 0.7fr 3fr", gap="8px", padding_y="8px",
+                            border_bottom=f"2px solid {SURFACE_BORDER}", width="100%",
+                        ),
+                        rx.foreach(State.mcs_ins_deleg_rows, _ins_deleg_row),
+                        width="100%",
+                    ),
+                ),
+                rx.cond(
+                    State.mcs_ins_deleg_warnings.length() > 0,  # type: ignore[union-attr]
+                    rx.box(rx.foreach(State.mcs_ins_deleg_warnings, lambda w: rx.text(f"⚠ {w}", font_size="12px", color="var(--amber-9)")), padding_top="8px", width="100%"),
+                ),
+                width="100%",
+            ),
+        ),
         spacing="4",
         width="100%",
     )
@@ -1761,6 +1800,34 @@ def _mcs_knowledge_panel() -> rx.Component:
                     rx.foreach(State.mcs_knowledge_custom_steps, _mcs_ks_custom_step),
                     spacing="1",
                     width="100%",
+                ),
+                width="100%",
+            ),
+        ),
+        # Knowledge Source Effectiveness (moved from Insights)
+        rx.cond(
+            State.mcs_ins_ke_kpis.length() > 0,  # type: ignore[union-attr]
+            card(
+                _ins_card_header("database", "var(--amber-9)", "Knowledge Source Effectiveness", "Per-source hit rate and contribution to grounded responses."),
+                rx.hstack(rx.foreach(State.mcs_ins_ke_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                rx.box(
+                    rx.grid(
+                        rx.text("Source", **_INS_HEADER_CELL), rx.text("Queries", **_INS_HEADER_CELL, text_align="right"),
+                        rx.text("Contributed", **_INS_HEADER_CELL, text_align="right"), rx.text("Hit Rate", **_INS_HEADER_CELL),
+                        rx.text("Errors", **_INS_HEADER_CELL, text_align="right"), rx.text("Avg Results", **_INS_HEADER_CELL, text_align="right"),
+                        columns="2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr", gap="8px", padding_y="8px",
+                        border_bottom=f"2px solid {SURFACE_BORDER}", width="100%",
+                    ),
+                    rx.foreach(State.mcs_ins_ke_rows, _ins_ke_row),
+                    width="100%",
+                ),
+                rx.cond(
+                    State.mcs_ins_ke_warnings.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text("Low-performing sources", font_size="12px", font_weight="700", color="var(--amber-9)", padding_top="12px"),
+                        rx.foreach(State.mcs_ins_ke_warnings, lambda w: rx.text(f"• {w}", font_size="12px", color="var(--gray-a9)")),
+                        width="100%",
+                    ),
                 ),
                 width="100%",
             ),
@@ -2254,6 +2321,30 @@ def _mcs_routing_panel() -> rx.Component:
                 width="100%",
             ),
         ),
+        # Section 5: Plan Evolution Diffs (moved from Insights)
+        rx.cond(
+            State.mcs_ins_plan_diffs.length() > 0,  # type: ignore[union-attr]
+            card(
+                _ins_card_header("git-compare", "var(--violet-9)", "Plan Evolution Diffs", "How the orchestrator changed its plan within a single turn."),
+                rx.cond(
+                    State.mcs_ins_plan_kpis.length() > 0,  # type: ignore[union-attr]
+                    rx.hstack(rx.foreach(State.mcs_ins_plan_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                ),
+                rx.foreach(State.mcs_ins_plan_diffs, _ins_plan_diff_item),
+                width="100%",
+            ),
+        ),
+        # Section 6: Topic Coverage (moved from Topics)
+        rx.cond(
+            State.mcs_topics_coverage.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(rx.icon("scan-search", size=16, color="var(--teal-9)"), section_heading("Topic Coverage"), spacing="2", align="center"),
+                rx.text(State.mcs_topics_coverage_summary, font_size="13px", color="var(--gray-12)", font_weight="600", padding_bottom="8px"),
+                sub_heading("Not triggered in this session"),
+                _data_table(["Topic", "State", "External Calls"], "3fr 1fr 1fr", State.mcs_topics_coverage, _mcs_topics_coverage_row),
+                width="100%",
+            ),
+        ),
         spacing="4",
         width="100%",
     )
@@ -2518,28 +2609,6 @@ def _mcs_topics_panel() -> rx.Component:
                     "2fr 2fr 1fr 1fr",
                     State.mcs_topics_system_rows,
                     _mcs_topics_system_row,
-                ),
-                width="100%",
-            ),
-        ),
-        # Coverage
-        rx.cond(
-            State.mcs_topics_coverage.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Topic Coverage"),
-                rx.text(
-                    State.mcs_topics_coverage_summary,
-                    font_size="13px",
-                    color="var(--gray-12)",
-                    font_weight="600",
-                    padding_bottom="8px",
-                ),
-                sub_heading("Not triggered in this session"),
-                _data_table(
-                    ["Topic", "State", "External Calls"],
-                    "3fr 1fr 1fr",
-                    State.mcs_topics_coverage,
-                    _mcs_topics_coverage_row,
                 ),
                 width="100%",
             ),
@@ -3222,37 +3291,24 @@ def _ins_grid_header(*cols: tuple[str, str]) -> rx.Component:
     return rx.box(*children, display="contents")
 
 
-def _mcs_insights_panel() -> rx.Component:
+def _mcs_quality_panel() -> rx.Component:
     return rx.vstack(
-        # ── Turn Efficiency ────────────────────────────────────────────────
+        # ── Credits (moved from Credits tab) ───────────────────────────────
         rx.cond(
-            State.mcs_ins_turn_kpis.length() > 0,  # type: ignore[union-attr]
+            State.mcs_credit_rows.length() > 0,  # type: ignore[union-attr]
+            rx.vstack(
+                _mcs_credits_panel(),
+                rx.foreach(State.mcs_current_section_segments, _mcs_segment_block),
+                spacing="4",
+                width="100%",
+            ),
+        ),
+        # ── Quick Wins (moved from Profile) ────────────────────────────────
+        rx.cond(
+            State.mcs_profile_quick_wins.length() > 0,  # type: ignore[union-attr]
             card(
-                _ins_card_header("gauge", PRIMARY, "Turn Efficiency", "How efficiently the orchestrator resolves each user turn."),
-                rx.hstack(rx.foreach(State.mcs_ins_turn_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
-                rx.cond(
-                    State.mcs_ins_turn_rows.length() > 0,  # type: ignore[union-attr]
-                    rx.box(
-                        rx.grid(
-                            rx.text("#", **_INS_HEADER_CELL, text_align="right"),
-                            rx.text("User Message", **_INS_HEADER_CELL),
-                            rx.text("Plans", **_INS_HEADER_CELL, text_align="right"),
-                            rx.text("Tools", **_INS_HEADER_CELL, text_align="right"),
-                            rx.text("Search", **_INS_HEADER_CELL, text_align="right"),
-                            rx.text("Thinking", **_INS_HEADER_CELL, text_align="right"),
-                            rx.text("Total", **_INS_HEADER_CELL, text_align="right"),
-                            rx.text("Flags", **_INS_HEADER_CELL),
-                            columns="0.4fr 2.5fr 0.5fr 0.5fr 0.6fr 0.8fr 0.8fr 2fr",
-                            gap="8px",
-                            padding_y="8px",
-                            border_bottom=f"2px solid {SURFACE_BORDER}",
-                            width="100%",
-                        ),
-                        rx.foreach(State.mcs_ins_turn_rows, _ins_turn_row),
-                        width="100%",
-                        overflow_x="auto",
-                    ),
-                ),
+                rx.hstack(rx.icon("zap", size=16, color="var(--amber-9)"), section_heading("Quick Wins"), spacing="2", align="center"),
+                rx.vstack(rx.foreach(State.mcs_profile_quick_wins, _mcs_profile_quick_win_row), spacing="1", width="100%", padding_top="8px"),
                 width="100%",
             ),
         ),
@@ -3310,126 +3366,6 @@ def _mcs_insights_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # ── Plan Evolution Diffs ───────────────────────────────────────────
-        rx.cond(
-            State.mcs_ins_plan_diffs.length() > 0,  # type: ignore[union-attr]
-            card(
-                _ins_card_header("git-compare", "var(--violet-9)", "Plan Evolution", "How the orchestrator changed its plan within a single turn."),
-                rx.cond(
-                    State.mcs_ins_plan_kpis.length() > 0,  # type: ignore[union-attr]
-                    rx.hstack(rx.foreach(State.mcs_ins_plan_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
-                ),
-                rx.foreach(State.mcs_ins_plan_diffs, _ins_plan_diff_item),
-                width="100%",
-            ),
-        ),
-        # ── Knowledge Source Effectiveness ─────────────────────────────────
-        rx.cond(
-            State.mcs_ins_ke_kpis.length() > 0,  # type: ignore[union-attr]
-            card(
-                _ins_card_header("database", "var(--amber-9)", "Knowledge Source Effectiveness", "Per-source hit rate and contribution to grounded responses."),
-                rx.hstack(rx.foreach(State.mcs_ins_ke_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
-                rx.box(
-                    rx.grid(
-                        rx.text("Source", **_INS_HEADER_CELL),
-                        rx.text("Queries", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Contributed", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Hit Rate", **_INS_HEADER_CELL),
-                        rx.text("Errors", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Avg Results", **_INS_HEADER_CELL, text_align="right"),
-                        columns="2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr",
-                        gap="8px",
-                        padding_y="8px",
-                        border_bottom=f"2px solid {SURFACE_BORDER}",
-                        width="100%",
-                    ),
-                    rx.foreach(State.mcs_ins_ke_rows, _ins_ke_row),
-                    width="100%",
-                ),
-                rx.cond(
-                    State.mcs_ins_ke_warnings.length() > 0,  # type: ignore[union-attr]
-                    rx.box(
-                        rx.text("Low-performing sources", font_size="12px", font_weight="700", color="var(--amber-9)", padding_top="12px"),
-                        rx.foreach(State.mcs_ins_ke_warnings, lambda w: rx.text(f"• {w}", font_size="12px", color="var(--gray-a9)")),
-                        width="100%",
-                    ),
-                ),
-                width="100%",
-            ),
-        ),
-        # ── Multi-Agent Delegation ─────────────────────────────────────────
-        rx.cond(
-            State.mcs_ins_deleg_kpis.length() > 0,  # type: ignore[union-attr]
-            card(
-                _ins_card_header("network", "var(--cyan-9)", "Multi-Agent Delegation", "How the orchestrator delegates to child and connected agents."),
-                rx.hstack(rx.foreach(State.mcs_ins_deleg_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
-                rx.cond(
-                    State.mcs_ins_deleg_rows.length() > 0,  # type: ignore[union-attr]
-                    rx.box(
-                        rx.grid(
-                            rx.text("Agent", **_INS_HEADER_CELL),
-                            rx.text("Type", **_INS_HEADER_CELL),
-                            rx.text("State", **_INS_HEADER_CELL),
-                            rx.text("Duration", **_INS_HEADER_CELL, text_align="right"),
-                            rx.text("Reasoning", **_INS_HEADER_CELL),
-                            columns="1.2fr 0.8fr 0.8fr 0.7fr 3fr",
-                            gap="8px",
-                            padding_y="8px",
-                            border_bottom=f"2px solid {SURFACE_BORDER}",
-                            width="100%",
-                        ),
-                        rx.foreach(State.mcs_ins_deleg_rows, _ins_deleg_row),
-                        width="100%",
-                    ),
-                ),
-                rx.cond(
-                    State.mcs_ins_deleg_warnings.length() > 0,  # type: ignore[union-attr]
-                    rx.box(rx.foreach(State.mcs_ins_deleg_warnings, lambda w: rx.text(f"⚠ {w}", font_size="12px", color="var(--amber-9)")), padding_top="8px", width="100%"),
-                ),
-                width="100%",
-            ),
-        ),
-        # ── Latency Bottlenecks ────────────────────────────────────────────
-        rx.cond(
-            State.mcs_ins_latency_kpis.length() > 0,  # type: ignore[union-attr]
-            card(
-                _ins_card_header("timer", "var(--orange-9)", "Latency Bottlenecks", "Where time is spent per turn — thinking, tools, knowledge, or delivery."),
-                rx.hstack(rx.foreach(State.mcs_ins_latency_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
-                rx.box(
-                    rx.grid(
-                        rx.text("#", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Message", **_INS_HEADER_CELL),
-                        rx.text("Total", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Thinking", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Tools", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Knowledge", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Bottleneck", **_INS_HEADER_CELL),
-                        columns="0.4fr 2fr 0.8fr 1.2fr 1.2fr 1.2fr 1.5fr",
-                        gap="8px",
-                        padding_y="8px",
-                        border_bottom=f"2px solid {SURFACE_BORDER}",
-                        width="100%",
-                    ),
-                    rx.foreach(State.mcs_ins_latency_rows, _ins_latency_row),
-                    width="100%",
-                    overflow_x="auto",
-                ),
-                rx.cond(
-                    State.mcs_ins_latency_mermaid != "",
-                    rx.box(
-                        rx.el.pre(State.mcs_ins_latency_mermaid, class_name="mermaid"),
-                        width="100%",
-                        overflow_x="auto",
-                        padding="22px",
-                        background="var(--green-a2)",
-                        border="1px solid var(--green-a4)",
-                        border_radius="14px",
-                        margin_top="12px",
-                    ),
-                ),
-                width="100%",
-            ),
-        ),
         # ── Instruction Alignment ──────────────────────────────────────────
         rx.cond(
             State.mcs_ins_align_kpis.length() > 0,  # type: ignore[union-attr]
@@ -3459,12 +3395,12 @@ def _mcs_insights_panel() -> rx.Component:
         ),
         # ── Empty state ────────────────────────────────────────────────────
         rx.cond(
-            ~State.has_mcs_insights,
+            ~State.has_mcs_quality,
             rx.center(
                 rx.vstack(
-                    rx.icon("lightbulb", size=48, color="var(--gray-a5)"),
-                    rx.text("No insights available", size="3", color="var(--gray-a7)"),
-                    rx.text("Upload a conversation transcript to generate insights", size="2", color="var(--gray-a6)"),
+                    rx.icon("shield-check", size=48, color="var(--gray-a5)"),
+                    rx.text("No quality data available", size="3", color="var(--gray-a7)"),
+                    rx.text("Upload a bot export or transcript to generate quality analysis", size="2", color="var(--gray-a6)"),
                     align="center",
                     spacing="2",
                     padding="60px 0",
@@ -3573,32 +3509,72 @@ def dynamic_analysis_viewer() -> rx.Component:
             rx.box(
                 rx.match(
                     State.mcs_analyse_tab,
-                    (
-                        "credits",
-                        rx.vstack(
-                            _mcs_credits_panel(),
-                            rx.foreach(State.mcs_current_section_segments, _mcs_segment_block),
-                            spacing="4",
-                            width="100%",
-                        ),
-                    ),
+                    ("profile", _mcs_profile_panel()),
+                    ("topics", _mcs_topics_panel()),
+                    ("tools", _mcs_tools_panel()),
+                    ("knowledge", _mcs_knowledge_panel()),
+                    ("routing", _mcs_routing_panel()),
                     (
                         "conversation",
                         rx.vstack(
                             rx.cond(State.has_mcs_conv_visual_summary, _mcs_conversation_visual_dashboard()),
                             rx.cond(State.has_mcs_conversation_flow, _mcs_conversation_flow_panel()),
                             _mcs_conversation_detail_panel(),
+                            # Turn Efficiency (moved from Insights)
+                            rx.cond(
+                                State.mcs_ins_turn_kpis.length() > 0,  # type: ignore[union-attr]
+                                card(
+                                    _ins_card_header("gauge", PRIMARY, "Turn Efficiency", "How efficiently the orchestrator resolves each user turn."),
+                                    rx.hstack(rx.foreach(State.mcs_ins_turn_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                                    rx.cond(
+                                        State.mcs_ins_turn_rows.length() > 0,  # type: ignore[union-attr]
+                                        rx.box(
+                                            rx.grid(
+                                                rx.text("#", **_INS_HEADER_CELL, text_align="right"), rx.text("User Message", **_INS_HEADER_CELL),
+                                                rx.text("Plans", **_INS_HEADER_CELL, text_align="right"), rx.text("Tools", **_INS_HEADER_CELL, text_align="right"),
+                                                rx.text("Search", **_INS_HEADER_CELL, text_align="right"), rx.text("Thinking", **_INS_HEADER_CELL, text_align="right"),
+                                                rx.text("Total", **_INS_HEADER_CELL, text_align="right"), rx.text("Flags", **_INS_HEADER_CELL),
+                                                columns="0.4fr 2.5fr 0.5fr 0.5fr 0.6fr 0.8fr 0.8fr 2fr", gap="8px", padding_y="8px",
+                                                border_bottom=f"2px solid {SURFACE_BORDER}", width="100%",
+                                            ),
+                                            rx.foreach(State.mcs_ins_turn_rows, _ins_turn_row),
+                                            width="100%", overflow_x="auto",
+                                        ),
+                                    ),
+                                    width="100%",
+                                ),
+                            ),
+                            # Latency Bottlenecks (moved from Insights)
+                            rx.cond(
+                                State.mcs_ins_latency_kpis.length() > 0,  # type: ignore[union-attr]
+                                card(
+                                    _ins_card_header("timer", "var(--orange-9)", "Latency Bottlenecks", "Where time is spent per turn — thinking, tools, knowledge, or delivery."),
+                                    rx.hstack(rx.foreach(State.mcs_ins_latency_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                                    rx.box(
+                                        rx.grid(
+                                            rx.text("#", **_INS_HEADER_CELL, text_align="right"), rx.text("Message", **_INS_HEADER_CELL),
+                                            rx.text("Total", **_INS_HEADER_CELL, text_align="right"), rx.text("Thinking", **_INS_HEADER_CELL, text_align="right"),
+                                            rx.text("Tools", **_INS_HEADER_CELL, text_align="right"), rx.text("Knowledge", **_INS_HEADER_CELL, text_align="right"),
+                                            rx.text("Bottleneck", **_INS_HEADER_CELL),
+                                            columns="0.4fr 2fr 0.8fr 1.2fr 1.2fr 1.2fr 1.5fr", gap="8px", padding_y="8px",
+                                            border_bottom=f"2px solid {SURFACE_BORDER}", width="100%",
+                                        ),
+                                        rx.foreach(State.mcs_ins_latency_rows, _ins_latency_row),
+                                        width="100%", overflow_x="auto",
+                                    ),
+                                    rx.cond(
+                                        State.mcs_ins_latency_mermaid != "",
+                                        rx.box(rx.el.pre(State.mcs_ins_latency_mermaid, class_name="mermaid"), width="100%", overflow_x="auto", padding="22px",
+                                               background="var(--green-a2)", border="1px solid var(--green-a4)", border_radius="14px", margin_top="12px"),
+                                    ),
+                                    width="100%",
+                                ),
+                            ),
                             spacing="4",
                             width="100%",
                         ),
                     ),
-                    ("profile", _mcs_profile_panel()),
-                    ("tools", _mcs_tools_panel()),
-                    ("knowledge", _mcs_knowledge_panel()),
-                    ("topics", _mcs_topics_panel()),
-                    ("model_comparison", _mcs_model_panel()),
-                    ("routing", _mcs_routing_panel()),
-                    ("insights", _mcs_insights_panel()),
+                    ("quality", _mcs_quality_panel()),
                     rx.box(),  # fallback
                 ),
                 padding_top="20px",

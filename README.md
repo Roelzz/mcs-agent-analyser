@@ -3,7 +3,7 @@
 ![Repo Views](https://komarev.com/ghpvc/?username=Roelzz&label=Repo%20Views&color=0e75b6&style=flat)
 
 # TLDR
-**Peek under the hood of your Copilot Studio agents.** Upload a bot export, drop a conversation transcript, or connect straight to Dataverse; Instantly see what your agent is actually doing under the hood: how the orchestrator routes decisions, which topics/tools/agents fire and why, where knowledge searches hit or miss, how long each step takes, and what falls through the cracks. Architecture reports, best-practice rules, trigger overlap detection, execution timelines, credit estimates.
+**Peek under the hood of your Copilot Studio agents.** Upload a bot export, drop a conversation transcript, or connect straight to Dataverse — instantly see what your agent is actually doing under the hood: how the orchestrator routes decisions, which topics/tools/agents fire and why, where knowledge searches hit or miss, how long each step takes, and what falls through the cracks. Architecture reports, best-practice rules, trigger overlap detection, execution timelines, credit estimates, response quality scoring, and instruction compliance checking.
 
 Everything you need to build with confidence and debug without guessing. If you're serious about Copilot Studio development, this belongs in your toolkit.
 
@@ -12,6 +12,8 @@ Everything you need to build with confidence and debug without guessing. If you'
 ## Why Agent Analyser
 
 - **Full visibility into bot architecture** — see every topic, skill, entity, knowledge source, and how they connect, in one report
+- **Conversation quality analysis** — response groundedness scoring, hallucination risk detection, instruction compliance checking, and dead code detection
+- **Performance insights** — per-turn efficiency metrics, latency bottleneck identification, knowledge source effectiveness, and multi-agent delegation tracing
 - **Best-practice rules out of the box** — 18 configurable rules catch misconfigurations before they hit production, with custom YAML rules support
 - **Batch conversation analytics** — aggregate transcripts to surface success rates, topic usage, error patterns, and credit estimates
 - **Bot comparison** — diff two bot exports side by side to see what changed in components, instructions, settings, and connections
@@ -25,9 +27,16 @@ Everything you need to build with confidence and debug without guessing. If you'
 | --- | --- |
 | **Upload bot export** | Drop a `.zip`, or `botContent.yml` + `dialog.json` — get a full architecture report with quick wins |
 | **Connect to Dataverse** | Device-code auth to your environment, auto-analyses your bot the moment you connect |
-| **Routing analysis** | Orchestrator decision timeline with routing scores, topic lifecycles with redirect tracking, trigger phrase similarity, plan evolution with per-step confidence |
-| **Conversation transcripts** | Upload or fetch transcripts from Dataverse — sequence diagrams, Gantt charts, event logs |
+| **Routing analysis** | Orchestrator decision timeline with routing scores, topic lifecycles with redirect tracking, trigger phrase similarity, plan evolution diffs with thrashing detection |
+| **Conversation transcripts** | Upload or fetch transcripts from Dataverse — sequence diagrams, Gantt charts, event logs, per-turn efficiency and latency breakdown |
 | **Single conversation lookup** | Fetch and analyse a specific conversation by ID directly from Dataverse |
+| **Response quality scoring** | Groundedness assessment for every bot response — detects ungrounded answers, hallucination risk from zero-result searches, and silently swallowed tool errors |
+| **Instruction alignment** | Checks if the bot's runtime behavior matches its system instructions — language compliance, escalation triggers, scope restrictions |
+| **Dead code detection** | Cross-references bot components against runtime evidence to find topics, tools, and knowledge sources that are never used |
+| **Knowledge effectiveness** | Per-source hit rate, contribution rate, and error tracking — identifies knowledge sources that never contribute to grounded answers |
+| **Multi-agent delegation** | Traces orchestrator-to-agent delegation chains — detects dead agents, always-failing agents, and shows orchestrator reasoning per delegation |
+| **Latency bottlenecks** | Per-turn time breakdown showing where time is spent (thinking, tools, knowledge, delivery) with bottleneck flagging |
+| **Plan evolution diffs** | Structured diffs between consecutive orchestrator plans within a turn — detects thrashing, scope creep, and re-planning patterns |
 | **Batch analytics** | Aggregate multiple transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
 | **Bot comparison** | Compare two bot profiles — components added/removed/changed, instructions diff, topic connections, settings |
 | **Custom rules** | 18 default best-practice rules + user-defined YAML rules, evaluated during analysis and solution checks |
@@ -184,6 +193,22 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 - **Solution checker** — custom rules run alongside built-in check categories
 - **Rules page** (`/rules`) — view, edit, and manage rules in the web UI
 
+## Dynamic Analysis Tabs
+
+The dynamic analysis page presents bot and conversation data across 7 purpose-driven tabs:
+
+| Tab | Icon | What it answers |
+| --- | --- | --- |
+| **Profile** | `user-round` | What is this bot? Architecture, AI config, model, security, metadata, custom findings |
+| **Topics** | `list` | What topics exist? Inventory, trigger overlaps, anomalies, topic graph |
+| **Tools** | `wrench` | Did the tools work? Inventory, runtime stats, async chains, orchestrator reasoning, agent delegation |
+| **Knowledge** | `database` | Is the knowledge useful? Sources, search results, source effectiveness |
+| **Routing** | `route` | How did orchestration work? Decision timeline, plan evolution diffs, topic lifecycles, trigger analysis, topic coverage |
+| **Conversation** | `message-square` | What happened? Visual dashboard, chat replay, sequence/Gantt diagrams, turn efficiency, latency bottlenecks |
+| **Quality** | `shield-check` | How can I improve? Credits estimate, quick wins, response quality, dead code, instruction alignment |
+
+When uploading a transcript without a bot export, a reduced tab bar shows: Conversation, Tools, Routing, Quality.
+
 ## Screenshots
 
 ### Dynamic Analysis — Profile Tab
@@ -257,7 +282,9 @@ Each generated report contains:
 11. **Integration Map** — Mermaid diagram of external connections
 12. **Credit Estimate** — MCS message credit estimation based on bot features
 13. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log, errors
-14. **Routing Analysis** — orchestrator decision timeline with routing scores, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution with per-step confidence, trigger phrase similarity analysis, condition evaluations
+14. **Routing Analysis** — orchestrator decision timeline with routing scores, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution with per-step confidence and diff detection, trigger phrase similarity analysis, condition evaluations
+
+The dynamic analysis view adds interactive versions of these sections across 7 tabs, plus conversation analysis features: turn efficiency, response quality scoring, dead code detection, knowledge source effectiveness, multi-agent delegation tracing, latency bottleneck analysis, and instruction-to-behavior alignment checking.
 
 Transcript reports contain:
 
@@ -410,7 +437,7 @@ Make sure `.env` contains at least `REFLEX_ENV=prod` and `PORT=2009`.
 ```bash
 cp .env.example .env          # edit credentials
 uv sync
-uv run pytest              # 289 tests
+uv run pytest              # 340+ tests
 uv run ruff check .
 uv run ruff format .
 uv run reflex run          # dev server — frontend :3000, backend :8000
@@ -424,6 +451,7 @@ models.py                Pydantic models (BotProfile, ConversationTimeline, GptI
 parser.py                YAML + JSON parsing, GPT extraction, topic connection extraction
 timeline.py              Dialog activity → timeline event conversion
 transcript.py            Transcript JSON parsing and normalization
+conversation_analysis.py Turn efficiency, dead code, plan diffs, knowledge effectiveness, response quality, delegation, latency, instruction alignment
 dataverse_client.py      Dataverse Web API client (bot config, components, transcripts)
 batch_analytics.py       Batch transcript aggregation (success rates, topics, errors, credits)
 custom_rules.py          YAML rule loader and evaluator
@@ -438,11 +466,13 @@ rxconfig.py              Reflex app config
 
 renderer/                Markdown + Mermaid rendering
   _helpers.py            Shared rendering helpers
+  conversation_analysis.py  Renderers for conversation analysis features (markdown output)
   knowledge.py           Knowledge source rendering
   profile.py             Bot profile rendering
   report.py              Main report assembly
   sections.py            Routing tab builders (lifecycles, decision timeline, trigger analysis, plan evolution, routing scores)
   timeline_render.py     Timeline / conversation trace rendering
+  tools.py               Tool call analysis rendering
 
 solution_checker/        Solution health checker
   _helpers.py            Shared checker helpers
@@ -469,8 +499,8 @@ web/
     _report.py           Report generation state
     _rules.py            Custom rules state
     _solution.py         Solution tools state
-    _dynamic.py          Dynamic analysis state (routing, conversation, profile tabs)
-    _upload.py           File upload state
+    _dynamic.py          Dynamic analysis state (7 tabs: profile, topics, tools, knowledge, routing, conversation, quality)
+    _upload.py           File upload state + conversation analysis population
 
   components/            UI components
     batch.py             Batch analytics form
@@ -480,7 +510,7 @@ web/
     report.py            Report viewer
     rules.py             Rules editor
     solution_tools.py    Solution tools form
-    dynamic_analysis.py  Dynamic analysis panels (routing, conversation, profile)
+    dynamic_analysis.py  Dynamic analysis panels (profile, topics, tools, knowledge, routing, conversation, quality)
     upload.py            Upload form
 
 data/
@@ -488,7 +518,7 @@ data/
 
 best_practices/          GPT model best-practice reference docs
 samples/                 Sample reports
-tests/                   Test suite (289 tests)
+tests/                   Test suite (340+ tests)
 ```
 
 ## License
