@@ -141,6 +141,35 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_conv_sequence_mermaid: str = ""
     mcs_conv_gantt_mermaid: str = ""
 
+    # ── Insights tab (conversation analysis features) ──────────────────────
+    # Turn Efficiency
+    mcs_ins_turn_kpis: list[dict] = []
+    mcs_ins_turn_rows: list[dict] = []
+    # Response Quality
+    mcs_ins_quality_kpis: list[dict] = []
+    mcs_ins_quality_rows: list[dict] = []
+    # Dead Code
+    mcs_ins_dead_summary: str = ""
+    mcs_ins_dead_rows: list[dict] = []
+    # Plan Diff
+    mcs_ins_plan_kpis: list[dict] = []
+    mcs_ins_plan_diffs: list[dict] = []
+    # Knowledge Effectiveness
+    mcs_ins_ke_kpis: list[dict] = []
+    mcs_ins_ke_rows: list[dict] = []
+    mcs_ins_ke_warnings: list[str] = []
+    # Delegation
+    mcs_ins_deleg_kpis: list[dict] = []
+    mcs_ins_deleg_rows: list[dict] = []
+    mcs_ins_deleg_warnings: list[str] = []
+    # Latency
+    mcs_ins_latency_kpis: list[dict] = []
+    mcs_ins_latency_rows: list[dict] = []
+    mcs_ins_latency_mermaid: str = ""
+    # Alignment
+    mcs_ins_align_kpis: list[dict] = []
+    mcs_ins_align_rows: list[dict] = []
+
     @rx.var
     def has_dynamic_sections(self) -> bool:
         return bool(self.mcs_section_profile or self.mcs_section_conversation or self.mcs_conversation_flow_source)
@@ -179,6 +208,16 @@ class DynamicMixin(rx.State, mixin=True):
     @rx.var
     def has_mcs_tools_runtime(self) -> bool:
         return self.mcs_tools_call_count > 0
+
+    @rx.var
+    def has_mcs_insights(self) -> bool:
+        return bool(
+            self.mcs_ins_turn_kpis
+            or self.mcs_ins_quality_kpis
+            or self.mcs_ins_dead_rows
+            or self.mcs_ins_dead_summary
+            or self.mcs_ins_plan_diffs
+        )
 
     @rx.event
     def set_mcs_analyse_tab(self, tab: str):

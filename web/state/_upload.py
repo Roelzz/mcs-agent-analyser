@@ -439,6 +439,9 @@ class UploadMixin(rx.State, mixin=True):
                 self.mcs_tools_flow_mermaid = tool_data["flow_mermaid"]  # type: ignore[attr-defined]
                 self.mcs_tools_kpis = tool_data["kpis"]  # type: ignore[attr-defined]
 
+        # ── Conversation analysis insights ─────────────────────────────────
+        self._populate_insights_data(profile, timeline)
+
         # Set default tab based on profile presence
         if profile is not None:
             self.mcs_analyse_tab = "profile"  # type: ignore[attr-defined]
@@ -1245,6 +1248,226 @@ class UploadMixin(rx.State, mixin=True):
 
     # ── Clear all panel data ─────────────────────────────────────────────────
 
+    # ── Insights tab data extraction (conversation analysis features) ────────
+
+    def _populate_insights_data(self, profile, timeline) -> None:
+        """Populate the Insights tab with structured data for native components."""
+        from conversation_analysis import (
+            analyze_delegations,
+            analyze_instruction_alignment,
+            analyze_knowledge_effectiveness,
+            analyze_latency_bottlenecks,
+            analyze_plan_diffs,
+            analyze_response_quality,
+            analyze_turn_efficiency,
+            detect_dead_code,
+        )
+
+        if timeline is not None:
+            # Turn Efficiency
+            tr = analyze_turn_efficiency(timeline)
+            self.mcs_ins_turn_kpis = [  # type: ignore[attr-defined]
+                {"label": "Total Turns", "value": str(len(tr.turns))},
+                {"label": "Avg Plans/Turn", "value": f"{tr.avg_plans_per_turn:.1f}"},
+                {"label": "Avg Tools/Turn", "value": f"{tr.avg_tools_per_turn:.1f}"},
+                {"label": "Thinking Ratio", "value": f"{tr.avg_thinking_ratio:.0%}"},
+                {"label": "Inefficient", "value": str(tr.inefficient_turn_count), "tone": "warn" if tr.inefficient_turn_count > 0 else ""},
+            ]
+            self.mcs_ins_turn_rows = [  # type: ignore[attr-defined]
+                {
+                    "turn": str(t.turn_index),
+                    "message": t.user_message[:60] or "—",
+                    "plans": str(t.plan_count),
+                    "tools": str(t.tool_call_count),
+                    "searches": str(t.knowledge_search_count),
+                    "thinking": f"{t.thinking_ms:.0f}ms",
+                    "total": f"{t.total_ms:.0f}ms",
+                    "flags": ", ".join(t.flags) if t.flags else "",
+                }
+                for t in tr.turns
+            ]
+
+            # Response Quality
+            qr = analyze_response_quality(timeline)
+            total_resp = qr.grounded_count + qr.ungrounded_count
+            self.mcs_ins_quality_kpis = [  # type: ignore[attr-defined]
+                {"label": "Responses", "value": str(total_resp)},
+                {"label": "Grounded", "value": str(qr.grounded_count)},
+                {"label": "Ungrounded", "value": str(qr.ungrounded_count), "tone": "warn" if qr.ungrounded_count > 0 else ""},
+                {"label": "High Risk", "value": str(qr.high_risk_count), "tone": "danger" if qr.high_risk_count > 0 else ""},
+                {"label": "Swallowed Errors", "value": str(qr.swallowed_error_count), "tone": "warn" if qr.swallowed_error_count > 0 else ""},
+            ]
+            self.mcs_ins_quality_rows = [  # type: ignore[attr-defined]
+                {
+                    "turn": str(item.turn_index),
+                    "risk": item.hallucination_risk,
+                    "source": item.grounding_source,
+                    "flags": "; ".join(item.flags),
+                }
+                for item in qr.items
+                if item.flags
+            ]
+
+            # Plan Diff
+            pr = analyze_plan_diffs(timeline)
+            self.mcs_ins_plan_kpis = [  # type: ignore[attr-defined]
+                {"label": "Re-plans", "value": str(pr.total_replans)},
+                {"label": "Thrashing", "value": str(pr.thrashing_count), "tone": "danger" if pr.thrashing_count > 0 else ""},
+                {"label": "Scope Creep", "value": str(pr.scope_creep_count), "tone": "warn" if pr.scope_creep_count > 0 else ""},
+            ] if pr.total_replans > 0 else []
+            self.mcs_ins_plan_diffs = [  # type: ignore[attr-defined]
+                {
+                    "turn": str(d.turn_index),
+                    "ask": d.orchestrator_ask or "",
+                    "added": ", ".join(d.added_steps),
+                    "removed": ", ".join(d.removed_steps),
+                    "is_thrashing": "yes" if d.is_thrashing else "no",
+                }
+                for d in pr.diffs
+            ]
+
+            # Knowledge Effectiveness
+            ke = analyze_knowledge_effectiveness([timeline])
+            self.mcs_ins_ke_kpis = [  # type: ignore[attr-defined]
+                {"label": "Searches", "value": str(ke.total_searches)},
+                {"label": "Avg Sources/Search", "value": f"{ke.avg_sources_per_search:.1f}"},
+                {"label": "Zero Results", "value": str(ke.zero_result_searches), "tone": "warn" if ke.zero_result_searches > 0 else ""},
+            ] if ke.total_searches > 0 else []
+            self.mcs_ins_ke_rows = [  # type: ignore[attr-defined]
+                {
+                    "source": s.source_name,
+                    "queries": str(s.query_count),
+                    "contributions": str(s.contribution_count),
+                    "hit_rate": f"{s.hit_rate:.0%}",
+                    "hit_tone": "good" if s.hit_rate >= 0.6 else ("warn" if s.hit_rate >= 0.3 else "danger"),
+                    "errors": str(s.error_count),
+                    "avg_results": f"{s.avg_result_count:.1f}",
+                }
+                for s in ke.sources
+            ]
+            self.mcs_ins_ke_warnings = [  # type: ignore[attr-defined]
+                f"{s.source_name} — queried {s.query_count}x, contributed {s.contribution_count}x"
+                for s in ke.sources
+                if s.hit_rate < 0.1 and s.query_count >= 3
+            ]
+
+            # Latency
+            lr = analyze_latency_bottlenecks(timeline)
+            self.mcs_ins_latency_kpis = [  # type: ignore[attr-defined]
+                {"label": "Turns", "value": str(len(lr.turns))},
+                {"label": "Bottlenecks", "value": str(lr.bottleneck_turn_count), "tone": "warn" if lr.bottleneck_turn_count > 0 else ""},
+                {"label": "Avg Thinking", "value": f"{lr.avg_thinking_pct:.0f}%"},
+                {"label": "Avg Tools", "value": f"{lr.avg_tool_pct:.0f}%"},
+            ] if lr.turns else []
+            latency_rows = []
+            for t in lr.turns:
+                seg_map = {s.category: s for s in t.segments}
+                th = seg_map.get("thinking")
+                to = seg_map.get("tool")
+                kn = seg_map.get("knowledge")
+                latency_rows.append({
+                    "turn": str(t.turn_index),
+                    "message": t.user_message[:40] or "—",
+                    "total": f"{t.total_ms:.0f}ms",
+                    "thinking": f"{th.duration_ms:.0f}ms ({th.percentage:.0f}%)" if th else "—",
+                    "tools": f"{to.duration_ms:.0f}ms ({to.percentage:.0f}%)" if to else "—",
+                    "knowledge": f"{kn.duration_ms:.0f}ms ({kn.percentage:.0f}%)" if kn else "—",
+                    "bottleneck": t.bottleneck or "—",
+                    "bottleneck_tone": "warn" if t.bottleneck else "",
+                })
+            self.mcs_ins_latency_rows = latency_rows  # type: ignore[attr-defined]
+            # Mermaid Gantt for latency
+            if len(lr.turns) <= 10 and lr.turns:
+                gantt_lines = ["gantt", "    title Time Breakdown per Turn", "    dateFormat X", "    axisFormat %s ms"]
+                for t in lr.turns:
+                    gantt_lines.append(f"    section Turn {t.turn_index}")
+                    offset = 0
+                    for seg in t.segments:
+                        dur = max(1, int(seg.duration_ms))
+                        gantt_lines.append(f"    {seg.label} :{offset}, {offset + dur}")
+                        offset += dur
+                self.mcs_ins_latency_mermaid = "\n".join(gantt_lines)  # type: ignore[attr-defined]
+            else:
+                self.mcs_ins_latency_mermaid = ""  # type: ignore[attr-defined]
+        else:
+            self.mcs_ins_turn_kpis = []  # type: ignore[attr-defined]
+            self.mcs_ins_turn_rows = []  # type: ignore[attr-defined]
+            self.mcs_ins_quality_kpis = []  # type: ignore[attr-defined]
+            self.mcs_ins_quality_rows = []  # type: ignore[attr-defined]
+            self.mcs_ins_plan_kpis = []  # type: ignore[attr-defined]
+            self.mcs_ins_plan_diffs = []  # type: ignore[attr-defined]
+            self.mcs_ins_ke_kpis = []  # type: ignore[attr-defined]
+            self.mcs_ins_ke_rows = []  # type: ignore[attr-defined]
+            self.mcs_ins_ke_warnings = []  # type: ignore[attr-defined]
+            self.mcs_ins_latency_kpis = []  # type: ignore[attr-defined]
+            self.mcs_ins_latency_rows = []  # type: ignore[attr-defined]
+            self.mcs_ins_latency_mermaid = ""  # type: ignore[attr-defined]
+
+        # Features that need both profile + timeline
+        if profile is not None and timeline is not None:
+            # Dead Code
+            dc = detect_dead_code(profile, [timeline])
+            if dc.dead_items:
+                self.mcs_ins_dead_summary = (  # type: ignore[attr-defined]
+                    f"{len(dc.dead_items)} of {dc.total_components} components ({dc.dead_ratio:.0%}) "
+                    f"have no runtime evidence of usage"
+                )
+                self.mcs_ins_dead_rows = [  # type: ignore[attr-defined]
+                    {"kind": item.component_kind, "name": item.display_name, "schema": item.schema_name}
+                    for item in dc.dead_items
+                ]
+            else:
+                self.mcs_ins_dead_summary = "All components have runtime evidence of being used."  # type: ignore[attr-defined]
+                self.mcs_ins_dead_rows = []  # type: ignore[attr-defined]
+
+            # Delegation
+            dl = analyze_delegations(timeline, profile)
+            self.mcs_ins_deleg_kpis = [  # type: ignore[attr-defined]
+                {"label": "Configured", "value": str(len(dl.configured_agents))},
+                {"label": "Delegations", "value": str(len(dl.delegations))},
+                {"label": "Dead Agents", "value": str(len(dl.dead_agents)), "tone": "warn" if dl.dead_agents else ""},
+                {"label": "Always Failing", "value": str(len(dl.failing_agents)), "tone": "danger" if dl.failing_agents else ""},
+            ] if dl.configured_agents or dl.delegations else []
+            self.mcs_ins_deleg_rows = [  # type: ignore[attr-defined]
+                {
+                    "agent": d.agent_name,
+                    "type": d.tool_type or "—",
+                    "state": d.state,
+                    "duration": f"{d.duration_ms:.0f}ms",
+                    "thought": (d.thought or "—")[:80],
+                }
+                for d in dl.delegations
+            ]
+            self.mcs_ins_deleg_warnings = [  # type: ignore[attr-defined]
+                *(f"Dead agent: {a}" for a in dl.dead_agents),
+                *(f"Always failing: {a}" for a in dl.failing_agents),
+            ]
+
+            # Alignment
+            al = analyze_instruction_alignment(timeline, profile)
+            if al.directives_found > 0:
+                score_tone = "good" if al.coverage_score >= 0.8 else ("warn" if al.coverage_score >= 0.5 else "danger")
+                self.mcs_ins_align_kpis = [  # type: ignore[attr-defined]
+                    {"label": "Directives", "value": str(al.directives_found)},
+                    {"label": "Violations", "value": str(len(al.violations)), "tone": "danger" if al.violations else ""},
+                    {"label": "Compliance", "value": f"{al.coverage_score:.0%}", "tone": score_tone},
+                ]
+                self.mcs_ins_align_rows = [  # type: ignore[attr-defined]
+                    {"directive": v.directive, "type": v.violation_type, "evidence": v.evidence[:80]}
+                    for v in al.violations
+                ]
+            else:
+                self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
+                self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
+        else:
+            self.mcs_ins_dead_summary = ""  # type: ignore[attr-defined]
+            self.mcs_ins_dead_rows = []  # type: ignore[attr-defined]
+            self.mcs_ins_deleg_kpis = []  # type: ignore[attr-defined]
+            self.mcs_ins_deleg_rows = []  # type: ignore[attr-defined]
+            self.mcs_ins_deleg_warnings = []  # type: ignore[attr-defined]
+            self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
+            self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
+
     def _clear_panel_data(self) -> None:
         """Reset all structured panel state vars."""
         self.mcs_profile_kpis = []  # type: ignore[attr-defined]
@@ -1309,6 +1532,26 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_gantt_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_credit_step_rows = []  # type: ignore[attr-defined]
         self.mcs_credit_mermaid = ""  # type: ignore[attr-defined]
+        # Insights
+        self.mcs_ins_turn_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_turn_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_quality_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_quality_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_dead_summary = ""  # type: ignore[attr-defined]
+        self.mcs_ins_dead_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_plan_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_plan_diffs = []  # type: ignore[attr-defined]
+        self.mcs_ins_ke_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_ke_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_ke_warnings = []  # type: ignore[attr-defined]
+        self.mcs_ins_deleg_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_deleg_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_deleg_warnings = []  # type: ignore[attr-defined]
+        self.mcs_ins_latency_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_latency_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_latency_mermaid = ""  # type: ignore[attr-defined]
+        self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
 
     def new_upload(self):
         self.report_markdown = ""  # type: ignore[attr-defined]
@@ -1349,5 +1592,25 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_reasoning = []  # type: ignore[attr-defined]
         self.mcs_conv_sequence_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_conv_gantt_mermaid = ""  # type: ignore[attr-defined]
+        # Insights
+        self.mcs_ins_turn_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_turn_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_quality_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_quality_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_dead_summary = ""  # type: ignore[attr-defined]
+        self.mcs_ins_dead_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_plan_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_plan_diffs = []  # type: ignore[attr-defined]
+        self.mcs_ins_ke_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_ke_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_ke_warnings = []  # type: ignore[attr-defined]
+        self.mcs_ins_deleg_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_deleg_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_deleg_warnings = []  # type: ignore[attr-defined]
+        self.mcs_ins_latency_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_latency_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_latency_mermaid = ""  # type: ignore[attr-defined]
+        self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
         self._clear_panel_data()
         return rx.redirect("/dashboard")
