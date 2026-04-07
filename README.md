@@ -485,6 +485,7 @@ For admins reviewing network access or firewall rules:
 | `USERS` | _(none)_ | Web UI credentials, comma-separated `user:pass` pairs |
 | `OPENAI_API_KEY` | _(none)_ | OpenAI API key for Instruction Lint (required for OpenAI-model bots) |
 | `ANTHROPIC_API_KEY` | _(none)_ | Anthropic API key for Instruction Lint (required for Anthropic-model bots) |
+| `PYTHONUTF8` | `1` | Forces UTF-8 encoding for all Python I/O (prevents charmap errors on Windows and in Docker) |
 | `CUSTOM_RULES_FILE` | `data/default_rules.yaml` | Path to YAML file with custom rules for analysis and solution checks |
 
 ## Deployment

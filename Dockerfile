@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 
+ENV PYTHONUTF8=1
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl unzip && \
