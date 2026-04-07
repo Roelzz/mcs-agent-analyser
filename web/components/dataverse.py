@@ -48,9 +48,15 @@ def import_connection_form() -> rx.Component:
                     rx.box(
                         rx.el.ul(
                             rx.el.li(
+                                "A license that includes Dataverse access — Copilot Studio, Power Apps Premium, or Dynamics 365 Enterprise",
+                            ),
+                            rx.el.li(
                                 "Conversation transcripts enabled on your copilot — in Copilot Studio go to ",
                                 rx.text.strong("Settings → Agent → Conversation transcripts"),
-                                " and toggle it on. Transcripts are off by default for new bots.",
+                                " and toggle it on. Transcripts are off by default and ",
+                                rx.text.strong("do not backfill"),
+                                " — only conversations after enabling are captured. "
+                                "Transcripts appear ~30 minutes after a conversation ends.",
                             ),
                             rx.el.li(
                                 "Read access to the ",
@@ -62,7 +68,8 @@ def import_connection_form() -> rx.Component:
                                 " tables for full bot analysis",
                             ),
                             rx.el.li(
-                                "Your session details (Tenant ID, Instance URL, Copilot ID) from Copilot Studio Settings",
+                                "Your session details (Tenant ID, Instance URL, Copilot ID) — find them in Copilot Studio under ",
+                                rx.text.strong("Settings (gear icon) → Session details"),
                             ),
                             style={
                                 "padding_left": "20px",
@@ -74,7 +81,7 @@ def import_connection_form() -> rx.Component:
                         ),
                     ),
                     rx.text(
-                        "How to check / get access",
+                        "Security roles",
                         size="2",
                         font_weight="600",
                         color="var(--gray-12)",
@@ -82,19 +89,21 @@ def import_connection_form() -> rx.Component:
                     rx.box(
                         rx.el.ul(
                             rx.el.li(
-                                "System Administrator and System Customizer roles have access by default",
+                                rx.text.strong("System Administrator"),
+                                " — full access to all tables by default",
                             ),
                             rx.el.li(
-                                "For other roles: ask your admin to add Read privilege on ",
-                                rx.code("ConversationTranscript"),
-                                ", ",
+                                rx.text.strong("Bot Transcript Viewer"),
+                                " — read-only access to transcripts (can be assigned by your admin)",
+                            ),
+                            rx.el.li(
+                                "For custom roles: ask your admin to add Read privilege on ",
                                 rx.code("Bot"),
-                                ", and ",
+                                ", ",
                                 rx.code("BotComponent"),
-                                " entities",
-                            ),
-                            rx.el.li(
-                                "If you get a 403 error after connecting, this is the permission you're missing",
+                                ", and ",
+                                rx.code("ConversationTranscript"),
+                                " tables",
                             ),
                             style={
                                 "padding_left": "20px",
@@ -114,10 +123,42 @@ def import_connection_form() -> rx.Component:
                     rx.box(
                         rx.el.ul(
                             rx.el.li(
-                                "This tool uses device code auth — any user with a Microsoft Entra account in the tenant can sign in, no app registration required",
+                                "By default, this tool uses the Microsoft Azure CLI client ID — no app registration needed for most tenants",
+                            ),
+                            rx.el.li(
+                                "If your tenant blocks external client IDs (Conditional Access), you'll need to register your own app in Entra ID — see the README for step-by-step instructions",
                             ),
                             rx.el.li(
                                 "The token is delegated, so your Dataverse security role determines what you can read",
+                            ),
+                            style={
+                                "padding_left": "20px",
+                                "margin": "0",
+                                "font_size": "13px",
+                                "color": "var(--gray-11)",
+                                "line_height": "1.7",
+                            },
+                        ),
+                    ),
+                    rx.text(
+                        "Troubleshooting",
+                        size="2",
+                        font_weight="600",
+                        color="var(--gray-12)",
+                    ),
+                    rx.box(
+                        rx.el.ul(
+                            rx.el.li(
+                                rx.text.strong("403 error"),
+                                " — missing Read permission on Dataverse tables. Ask your admin for the right security role.",
+                            ),
+                            rx.el.li(
+                                rx.text.strong("Empty transcript list"),
+                                " — transcripts not enabled, or conversations are too recent (wait ~30 min).",
+                            ),
+                            rx.el.li(
+                                rx.text.strong("Auth error / AADSTS65002"),
+                                " — your tenant may block the default client ID. Register your own app (see README).",
                             ),
                             style={
                                 "padding_left": "20px",
