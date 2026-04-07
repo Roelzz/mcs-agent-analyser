@@ -3403,7 +3403,7 @@ def test_evaluate_rules_empty_list():
 def test_load_default_rules_yaml():
     """Load data/default_rules.yaml -> 18 valid BP rules, no errors."""
     rules_path = Path(__file__).parent.parent / "data" / "default_rules.yaml"
-    yaml_text = rules_path.read_text()
+    yaml_text = rules_path.read_text(encoding="utf-8")
     rules = load_rules_yaml(yaml_text)
     assert len(rules) == 18
     rule_ids = [r.rule_id for r in rules]
@@ -3421,11 +3421,11 @@ def test_default_rules_auto_load(monkeypatch, tmp_path):
     from web.state._rules import RulesMixin
 
     rules_path = Path(__file__).parent.parent / "data" / "default_rules.yaml"
-    yaml_text = rules_path.read_text()
+    yaml_text = rules_path.read_text(encoding="utf-8")
 
     # Write rules to a temp file
     tmp_rules = tmp_path / "rules.yaml"
-    tmp_rules.write_text(yaml_text)
+    tmp_rules.write_text(yaml_text, encoding="utf-8")
     monkeypatch.setenv("CUSTOM_RULES_FILE", str(tmp_rules))
 
     # Create a fresh mixin instance attributes on a simple namespace
@@ -3477,7 +3477,7 @@ def test_default_rules_no_auto_load_when_user_has_rules(monkeypatch, tmp_path):
 
     rules_path = Path(__file__).parent.parent / "data" / "default_rules.yaml"
     tmp_rules = tmp_path / "rules.yaml"
-    tmp_rules.write_text(rules_path.read_text())
+    tmp_rules.write_text(rules_path.read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setenv("CUSTOM_RULES_FILE", str(tmp_rules))
 
     class FakeState:
@@ -3776,7 +3776,7 @@ def test_instruction_atomic_write(tmp_path, monkeypatch):
     assert versions_file.exists()
     import json
 
-    data = json.loads(versions_file.read_text())
+    data = json.loads(versions_file.read_text(encoding="utf-8"))
     assert "versions" in data
     assert "bot1" in data["versions"]
 
@@ -4056,7 +4056,7 @@ def test_dv_batch_analysis_pipeline():
     for i, transcript_data in enumerate(transcripts):
         with tempfile.TemporaryDirectory() as tmpdir:
             json_path = Path(tmpdir) / f"transcript_{i}.json"
-            json_path.write_text(json.dumps(transcript_data))
+            json_path.write_text(json.dumps(transcript_data), encoding="utf-8")
 
             activities, metadata = parse_transcript_json(json_path)
             timeline = build_timeline(activities, {})

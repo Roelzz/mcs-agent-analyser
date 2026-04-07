@@ -399,7 +399,7 @@ class DataverseMixin(rx.State, mixin=True):
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 json_path = Path(tmpdir) / "dataverse_transcript.json"
-                json_path.write_text(json.dumps(parsed))
+                json_path.write_text(json.dumps(parsed), encoding="utf-8")
 
                 activities, metadata = parse_transcript_json(json_path)
                 timeline = build_timeline(activities, self.dv_schema_lookup)
@@ -492,7 +492,7 @@ class DataverseMixin(rx.State, mixin=True):
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 json_path = Path(tmpdir) / "conversation_transcript.json"
-                json_path.write_text(json.dumps(parsed))
+                json_path.write_text(json.dumps(parsed), encoding="utf-8")
 
                 activities, metadata = parse_transcript_json(json_path)
                 timeline = build_timeline(activities, self.dv_schema_lookup)
@@ -648,7 +648,7 @@ class DataverseMixin(rx.State, mixin=True):
 
                 with tempfile.TemporaryDirectory() as tmpdir:
                     json_path = Path(tmpdir) / "transcript.json"
-                    json_path.write_text(json.dumps(parsed))
+                    json_path.write_text(json.dumps(parsed), encoding="utf-8")
 
                     try:
                         activities, metadata = parse_transcript_json(json_path)

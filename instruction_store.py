@@ -18,7 +18,7 @@ def _atomic_write(filepath: Path, content: str) -> None:
     filepath.parent.mkdir(parents=True, exist_ok=True)
     tmp = filepath.with_suffix(".tmp")
     try:
-        tmp.write_text(content)
+        tmp.write_text(content, encoding="utf-8")
         tmp.replace(filepath)
     except OSError as e:
         logger.error(f"Failed to write {filepath}: {e}")
@@ -27,7 +27,7 @@ def _atomic_write(filepath: Path, content: str) -> None:
 def _load_versions() -> dict[str, list[dict]]:
     try:
         if _VERSIONS_FILE.exists():
-            data = json.loads(_VERSIONS_FILE.read_text())
+            data = json.loads(_VERSIONS_FILE.read_text(encoding="utf-8"))
             return data.get("versions", {})
     except (json.JSONDecodeError, OSError) as e:
         logger.warning(f"Failed to load instruction versions: {e}")
