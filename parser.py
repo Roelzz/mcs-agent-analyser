@@ -180,7 +180,7 @@ def _extract_begin_dialogs(
 
 def parse_yaml(path: Path) -> tuple[BotProfile, dict[str, str]]:
     """Parse botContent.yml and return (BotProfile, schema_to_display_name lookup)."""
-    raw = path.read_text(encoding="utf-8")
+    raw = path.read_text(encoding="utf-8", errors="replace")
     data = yaml.safe_load(sanitize_yaml(raw))
     return _parse_bot_dict(data)
 
