@@ -359,34 +359,118 @@ Built-in check categories:
 
 Custom rules (from your YAML file) also run during solution checks alongside these built-in categories.
 
-## Dataverse Connection (App Registration)
+## Dataverse Connection
 
-You need an **Entra ID app registration** to use the Dataverse integration. There's no way around it — Microsoft 365 username/password authentication for Dataverse is deprecated, and any non-.NET application must authenticate via OAuth against the OData RESTful Web API.
+Agent Analyser connects to Dataverse to fetch bot configuration, components, and conversation transcripts. Authentication uses OAuth 2.0 device code flow against the Dataverse Web API.
 
-**What to set up**
+### Prerequisites
 
-1. Register an app in **Entra ID** (Azure Portal → App registrations → New registration)
-2. Add **Dynamics CRM / `user_impersonation`** as a delegated permission (no admin consent needed)
-3. Enable **public client** flows (Authentication → Allow public client flows → Yes)
-4. Note the **Application (client) ID** — you'll enter this in Agent Analyser
+Before connecting, make sure the following are in place:
 
-**What you do NOT need**
+**1. Licensing**
 
-- No client secret (this is a public client, not a confidential one)
-- No admin consent (`user_impersonation` is a delegated permission)
-- No special Dataverse configuration
+The user signing in needs a license that includes Dataverse access:
+- Copilot Studio license (per-user)
+- Power Apps Premium (per-user or per-app)
+- Dynamics 365 Enterprise (Sales, Customer Service, Finance, etc.)
 
-The user logging in just needs a valid Dataverse license and the right security role in the target environment. The app registration handles the OAuth flow; actual data access is controlled by the user's Dataverse security roles.
+Any of these grants access to the Dataverse environment where your bot lives.
 
-**The flow in Agent Analyser**
+**2. Conversation transcripts**
 
-1. Enter your Dataverse environment URL and app registration client ID
-2. Agent Analyser initiates a device-code login flow
-3. You authenticate in your browser with your org credentials
-4. The token is used as a Bearer header against `https://<your-env>.crm.dynamics.com/api/data/v9.x/`
-5. Bot config, components, and conversation transcripts are fetched automatically
+Transcripts must be enabled explicitly — they're off by default.
 
-One app registration, one delegated permission. That's it.
+1. In Copilot Studio, open your agent
+2. Go to **Settings** (gear icon) → **Agent** → **Conversation transcripts**
+3. Toggle it **on**
+
+Important details:
+- Enabling transcripts only captures conversations **going forward** — there is no backfill of historical conversations
+- Transcripts appear in Dataverse approximately **30 minutes** after a conversation ends (3 minutes for telephony)
+- Default retention is **30 days** (configurable up to 24 months by a Power Platform admin)
+
+**3. Dataverse security role**
+
+The signed-in user needs **Read** access to three tables:
+
+| Table | Schema name | Used for |
+| --- | --- | --- |
+| Bot | `bot` | Resolving bot identity and configuration |
+| Bot Component | `botcomponent` | Fetching topics, skills, entities, connectors |
+| Conversation Transcript | `conversationtranscript` | Fetching conversation activity logs |
+
+Built-in roles that have this access:
+- **System Administrator** — full access to everything
+- **System Customizer** — full customization access including bot tables
+
+For least-privilege access, ask your admin to assign the **Bot Transcript Viewer** role (created by Copilot Studio), or create a custom security role with Read on those three tables.
+
+**4. Session details**
+
+You need three values from Copilot Studio:
+
+1. Open your agent in Copilot Studio
+2. Go to **Settings** (gear icon) → **Session details**
+3. Copy: **Tenant ID**, **Instance URL**, and **Copilot ID**
+
+Agent Analyser can auto-fill these — just paste the full Session details block into the text area on the Import page.
+
+### Authentication
+
+Agent Analyser supports two authentication modes. Try the default first.
+
+**Option 1: Default (no app registration)**
+
+By default, Agent Analyser uses the Microsoft Azure CLI client ID (`04b07795-8ddb-461a-bbee-02f9e1bf7b46`). This is a well-known first-party Microsoft application that works across all tenants without any setup.
+
+1. Enter your **Environment URL** and **Tenant ID** on the Import page
+2. Click **Connect to Dataverse**
+3. A device code appears — go to [microsoft.com/devicelogin](https://microsoft.com/devicelogin) and enter the code
+4. Sign in with your org credentials
+5. Agent Analyser receives a delegated token and starts fetching data
+
+No app registration, no admin involvement. Works for most tenants.
+
+**Option 2: Custom app registration (if default is blocked)**
+
+Some tenants block third-party client IDs via Conditional Access policies. If the default flow fails with `AADSTS65002` or a similar auth error, register your own app:
+
+1. Go to **Azure Portal** → **App registrations** → **New registration**
+2. Name it (e.g. "Agent Analyser"), select **Single tenant**
+3. No redirect URI needed — leave it blank
+4. Go to **API permissions** → **Add a permission** → **Dynamics CRM** → **Delegated permissions** → check **`user_impersonation`** → **Add**
+5. Ask your tenant admin to click **Grant admin consent for [your tenant]** (or consent yourself if your tenant allows it)
+6. Go to **Authentication** → **Advanced settings** → set **Allow public client flows** to **Yes** → **Save**
+7. Copy the **Application (client) ID** from the Overview page
+
+Enter this client ID in the **Client ID** field on the Import page instead of the default.
+
+What you do NOT need:
+- No client secret (device code flow uses a public client)
+- No redirect URI
+- No special Dataverse-side configuration
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `AADSTS65002` during auth | Public client flows not enabled, or client ID blocked by Conditional Access | Enable public client flows on the app registration, or register your own app (Option 2) |
+| 403 after connecting | Missing Read permission on one or more Dataverse tables | Ask admin to assign System Administrator, Bot Transcript Viewer, or a custom role with Read on `bot`, `botcomponent`, `conversationtranscript` |
+| Empty transcript list | Transcripts not enabled, or conversations too recent | Enable transcripts in Copilot Studio and wait ~30 minutes after a conversation completes |
+| Device code expired | The code is valid for ~15 minutes | Retry the connection — click Connect again to get a fresh code |
+| Consent prompt on sign-in | Admin hasn't pre-consented `user_impersonation` | Ask your tenant admin to grant admin consent, or consent yourself if allowed |
+
+### API details
+
+For admins reviewing network access or firewall rules:
+
+- **Protocol**: OData v4 over HTTPS
+- **API version**: Dataverse Web API v9.2
+- **Base URL**: `https://<your-env>.crm.dynamics.com/api/data/v9.2/`
+- **Auth endpoint**: `https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/devicecode`
+- **Token scope**: `https://<your-env>.crm.dynamics.com/.default`
+- **Tables accessed**: `bots`, `botcomponents`, `conversationtranscripts`
+- **Operations**: Read only (HTTP GET)
 
 ## Configuration
 

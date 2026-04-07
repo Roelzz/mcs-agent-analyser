@@ -127,7 +127,7 @@ class UploadMixin(rx.State, mixin=True):
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
                 json_path = Path(tmpdir) / "pasted_transcript.json"
-                json_path.write_text(text)
+                json_path.write_text(text, encoding="utf-8")
 
                 activities, metadata = parse_transcript_json(json_path)
                 timeline = build_timeline(activities, {})

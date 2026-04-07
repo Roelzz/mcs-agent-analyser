@@ -50,7 +50,7 @@ def _save_bot_profile(json_str: str) -> None:
     _BOT_PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = _BOT_PROFILE_FILE.with_suffix(".tmp")
     try:
-        tmp.write_text(json_str)
+        tmp.write_text(json_str, encoding="utf-8")
         tmp.replace(_BOT_PROFILE_FILE)
     except OSError as e:
         logger.error(f"Failed to save bot profile: {e}")
@@ -59,7 +59,7 @@ def _save_bot_profile(json_str: str) -> None:
 def _load_bot_profile() -> str:
     try:
         if _BOT_PROFILE_FILE.exists():
-            return _BOT_PROFILE_FILE.read_text()
+            return _BOT_PROFILE_FILE.read_text(encoding="utf-8")
     except OSError as e:
         logger.warning(f"Failed to load bot profile: {e}")
     return ""
