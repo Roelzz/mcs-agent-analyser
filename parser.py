@@ -267,7 +267,7 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
     has_external_calls = False
     if kind == "DialogComponent":
         model_description = dialog.get("modelDescription")
-        trigger_queries = begin_dialog.get("intent", {}).get("triggerQueries", []) or []
+        trigger_queries = [tq for tq in (begin_dialog.get("intent", {}).get("triggerQueries", []) or []) if isinstance(tq, str)]
         dialog_actions = begin_dialog.get("actions", []) or []
         action_summary = _count_action_kinds(dialog_actions)
         action_details = _extract_action_details(dialog_actions)
