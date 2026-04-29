@@ -309,16 +309,28 @@ def _classify_trace_outcome(
         ep_count = len(trace.endpoints)
         gated = _trigger_disabled_endpoints(trace, profile)
         if ep_count > 0 and len(gated) == ep_count:
-            # All endpoints are gated off — the connector never queried anything.
+            # All endpoints have triggerCondition: false. Per Microsoft's
+            # skills-for-copilot-studio repo, this is the documented pattern
+            # for "topic-only" sources — i.e. the source is *intentionally*
+            # excluded from automatic search and used only via explicit
+            # SearchAndSummarizeContent invocation. Don't blame the trigger
+            # for the empty result; just surface the configuration and
+            # suggest the real likely causes.
             return (
-                "🟠",
-                "Trigger Gated Off",
-                f"All {ep_count} configured knowledge source(s) have "
-                f"`triggerCondition: false` — they are wired up but gated off, "
-                f"so the SearchAndSummarizeContent connector never queried them. "
-                f"Empty `searchResults`/`searchLogs`/`searchErrors` reflect a "
-                f"short-circuit before any backend call. Fix the trigger "
-                f"condition on the knowledge source to allow searches to fire.",
+                "🟡",
+                "Topic-Only Sources, No Hits",
+                f"All {ep_count} endpoint(s) have `triggerCondition: false` — "
+                f"the documented pattern for sources used only via explicit "
+                f"topic invocation (your topic is calling SearchAndSummarizeContent "
+                f"directly, so this configuration is consistent). Empty "
+                f"`searchResults`/`searchLogs` therefore likely point to: "
+                f"(a) SharePoint permissions for the signed-in user "
+                f"(`Sites.Read.All` + `Files.Read.All`), "
+                f"(b) URL form (generative answers expects site/library URLs, "
+                f"not always direct file URLs), "
+                f"(c) indexing not yet complete, or "
+                f"(d) content not matching the rewritten query. "
+                f"See docs/trigger-condition.md for the full diagnosis ladder.",
             )
         keyword_hint = (
             f' (rewritten query: "{trace.rewritten_keywords or trace.rewritten_message}")'

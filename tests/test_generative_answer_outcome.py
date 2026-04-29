@@ -112,10 +112,12 @@ def _ks_component(site: str, trigger: str | None) -> ComponentSummary:
     )
 
 
-def test_outcome_trigger_gated_off_takes_precedence_over_no_search_results():
+def test_outcome_topic_only_sources_when_all_endpoints_gated():
     """The CT 7500 case from `botContent (4) (2).zip` — `triggerCondition: false`
-    on every endpoint should override the generic "No Search Results" verdict
-    with the more actionable "Trigger Gated Off" diagnosis."""
+    on every endpoint is the documented pattern for "topic-only" sources, NOT a
+    misconfiguration on its own. The verdict must surface the configuration but
+    redirect to the real likely causes (permissions, URL form, indexing) rather
+    than blame the trigger for the empty result."""
     trace = _trace(
         gpt_answer_state="No Search Results",
         completion_state="NoSearchResults",
@@ -138,9 +140,10 @@ def test_outcome_trigger_gated_off_takes_precedence_over_no_search_results():
         ]
     )
     icon, label, explanation = _classify_trace_outcome(trace, profile)
-    assert (icon, label) == ("🟠", "Trigger Gated Off")
+    assert (icon, label) == ("🟡", "Topic-Only Sources, No Hits")
     assert "triggerCondition: false" in explanation
-    assert "2 configured knowledge source" in explanation
+    assert "documented pattern" in explanation
+    assert "SharePoint permissions" in explanation
 
 
 def test_outcome_partial_trigger_gating_keeps_no_search_results_with_hint():
