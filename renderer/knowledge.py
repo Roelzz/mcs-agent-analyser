@@ -329,8 +329,7 @@ def _classify_trace_outcome(
                 f"(b) URL form (generative answers expects site/library URLs, "
                 f"not always direct file URLs), "
                 f"(c) indexing not yet complete, or "
-                f"(d) content not matching the rewritten query. "
-                f"See docs/trigger-condition.md for the full diagnosis ladder.",
+                f"(d) content not matching the rewritten query.",
             )
         keyword_hint = (
             f' (rewritten query: "{trace.rewritten_keywords or trace.rewritten_message}")'
