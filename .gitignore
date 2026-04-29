@@ -42,6 +42,7 @@ Transcripts/
 # Persistent app data
 data/*
 !data/default_rules.yaml
+!data/topic_explainer.yaml
 
 # Local docs / plans (keep screenshots for README)
 docs/*

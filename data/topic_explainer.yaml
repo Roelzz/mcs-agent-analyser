@@ -1,0 +1,359 @@
+# Curated knowledge base for the topic-settings explainer.
+#
+# Every entry's `summary` and `doc` field must trace to a primary Microsoft
+# source (Microsoft Learn or the official `microsoft/skills-for-copilot-studio`
+# repo). Do NOT add LLM-generated explanations — when a kind/property isn't
+# verified against a primary source, leave it out and let the explainer emit
+# its `not yet documented in the explainer KB` sentinel.
+#
+# Format
+#   kinds:
+#     <kind>:
+#       category: action | trigger | component | dialog
+#       summary: "Short human-readable description"
+#       doc:     "https://learn.microsoft.com/..."
+#       properties:
+#         <propname>:
+#           summary: "..."
+#           doc: "..."
+#           type:    enum   # optional — when present, `values` lists each option
+#           values:
+#             <enum_value>:
+#               summary: "..."
+#               doc:     "..."
+#
+# Property names use dot notation for nested keys (e.g. `knowledgeSources.kind`).
+
+schema_version: 1
+
+kinds:
+
+  # ─── Triggers ────────────────────────────────────────────────────────────
+
+  OnRecognizedIntent:
+    category: trigger
+    summary: "Trigger fires when the user's utterance matches the topic's intent (trigger phrases). The dominant trigger kind for user-facing topics."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-triggers"
+    properties:
+      intent.triggerQueries:
+        summary: "List of natural-language phrases that train the intent. The orchestrator matches user utterances against these to decide whether to enter the topic."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-triggers"
+      intent.displayName:
+        summary: "Friendly label for the intent shown in the authoring UI."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-triggers"
+
+  OnUnknownIntent:
+    category: trigger
+    summary: "Fallback trigger that fires when no other topic's intent matches the user query. The Conversational boosting system topic uses this by default."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-system-topics"
+
+  OnConversationStart:
+    category: trigger
+    summary: "Fires once when a user starts a new conversation with the agent. Typical use: greeting message and conversation starters."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-system-topics"
+
+  OnEventActivity:
+    category: trigger
+    summary: "Fires on a specific named event activity sent to the agent (e.g. from an external channel)."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-triggers"
+
+  OnDialogEvent:
+    category: trigger
+    summary: "Fires on internal dialog events such as activity received, end of conversation, or error. Used by system topics."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-system-topics"
+
+  # ─── Dialog kinds ────────────────────────────────────────────────────────
+
+  AdaptiveDialog:
+    category: dialog
+    summary: "The standard dialog kind for conversational topics. Holds a `beginDialog` trigger plus an action tree."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/guidance/topics-code-editor"
+
+  PromptDialog:
+    category: dialog
+    summary: "A prompt tool — a reusable LLM prompt invoked as an action. Distinct from AdaptiveDialog: focused on producing a structured response rather than running a conversation flow."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/prompt-model-settings"
+
+  TaskDialog:
+    category: dialog
+    summary: "A connector or flow action invocation, surfaced as a tool the orchestrator can call. Wraps a connector operation, Power Automate flow, or HTTP request."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
+
+  AgentDialog:
+    category: dialog
+    summary: "An external or connected agent invocation (Agent-to-Agent protocol or Model Context Protocol). The orchestrator delegates work to another agent."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/multiple-bots"
+
+  # ─── Actions: control flow ──────────────────────────────────────────────
+
+  SetVariable:
+    category: action
+    summary: "Assigns a Power Fx expression to a topic, global, or system variable."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-variables"
+    properties:
+      variable:
+        summary: "Target variable, e.g. `Topic.Question` (topic-scoped), `Global.UserName` (conversation-scoped)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-variables-bot"
+      value:
+        summary: "Power Fx expression. A leading `=` indicates a formula; otherwise the value is treated as a literal."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-power-fx"
+
+  SendActivity:
+    category: action
+    summary: "Sends a message activity to the user — text, adaptive card, or other rich content."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-send-message"
+
+  Question:
+    category: action
+    summary: "Asks the user a question, optionally with entity recognition or multiple-choice options. Stores the answer in a variable."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-create-edit-topics#questions"
+    properties:
+      entity:
+        summary: "The entity kind expected from the user's reply (e.g. number, date, custom entity)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-entities-slot-filling"
+      variable:
+        summary: "Variable the recognized answer is stored in."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-variables"
+
+  ConditionGroup:
+    category: action
+    summary: "Branches the dialog based on Power Fx boolean conditions. Each `condition` evaluates an expression; the first match runs its `actions`. `elseActions` runs when no branch matches."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-using-conditions"
+    properties:
+      conditions:
+        summary: "Ordered list of branches. Each branch has a Power Fx `condition` (must return a Boolean) and an `actions` block."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-using-conditions"
+      elseActions:
+        summary: "Actions executed when no branch's condition evaluates to true."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-using-conditions"
+
+  BeginDialog:
+    category: action
+    summary: "Redirects the conversation to another topic (sub-dialog). Execution returns when the target topic ends."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-redirect-another-topic"
+    properties:
+      dialog:
+        summary: "Schema name of the target topic."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-redirect-another-topic"
+
+  EndDialog:
+    category: action
+    summary: "Ends the current topic. Optionally clears the topic queue so any queued follow-up topics are dropped."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-end-current-topic"
+    properties:
+      clearTopicQueue:
+        summary: "When true, drops any topics queued by `BeginDialog` so the conversation returns directly to the orchestrator."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-end-current-topic"
+
+  GotoAction:
+    category: action
+    summary: "Jumps to another action within the same topic by id. Used to build loops or re-entry points."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/guidance/topics-code-editor"
+
+  EndConversation:
+    category: action
+    summary: "Ends the entire conversation. Distinct from `EndDialog` (which only ends the current topic)."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-end-current-topic"
+
+  # ─── Actions: knowledge / generative ────────────────────────────────────
+
+  SearchAndSummarizeContent:
+    category: action
+    summary: "Generative-answers action invoked from inside a topic. Rewrites the user's query, searches the configured knowledge sources, and summarises the results with an LLM. The most-used grounded-answer mechanism."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/nlu-boost-node"
+    properties:
+      userInput:
+        summary: "Power Fx expression for the text passed into the search/summary pipeline. Microsoft's authoring guidance is to pass a topic variable populated from `System.LastMessage.Text` rather than `System.Activity.Text` directly, to preserve conversational context."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/guidance/topics-code-editor"
+      variable:
+        summary: "Topic or global variable that captures the generated answer for downstream use."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/nlu-boost-node"
+      additionalInstructions:
+        summary: "Free-text instructions appended to the summarization LLM prompt. Used to bias tone, format, or content."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/nlu-boost-node"
+      moderationLevel:
+        type: enum
+        summary: "Content-moderation strictness applied to the generated answer. Higher = stricter filtering, fewer answers returned."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-copilot-studio#content-moderation"
+        values:
+          Lowest:
+            summary: "Most permissive — generates the most answers; filtering is minimal."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-copilot-studio#content-moderation"
+          Low:
+            summary: "Permissive — light moderation."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-copilot-studio#content-moderation"
+          Medium:
+            summary: "Balanced moderation."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-copilot-studio#content-moderation"
+          High:
+            summary: "Default. Strict filter against harmful content; some answers may be blocked."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-copilot-studio#content-moderation"
+          Highest:
+            summary: "Most restrictive — fewest answers, strictest filter."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-copilot-studio#content-moderation"
+      knowledgeSources.kind:
+        type: enum
+        summary: "Scope of which knowledge sources this S&S call searches."
+        doc: "https://github.com/microsoft/skills-for-copilot-studio/blob/main/skills/add-knowledge/knowledge-guide.md"
+        values:
+          SearchAllKnowledgeSources:
+            summary: "Searches every knowledge source registered to the agent. Sources with `triggerCondition: =false` are excluded from automatic searches per Microsoft's skills repo; the runtime precedence when invoked from an explicit topic-level S&S node is not documented."
+            doc: "https://github.com/microsoft/skills-for-copilot-studio/blob/main/skills/add-knowledge/knowledge-guide.md"
+          SearchSpecificKnowledgeSources:
+            summary: "Searches only the explicitly listed sources by schema name. Use this when sources have `triggerCondition: =false` and are intended to be invoked only from this topic."
+            doc: "https://github.com/microsoft/skills-for-copilot-studio/blob/main/skills/add-knowledge/knowledge-guide.md"
+      fileSearchDataSource.searchFilesMode.kind:
+        type: enum
+        summary: "Scope of which uploaded files this S&S call searches."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-add-file-upload"
+        values:
+          SearchAllFiles:
+            summary: "Searches every file uploaded to the agent."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-add-file-upload"
+          SearchSpecificFiles:
+            summary: "Searches only the files explicitly listed."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-add-file-upload"
+      publicDataSource:
+        summary: "Public website search source. Specify allowed sites; results come from Bing constrained to those domains."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-add-public-website"
+      sharePointSearchDataSource:
+        summary: "SharePoint search source. Uses Microsoft Graph search, runs as the signed-in user, requires `Sites.Read.All` and `Files.Read.All` delegated permissions."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/nlu-generative-answers-sharepoint-onedrive"
+
+  SearchKnowledgeSources:
+    category: action
+    summary: "Returns ranked results from the agent's knowledge sources without LLM summarization. Use when the precision of raw results matters more than a generated summary."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/guidance/topics-code-editor"
+
+  CreateSearchQuery:
+    category: action
+    summary: "Generates a search query from conversational context using an LLM. Microsoft's guidance is to pair `CreateSearchQuery` → `SearchAndSummarizeContent` rather than passing `System.Activity.Text` directly."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/guidance/topics-code-editor"
+
+  # ─── Actions: external invocation ───────────────────────────────────────
+
+  HttpRequestAction:
+    category: action
+    summary: "Calls an arbitrary HTTP endpoint. Bypasses the connector layer — useful for endpoints not exposed through Power Platform connectors."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-flow"
+    properties:
+      method:
+        summary: "HTTP verb (GET, POST, PUT, DELETE, etc.)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-flow"
+      url:
+        summary: "Full request URL. Power Fx expressions are interpolated."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-flow"
+
+  InvokeFlowAction:
+    category: action
+    summary: "Invokes a Power Automate cloud flow as an action. The flow's parameters and return value are bound through the connector definition."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-flow"
+
+  InvokeConnectorAction:
+    category: action
+    summary: "Invokes a Power Platform connector operation directly (e.g. SharePoint, Outlook, Dataverse). Bound by `connectionReference` and `operationId`."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
+    properties:
+      connectionReference:
+        summary: "Logical reference to the connection used to authenticate the call. Resolves to a connector instance at runtime."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
+      operationId:
+        summary: "Specific connector operation invoked (one of the actions exposed by the connector definition)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
+
+  InvokeAIBuilderModelAction:
+    category: action
+    summary: "Invokes an AI Builder model (prediction, form processing, prompt) as an action."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-ai-builder"
+
+  InvokeConnectorTaskAction:
+    category: action
+    summary: "Calls a connector that is registered as a tool (TaskDialog) — surfaced for orchestrator selection rather than hard-wired into a topic."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
+
+  InvokeExternalAgentTaskAction:
+    category: action
+    summary: "Delegates a turn to an external agent (e.g. an Azure AI Foundry agent or a third-party A2A endpoint). Configured by `externalAgentProtocol` and the protocol-specific metadata."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/multiple-bots"
+
+  InvokeConnectedAgentTaskAction:
+    category: action
+    summary: "Delegates a turn to another Copilot Studio agent in the same tenant (Connected Agent pattern)."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/multiple-bots"
+
+  InvokeComputerUseAction:
+    category: action
+    summary: "Invokes a Computer Use tool (CUA) — automation that takes screenshots and clicks the UI."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
+
+  AdaptiveCardPrompt:
+    category: action
+    summary: "Renders an Adaptive Card and waits for the user to submit it. Captures the submitted values into bound variables."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-send-message#add-an-adaptive-card"
+
+  # ─── Components ─────────────────────────────────────────────────────────
+
+  KnowledgeSourceComponent:
+    category: component
+    summary: "A registered knowledge source the agent can search — SharePoint, public website, uploaded documents, Dataverse, or an enterprise data connector."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-copilot-studio"
+    properties:
+      configuration.source.kind:
+        type: enum
+        summary: "The backend used to retrieve content for this source."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-copilot-studio#supported-knowledge-sources"
+        values:
+          SharePointSearchSource:
+            summary: "SharePoint via Microsoft Graph search. Requires Microsoft Entra ID auth and `Sites.Read.All` / `Files.Read.All` delegated permissions."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/nlu-generative-answers-sharepoint-onedrive"
+          PublicSiteSearchSource:
+            summary: "Public-website search via Bing, restricted to the listed domains."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-add-public-website"
+          DataverseSearchSource:
+            summary: "Dataverse table search using retrieval-augmented generation."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-add-dataverse"
+      configuration.source.triggerCondition:
+        summary: "Power Fx boolean expression. `=true` (default) makes the source automatically searchable; `=false` excludes it from automatic searches and reserves it for explicit invocation. Documented in Microsoft's `microsoft/skills-for-copilot-studio` repo as the documented pattern for topic-only sources."
+        doc: "https://github.com/microsoft/skills-for-copilot-studio/blob/main/skills/add-knowledge/knowledge-guide.md"
+      configuration.source.site:
+        summary: "SharePoint URL the source binds to. Generative answers expects site or library URLs; direct file URLs may produce zero hits."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-add-public-website#url-considerations"
+
+  GlobalVariableComponent:
+    category: component
+    summary: "A conversation-scoped variable available to all topics. Optionally exposed to the orchestrator as context."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-variables-bot"
+    properties:
+      variable.scope:
+        summary: "Variable scope — typically `Global` (per-conversation) or `User` (per-user persistence)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-variables"
+
+  FileAttachmentComponent:
+    category: component
+    summary: "An uploaded file (PDF, DOCX, PPTX) registered as a knowledge source for the agent."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/knowledge-add-file-upload"
+
+  CustomEntityComponent:
+    category: component
+    summary: "A custom entity definition — closed list of values the agent recognises in user input. Used by Question nodes for slot filling."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-entities-slot-filling"
+
+  GptComponent:
+    category: component
+    summary: "An agent-level GPT/AI configuration record — system instructions, model hints, conversation starters, capability toggles."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-instructions"
+
+  DialogComponent:
+    category: component
+    summary: "A topic — wraps a `dialog` (typically `AdaptiveDialog`) plus its trigger, intent, and action tree."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-create-edit-topics"
+
+  BotSettingsComponent:
+    category: component
+    summary: "Agent-level settings — feedback collection, telemetry, and other configuration not tied to a specific topic."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-create-bot"
+
+  SkillComponent:
+    category: component
+    summary: "A registered Bot Framework skill the agent can invoke. Predates the newer Connected/External Agent patterns."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/configuration-add-skills"

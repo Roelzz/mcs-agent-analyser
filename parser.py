@@ -269,6 +269,7 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
     action_summary: dict[str, int] = {}
     action_details: list[dict] = []
     has_external_calls = False
+    raw_dialog: dict | None = None
     if kind == "DialogComponent":
         model_description = dialog.get("modelDescription")
         trigger_queries = [
@@ -278,6 +279,10 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
         action_summary = _count_action_kinds(dialog_actions)
         action_details = _extract_action_details(dialog_actions)
         has_external_calls = bool(set(action_summary) & _EXTERNAL_ACTION_KINDS)
+        # Retain the full dialog dict so the topic-settings explainer can walk
+        # the action tree without re-parsing. We keep this as a raw dict (not a
+        # Pydantic submodel) because the YAML schema is open-ended.
+        raw_dialog = dialog if isinstance(dialog, dict) else None
 
     # KnowledgeSourceComponent: extract source config + trigger condition
     source_kind = None
@@ -343,6 +348,7 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
         file_type=file_type,
         variable_scope=variable_scope,
         trigger_condition_raw=trigger_condition_raw,
+        raw_dialog=raw_dialog,
     )
 
     return summary, marks_orchestrator

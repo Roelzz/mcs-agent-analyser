@@ -31,6 +31,7 @@ from .profile import (
     render_topic_details,
     render_topic_graph,
     render_topic_inventory,
+    render_topic_settings_explained,
     render_trigger_overlaps,
 )
 from .report import (
@@ -103,6 +104,7 @@ __all__ = [
     "render_topic_details",
     "render_topic_graph",
     "render_topic_inventory",
+    "render_topic_settings_explained",
     "render_transcript_report",
     "render_trigger_overlaps",
 ]

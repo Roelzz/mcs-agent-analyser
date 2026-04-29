@@ -9,6 +9,12 @@ from ._helpers import (
     _make_participant_id,
     _sanitize_mermaid,
 )
+from .topic_explainer import (
+    explain_component,
+    load_kb,
+    render_explainer_for_topic,
+    render_explainer_node_markdown,
+)
 
 _SYSTEM_TRIGGERS: set[str] = {
     "OnSystemRedirect",
@@ -356,6 +362,7 @@ def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | N
                     raw_rows.append((comp.display_name, "(summary)", "—", f"{total} calls"))
             # Deduplicate: count identical rows
             from collections import Counter
+
             row_counts = Counter(raw_rows)
             for (topic, kind, connector, operation), count in row_counts.items():
                 op_display = f"{operation} (×{count})" if count > 1 else operation
@@ -402,6 +409,51 @@ def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | N
                     lines.append(f"| {comp.display_name} | {comp.state} | {ext} |")
             lines.append("")
 
+    return "\n".join(lines)
+
+
+def render_topic_settings_explained(profile: BotProfile) -> str:
+    """Per-topic deep walkthrough of every action and property.
+
+    For each non-system topic in the bot, walks the dialog action tree and
+    renders a markdown block with KB-sourced explanations and Microsoft doc
+    links. Undocumented kinds/properties are flagged with a visible sentinel
+    rather than silently filled in.
+    """
+    topics = [
+        c
+        for c in profile.components
+        if c.kind == "DialogComponent" and c.raw_dialog and c.trigger_kind not in (_SYSTEM_TRIGGERS | {None})
+    ]
+    if not topics:
+        return ""
+    try:
+        kb = load_kb()
+    except Exception as e:
+        return f"## Topic Settings Explained\n\n_Could not load explainer KB: {e}_\n"
+
+    lines: list[str] = ["## Topic Settings Explained\n"]
+    lines.append(
+        "Walks every action and property in each topic's dialog tree and explains "
+        "what the setting does, with links to Microsoft's documentation. Lines marked "
+        "⚪ are not yet documented in the analyser's curated knowledge base.\n"
+    )
+    for comp in topics:
+        block = render_explainer_for_topic(comp, kb)
+        if block:
+            lines.append(block)
+
+    # Also render explainer blocks for the agent's KnowledgeSourceComponents,
+    # since those carry the `triggerCondition` field that gates topic-level
+    # search behaviour.
+    ks_comps = [c for c in profile.components if c.kind == "KnowledgeSourceComponent"]
+    if ks_comps:
+        lines.append("### Knowledge sources — settings explained\n")
+        for comp in ks_comps:
+            node = explain_component(comp, kb)
+            block_lines = [f"#### {comp.display_name or comp.schema_name}\n"]
+            block_lines.extend(render_explainer_node_markdown(node))
+            lines.append("\n".join(block_lines) + "\n")
     return "\n".join(lines)
 
 
@@ -469,10 +521,10 @@ def render_knowledge_inventory(profile: BotProfile) -> str:
 
 
 _SEVERITY_ICON: dict[str, str] = {
-    "fail": "\U0001f534",      # red circle
-    "warning": "\U0001f7e1",   # yellow circle
-    "info": "\U0001f535",      # blue circle
-    "pass": "\U0001f7e2",      # green circle
+    "fail": "\U0001f534",  # red circle
+    "warning": "\U0001f7e1",  # yellow circle
+    "info": "\U0001f535",  # blue circle
+    "pass": "\U0001f7e2",  # green circle
 }
 
 
@@ -493,8 +545,10 @@ def render_quick_wins(profile: BotProfile) -> str:
     for comp in profile.components:
         if comp.kind == "DialogComponent" and comp.state != "Active":
             findings.append(
-                _fmt("warning", f'Disabled topic: "{comp.display_name}" — '
-                     "Topic is inactive. Enable or remove to reduce clutter.")
+                _fmt(
+                    "warning",
+                    f'Disabled topic: "{comp.display_name}" — Topic is inactive. Enable or remove to reduce clutter.',
+                )
             )
 
     # 2. No trigger queries (user topics only)
@@ -507,8 +561,11 @@ def render_quick_wins(profile: BotProfile) -> str:
             and comp.trigger_kind not in _AUTOMATION_TRIGGERS
         ):
             findings.append(
-                _fmt("warning", f'No trigger queries: "{comp.display_name}" — '
-                     "User topic has no trigger phrases. It may never be matched by the recognizer.")
+                _fmt(
+                    "warning",
+                    f'No trigger queries: "{comp.display_name}" — '
+                    "User topic has no trigger phrases. It may never be matched by the recognizer.",
+                )
             )
 
     # 3. Weak descriptions
@@ -522,17 +579,13 @@ def render_quick_wins(profile: BotProfile) -> str:
                     reason_detail = f'too short: "{desc}"'
                 else:
                     reason_detail = "matches display name"
-                findings.append(
-                    _fmt("info", f'Weak description: "{comp.display_name}" — {reason_detail}')
-                )
+                findings.append(_fmt("info", f'Weak description: "{comp.display_name}" — {reason_detail}'))
 
     # 4. Missing system topics
     trigger_kinds = {c.trigger_kind for c in profile.components if c.trigger_kind}
     for trigger in ("OnError", "OnUnknownIntent", "OnEscalate"):
         if trigger not in trigger_kinds:
-            findings.append(
-                _fmt("warning", f"Missing system topic: {trigger} — No handler for this lifecycle event.")
-            )
+            findings.append(_fmt("warning", f"Missing system topic: {trigger} — No handler for this lifecycle event."))
 
     # 5. Unused global variables (heuristic)
     global_vars = [c for c in profile.components if c.kind == "GlobalVariableComponent"]
@@ -547,8 +600,11 @@ def render_quick_wins(profile: BotProfile) -> str:
     for gv in global_vars:
         if gv.schema_name and gv.schema_name not in all_text:
             findings.append(
-                _fmt("info", f'Possibly unused variable: "{gv.display_name}" — '
-                     "Schema name not found in other component references (heuristic).")
+                _fmt(
+                    "info",
+                    f'Possibly unused variable: "{gv.display_name}" — '
+                    "Schema name not found in other component references (heuristic).",
+                )
             )
 
     # 6. Connection reference issues

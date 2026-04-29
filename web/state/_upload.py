@@ -1180,6 +1180,24 @@ class UploadMixin(rx.State, mixin=True):
     def _populate_topics_data(self, profile, timeline) -> None:
         """Extract structured data for the Topics tab."""
         from models import EventType
+        from renderer.topic_explainer import load_kb, render_explainer_for_topic
+
+        # Load explainer KB once and reuse across topic rows. If the KB file is
+        # missing or malformed, fall back to no explainer rather than crash.
+        try:
+            explainer_kb: dict | None = load_kb()
+        except Exception as e:
+            logger.warning(f"Topic explainer KB load failed: {e}")
+            explainer_kb = None
+
+        def _explainer_md(comp) -> str:
+            if not explainer_kb or not comp.raw_dialog:
+                return ""
+            try:
+                return render_explainer_for_topic(comp, explainer_kb)
+            except Exception as e:
+                logger.warning(f"Explainer render failed for {comp.schema_name}: {e}")
+                return ""
 
         by_cat: dict[str, list] = {}
         for comp in profile.components:
@@ -1251,7 +1269,8 @@ class UploadMixin(rx.State, mixin=True):
             )
         self.mcs_topics_summary = summary_rows  # type: ignore[attr-defined]
 
-        # User topics detail
+        # User topics detail (now carries a pre-rendered explainer markdown
+        # block per topic; the UI renders it inside a per-row accordion).
         self.mcs_topics_user_rows = [  # type: ignore[attr-defined]
             {
                 "name": c.display_name,
@@ -1261,6 +1280,7 @@ class UploadMixin(rx.State, mixin=True):
                 if c.trigger_queries
                 else "—",
                 "description": (c.description or "—")[:150],
+                "explainer_md": _explainer_md(c),
             }
             for c in user_topics
         ]
@@ -1273,6 +1293,7 @@ class UploadMixin(rx.State, mixin=True):
                 "tool_type": c.tool_type or c.action_kind or "—",
                 "connector": c.connector_display_name or "—",
                 "mode": c.connection_mode or "—",
+                "explainer_md": _explainer_md(c),
             }
             for c in orch_topics
         ]
@@ -1284,6 +1305,7 @@ class UploadMixin(rx.State, mixin=True):
                 "schema": c.schema_name,
                 "state": c.state,
                 "trigger": c.trigger_kind or "—",
+                "explainer_md": _explainer_md(c),
             }
             for c in system_topics
         ]

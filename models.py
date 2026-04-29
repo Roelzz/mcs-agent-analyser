@@ -47,6 +47,10 @@ class ComponentSummary(BaseModel):
     file_type: str | None = None
     variable_scope: str | None = None
     trigger_condition_raw: str | None = None
+    # Raw dialog dict — populated only for DialogComponent. The topic-settings
+    # explainer walks this tree to produce per-action explanations. Kept loose
+    # (Any) because the underlying YAML schema is open-ended.
+    raw_dialog: dict | None = None
 
 
 class GptInfo(BaseModel):

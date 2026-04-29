@@ -3203,70 +3203,127 @@ def _mcs_topics_summary_row(item: dict) -> rx.Component:
     )
 
 
+def _settings_explained_accordion(item: dict) -> rx.Component:
+    """Per-row accordion that renders the topic-explainer markdown.
+
+    Rendered only when `explainer_md` is non-empty, so non-DialogComponent rows
+    (or rows without a parsed dialog tree) collapse cleanly.
+    """
+    return rx.cond(
+        item["explainer_md"] != "",
+        rx.accordion.root(
+            rx.accordion.item(
+                header=rx.hstack(
+                    rx.icon("book-open-text", size=12, color=PRIMARY),
+                    rx.text(
+                        "Settings explained",
+                        font_size="11px",
+                        color="var(--gray-a9)",
+                        font_weight="700",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                content=rx.box(
+                    rx.markdown(item["explainer_md"]),
+                    font_size="12px",
+                    color="var(--gray-12)",
+                    line_height="1.55",
+                    padding="10px 14px",
+                    background="var(--gray-a2)",
+                    border_radius="6px",
+                    max_height="520px",
+                    overflow_y="auto",
+                ),
+                value="settings_explained",
+            ),
+            type="single",
+            collapsible=True,
+            width="100%",
+            variant="ghost",
+        ),
+    )
+
+
 def _mcs_topics_user_row(item: dict) -> rx.Component:
-    return _grid_row(
-        [
-            rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-            rx.text(item["schema"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
-            rx.badge(
-                item["state"],
-                color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
-                variant="soft",
-                size="1",
-            ),
-            rx.text(
-                item["triggers"],
-                font_size="12px",
-                color="var(--gray-a9)",
-                overflow="hidden",
-                text_overflow="ellipsis",
-                white_space="nowrap",
-            ),
-            rx.text(
-                item["description"],
-                font_size="12px",
-                color="var(--gray-a9)",
-                overflow="hidden",
-                text_overflow="ellipsis",
-                white_space="nowrap",
-            ),
-        ],
-        template="2fr 2fr 1fr 2fr 2fr",
+    return rx.vstack(
+        _grid_row(
+            [
+                rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+                rx.text(item["schema"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+                rx.badge(
+                    item["state"],
+                    color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
+                    variant="soft",
+                    size="1",
+                ),
+                rx.text(
+                    item["triggers"],
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    overflow="hidden",
+                    text_overflow="ellipsis",
+                    white_space="nowrap",
+                ),
+                rx.text(
+                    item["description"],
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    overflow="hidden",
+                    text_overflow="ellipsis",
+                    white_space="nowrap",
+                ),
+            ],
+            template="2fr 2fr 1fr 2fr 2fr",
+        ),
+        _settings_explained_accordion(item),
+        spacing="0",
+        width="100%",
     )
 
 
 def _mcs_topics_orch_row(item: dict) -> rx.Component:
-    return _grid_row(
-        [
-            rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-            rx.badge(
-                item["state"],
-                color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
-                variant="soft",
-                size="1",
-            ),
-            rx.text(item["tool_type"], font_size="13px", color="var(--gray-a9)"),
-            rx.text(item["connector"], font_size="13px", color="var(--gray-a9)"),
-            rx.text(item["mode"], font_size="13px", color="var(--gray-11)"),
-        ],
-        template="2fr 1fr 1fr 1fr 1fr",
+    return rx.vstack(
+        _grid_row(
+            [
+                rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+                rx.badge(
+                    item["state"],
+                    color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
+                    variant="soft",
+                    size="1",
+                ),
+                rx.text(item["tool_type"], font_size="13px", color="var(--gray-a9)"),
+                rx.text(item["connector"], font_size="13px", color="var(--gray-a9)"),
+                rx.text(item["mode"], font_size="13px", color="var(--gray-11)"),
+            ],
+            template="2fr 1fr 1fr 1fr 1fr",
+        ),
+        _settings_explained_accordion(item),
+        spacing="0",
+        width="100%",
     )
 
 
 def _mcs_topics_system_row(item: dict) -> rx.Component:
-    return _grid_row(
-        [
-            rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-            rx.text(item["schema"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
-            rx.badge(
-                item["state"],
-                color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
-                variant="soft",
-                size="1",
-            ),
-            rx.text(item["trigger"], font_size="13px", color="var(--gray-a9)"),
-        ],
-        template="2fr 2fr 1fr 1fr",
+    return rx.vstack(
+        _grid_row(
+            [
+                rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+                rx.text(item["schema"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+                rx.badge(
+                    item["state"],
+                    color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
+                    variant="soft",
+                    size="1",
+                ),
+                rx.text(item["trigger"], font_size="13px", color="var(--gray-a9)"),
+            ],
+            template="2fr 2fr 1fr 1fr",
+        ),
+        _settings_explained_accordion(item),
+        spacing="0",
+        width="100%",
     )
 
 

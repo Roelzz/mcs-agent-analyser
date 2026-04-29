@@ -28,6 +28,7 @@ from .profile import (
     render_topic_details,
     render_topic_graph,
     render_topic_inventory,
+    render_topic_settings_explained,
     render_trigger_overlaps,
 )
 from .timeline_render import (
@@ -217,6 +218,11 @@ def render_report(
     topic_graph = render_topic_graph(profile)
     if topic_graph:
         sections.append(topic_graph)
+
+    # 13.5 Topic Settings Explained — per-action walk with KB-sourced summaries
+    settings_explained = render_topic_settings_explained(profile)
+    if settings_explained:
+        sections.append(settings_explained)
 
     # 14. Knowledge Inventory
     ka = render_knowledge_inventory(profile)
