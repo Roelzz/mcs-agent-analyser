@@ -3203,32 +3203,156 @@ def _mcs_topics_summary_row(item: dict) -> rx.Component:
     )
 
 
-def _settings_explained_accordion(item: dict) -> rx.Component:
-    """Per-row accordion that renders the topic-explainer markdown.
+def _settings_hover_card(row: dict) -> rx.Component:
+    """Hover card with the KB-sourced explanation for one setting.
 
-    Rendered only when `explainer_md` is non-empty, so non-DialogComponent rows
-    (or rows without a parsed dialog tree) collapse cleanly.
+    Trigger is a small (i) icon next to the setting. Content shows the summary
+    plus a Microsoft Learn link. For undocumented entries, the trigger is
+    greyed out and the card states the gap explicitly — no fake explanation.
+    """
+    return rx.hover_card.root(
+        rx.hover_card.trigger(
+            rx.icon(
+                "info",
+                size=12,
+                color=rx.cond(row["documented"] != "", "var(--accent-9)", "var(--gray-a7)"),
+                cursor="help",
+            ),
+        ),
+        rx.hover_card.content(
+            rx.cond(
+                row["documented"] != "",
+                rx.vstack(
+                    rx.text(row["summary"], font_size="12px", line_height="1.55"),
+                    rx.cond(
+                        row["doc_url"] != "",
+                        rx.link(
+                            "Open Microsoft Learn ↗",
+                            href=row["doc_url"],
+                            is_external=True,
+                            font_size="11px",
+                            color="var(--accent-11)",
+                            text_decoration="underline",
+                        ),
+                    ),
+                    spacing="2",
+                    align="start",
+                ),
+                rx.text(
+                    "Not yet documented in the analyser's curated KB. "
+                    "Add an entry to data/topic_explainer.yaml to surface a hover here.",
+                    font_size="12px",
+                    color="var(--gray-a10)",
+                    font_style="italic",
+                ),
+            ),
+            max_width="420px",
+            padding="10px 12px",
+        ),
+    )
+
+
+def _settings_kind_row(row: dict) -> rx.Component:
+    """Row that names an action / trigger / component."""
+    return rx.hstack(
+        rx.box(min_width=row["indent_px"]),
+        rx.icon(
+            rx.cond(row["documented"] != "", "circle-check", "circle-help"),
+            size=12,
+            color=rx.cond(row["documented"] != "", "var(--accent-9)", "var(--gray-a7)"),
+        ),
+        rx.text(
+            row["label"],
+            font_size="12px",
+            font_weight="700",
+            color="var(--gray-12)",
+        ),
+        rx.cond(
+            row["node_id"] != "",
+            rx.code(row["node_id"], font_size="10px", color="var(--gray-a9)"),
+        ),
+        _settings_hover_card(row),
+        spacing="2",
+        align="center",
+        width="100%",
+        padding="3px 0",
+    )
+
+
+def _settings_prop_row(row: dict) -> rx.Component:
+    """Row that displays one property: name + value, with hover-card explainer."""
+    return rx.hstack(
+        rx.box(min_width=row["indent_px"]),
+        rx.text(
+            row["label"],
+            font_size="11px",
+            color="var(--gray-a9)",
+            font_family=_MONO,
+        ),
+        rx.text(":", font_size="11px", color="var(--gray-a7)"),
+        rx.code(
+            row["display_value"],
+            font_size="11px",
+            color="var(--gray-12)",
+        ),
+        _settings_hover_card(row),
+        spacing="2",
+        align="center",
+        width="100%",
+        padding="2px 0",
+    )
+
+
+def _settings_row_dispatch(row: dict) -> rx.Component:
+    """Render either a kind row or a prop row based on `row_type`."""
+    return rx.cond(
+        row["row_type"] == "kind",
+        _settings_kind_row(row),
+        _settings_prop_row(row),
+    )
+
+
+def _settings_explained_accordion(item: dict) -> rx.Component:
+    """Per-row accordion that opens to the structured settings panel.
+
+    Each setting in the panel has an (i) icon. Hovering reveals a card with
+    the KB-sourced explanation and a Microsoft Learn link. Undocumented
+    settings show a circle-help icon and an explicit "not in KB" hover.
+
+    Rendered only when `settings_rows` is non-empty, so non-DialogComponent
+    rows collapse cleanly.
     """
     return rx.cond(
-        item["explainer_md"] != "",
+        item["settings_rows"].length() > 0,  # type: ignore[union-attr]
         rx.accordion.root(
             rx.accordion.item(
                 header=rx.hstack(
-                    rx.icon("book-open-text", size=12, color=PRIMARY),
+                    rx.icon("settings", size=12, color=PRIMARY),
                     rx.text(
-                        "Settings explained",
+                        "Settings",
                         font_size="11px",
                         color="var(--gray-a9)",
                         font_weight="700",
+                    ),
+                    rx.text(
+                        "(hover ⓘ to explain)",
+                        font_size="10px",
+                        color="var(--gray-a8)",
+                        font_style="italic",
                     ),
                     spacing="2",
                     align="center",
                 ),
                 content=rx.box(
-                    rx.markdown(item["explainer_md"]),
-                    font_size="12px",
-                    color="var(--gray-12)",
-                    line_height="1.55",
+                    rx.vstack(
+                        rx.foreach(
+                            item["settings_rows"].to(list[dict]),  # type: ignore[union-attr]
+                            _settings_row_dispatch,
+                        ),
+                        spacing="0",
+                        align="start",
+                        width="100%",
+                    ),
                     padding="10px 14px",
                     background="var(--gray-a2)",
                     border_radius="6px",

@@ -1180,24 +1180,34 @@ class UploadMixin(rx.State, mixin=True):
     def _populate_topics_data(self, profile, timeline) -> None:
         """Extract structured data for the Topics tab."""
         from models import EventType
-        from renderer.topic_explainer import load_kb, render_explainer_for_topic
+        from renderer.topic_explainer import load_kb, settings_rows_for_topic
 
         # Load explainer KB once and reuse across topic rows. If the KB file is
-        # missing or malformed, fall back to no explainer rather than crash.
+        # missing or malformed, fall back to empty rows rather than crash.
         try:
             explainer_kb: dict | None = load_kb()
         except Exception as e:
             logger.warning(f"Topic explainer KB load failed: {e}")
             explainer_kb = None
 
-        def _explainer_md(comp) -> str:
+        def _settings_rows(comp) -> list[dict]:
             if not explainer_kb or not comp.raw_dialog:
-                return ""
+                return []
             try:
-                return render_explainer_for_topic(comp, explainer_kb)
+                rows = settings_rows_for_topic(comp, explainer_kb)
             except Exception as e:
-                logger.warning(f"Explainer render failed for {comp.schema_name}: {e}")
-                return ""
+                logger.warning(f"Explainer flatten failed for {comp.schema_name}: {e}")
+                return []
+            # Pre-compute UI fields. Reflex can't do f-string concat on State Vars,
+            # so we materialise these server-side when the rows are built.
+            for r in rows:
+                r["indent_px"] = f"{int(r['depth']) * 16}px"
+                # A label that's safe to render unconditionally — kind rows use the
+                # action name, prop rows use the property path.
+                r["label"] = r["kind"] if r["row_type"] == "kind" else r["path"]
+                # Display value: blank for kind rows, raw value for prop rows.
+                r["display_value"] = "" if r["row_type"] == "kind" else (r["value"] or "—")
+            return rows
 
         by_cat: dict[str, list] = {}
         for comp in profile.components:
@@ -1280,7 +1290,7 @@ class UploadMixin(rx.State, mixin=True):
                 if c.trigger_queries
                 else "—",
                 "description": (c.description or "—")[:150],
-                "explainer_md": _explainer_md(c),
+                "settings_rows": _settings_rows(c),
             }
             for c in user_topics
         ]
@@ -1293,7 +1303,7 @@ class UploadMixin(rx.State, mixin=True):
                 "tool_type": c.tool_type or c.action_kind or "—",
                 "connector": c.connector_display_name or "—",
                 "mode": c.connection_mode or "—",
-                "explainer_md": _explainer_md(c),
+                "settings_rows": _settings_rows(c),
             }
             for c in orch_topics
         ]
@@ -1305,7 +1315,7 @@ class UploadMixin(rx.State, mixin=True):
                 "schema": c.schema_name,
                 "state": c.state,
                 "trigger": c.trigger_kind or "—",
-                "explainer_md": _explainer_md(c),
+                "settings_rows": _settings_rows(c),
             }
             for c in system_topics
         ]

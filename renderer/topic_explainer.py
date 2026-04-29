@@ -342,6 +342,73 @@ def collect_undocumented(node: ExplainerNode) -> list[ExplainerNode]:
     return out
 
 
+# ── Flattening for UI consumption ───────────────────────────────────────────
+
+
+def flatten_to_rows(node: ExplainerNode, depth: int = 0) -> list[dict]:
+    """Flatten an ExplainerNode tree into a list of UI-friendly row dicts.
+
+    Each row is one of two shapes:
+
+    - **kind row** (the action / trigger / component itself)
+        ``{"row_type": "kind", "depth", "kind", "node_id", "summary", "doc_url",
+           "documented"}``
+
+    - **prop row** (one property under a kind)
+        ``{"row_type": "prop", "depth", "path", "value", "summary", "doc_url",
+           "documented"}``
+
+    The depth indicates nesting. Properties get `depth + 1` relative to their
+    owning kind, so the renderer can indent them once. Children of a kind
+    get `depth + 1` relative to that kind too.
+
+    Stable ordering: kind row → its properties (alphabetical by path) → its
+    children (in walk order). This keeps the UI predictable.
+    """
+    rows: list[dict] = [
+        {
+            "row_type": "kind",
+            "depth": depth,
+            "kind": node.kind,
+            "node_id": node.node_id or "",
+            "summary": node.summary or "",
+            "doc_url": node.doc_url or "",
+            "documented": "true" if node.documented else "",
+            # Filled below for the kind row's "value" placeholder; UI renders blank.
+            "path": "",
+            "value": "",
+        }
+    ]
+    for prop in node.properties:
+        rows.append(
+            {
+                "row_type": "prop",
+                "depth": depth + 1,
+                "kind": node.kind,
+                "node_id": node.node_id or "",
+                "path": prop.path,
+                "value": prop.value,
+                "summary": prop.summary or "",
+                "doc_url": prop.doc_url or "",
+                "documented": "true" if prop.documented else "",
+            }
+        )
+    for child in node.children:
+        rows.extend(flatten_to_rows(child, depth + 1))
+    return rows
+
+
+def settings_rows_for_topic(component: ComponentSummary, kb: dict) -> list[dict]:
+    """Produce a flat list of UI rows for a topic component.
+
+    Returns an empty list when the component isn't a topic.
+    """
+    root = explain_topic(component, kb)
+    if root is None:
+        return []
+    return flatten_to_rows(root)
+
+
 # ── Markdown rendering ──────────────────────────────────────────────────────
 
 
