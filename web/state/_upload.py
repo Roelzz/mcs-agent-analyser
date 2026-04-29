@@ -1003,8 +1003,10 @@ class UploadMixin(rx.State, mixin=True):
         for idx, trace in enumerate(traces, 1):
             if trace.topic_name:
                 gen_topics.add(trace.topic_name)
-            # Outcome verdict — single source of truth shared with markdown report
-            outcome_icon, outcome_label_text, outcome_explanation = _classify_trace_outcome(trace)
+            # Outcome verdict — single source of truth shared with markdown report.
+            # Profile is passed so the classifier can detect "Trigger Gated Off" when
+            # every endpoint maps to a KnowledgeSourceComponent with triggerCondition=false.
+            outcome_icon, outcome_label_text, outcome_explanation = _classify_trace_outcome(trace, profile)
             status_label = f"{outcome_icon} {outcome_label_text}"
             if outcome_icon == "🟢":
                 status_tone = "good"

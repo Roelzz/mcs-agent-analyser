@@ -6,7 +6,13 @@ down the verdict for each shape of trace the platform can emit, so changes
 to the classifier surface as a clear test failure rather than UI drift.
 """
 
-from models import GenerativeAnswerCitation, GenerativeAnswerTrace, SearchResult
+from models import (
+    BotProfile,
+    ComponentSummary,
+    GenerativeAnswerCitation,
+    GenerativeAnswerTrace,
+    SearchResult,
+)
 from renderer.knowledge import _classify_trace_outcome
 
 
@@ -93,6 +99,81 @@ def test_outcome_answered_grounded():
     assert (icon, label) == ("🟢", "Answered")
     assert "2 result(s)" in explanation
     assert "1 citation(s)" in explanation
+
+
+def _ks_component(site: str, trigger: str | None) -> ComponentSummary:
+    return ComponentSummary(
+        kind="KnowledgeSourceComponent",
+        display_name=site.rsplit("/", 1)[-1].replace("%20", " "),
+        schema_name="ks_" + site.rsplit("/", 1)[-1].split(".")[0],
+        source_kind="SharePointSearchSource",
+        source_site=site,
+        trigger_condition_raw=trigger,
+    )
+
+
+def test_outcome_trigger_gated_off_takes_precedence_over_no_search_results():
+    """The CT 7500 case from `botContent (4) (2).zip` — `triggerCondition: false`
+    on every endpoint should override the generic "No Search Results" verdict
+    with the more actionable "Trigger Gated Off" diagnosis."""
+    trace = _trace(
+        gpt_answer_state="No Search Results",
+        completion_state="NoSearchResults",
+        endpoints=[
+            "https://share.philips.com/sites/AIAssistant/Shared Documents/CT/Spectral CT/Philips Spectral CT 7500 - Premium Specifications - SW 5.2 2024.pdf",
+            "https://share.philips.com/sites/AIAssistant/Shared Documents/CT/Spectral CT/Philips Spectral CT 7500 - Product Brochure - 2024.pdf",
+        ],
+    )
+    profile = BotProfile(
+        components=[
+            # YAML side: percent-encoded URL with `triggerCondition: false`
+            _ks_component(
+                "https://share.philips.com/sites/AIAssistant/Shared%20Documents/CT/Spectral%20CT/Philips%20Spectral%20CT%207500%20-%20Premium%20Specifications%20-%20SW%205.2%202024.pdf",
+                "false",
+            ),
+            _ks_component(
+                "https://share.philips.com/sites/AIAssistant/Shared%20Documents/CT/Spectral%20CT/Philips%20Spectral%20CT%207500%20-%20Product%20Brochure%20-%202024.pdf",
+                "false",
+            ),
+        ]
+    )
+    icon, label, explanation = _classify_trace_outcome(trace, profile)
+    assert (icon, label) == ("🟠", "Trigger Gated Off")
+    assert "triggerCondition: false" in explanation
+    assert "2 configured knowledge source" in explanation
+
+
+def test_outcome_partial_trigger_gating_keeps_no_search_results_with_hint():
+    """When only some endpoints are gated off, the generic 'No Search Results'
+    verdict still applies but the explanation flags how many were gated."""
+    trace = _trace(
+        gpt_answer_state="No Search Results",
+        completion_state="NoSearchResults",
+        endpoints=[
+            "https://share.example/SharedDocs/A.pdf",
+            "https://share.example/SharedDocs/B.pdf",
+        ],
+    )
+    profile = BotProfile(
+        components=[
+            _ks_component("https://share.example/SharedDocs/A.pdf", "false"),
+            _ks_component("https://share.example/SharedDocs/B.pdf", "true"),
+        ]
+    )
+    icon, label, explanation = _classify_trace_outcome(trace, profile)
+    assert (icon, label) == ("🟡", "No Search Results")
+    assert "1 of 2 endpoint(s) have `triggerCondition: false`" in explanation
+
+
+def test_outcome_no_profile_falls_back_to_generic_verdict():
+    """Without a profile we can't cross-reference triggers — verdict must remain
+    the generic 'No Search Results' (don't fabricate a gated-off diagnosis)."""
+    trace = _trace(
+        gpt_answer_state="No Search Results",
+        completion_state="NoSearchResults",
+    )
+    icon, label, _ = _classify_trace_outcome(trace, profile=None)
+    assert (icon, label) == ("🟡", "No Search Results")
 
 
 def test_outcome_hits_but_filtered():

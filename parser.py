@@ -54,21 +54,25 @@ def _extract_action_details(actions: list) -> list[dict]:
         kind = action.get("kind", "")
         if kind in _EXTERNAL_ACTION_KINDS:
             if kind == "HttpRequestAction":
-                details.append({
-                    "kind": kind,
-                    "connection_reference": "",
-                    "operation_id": action.get("displayName", "") or action.get("operationId", ""),
-                    "connector_display_name": "HTTP",
-                    "http_method": action.get("method", ""),
-                    "http_url": (action.get("url", "") or "")[:120],
-                })
+                details.append(
+                    {
+                        "kind": kind,
+                        "connection_reference": "",
+                        "operation_id": action.get("displayName", "") or action.get("operationId", ""),
+                        "connector_display_name": "HTTP",
+                        "http_method": action.get("method", ""),
+                        "http_url": (action.get("url", "") or "")[:120],
+                    }
+                )
             else:
-                details.append({
-                    "kind": kind,
-                    "connection_reference": action.get("connectionReference", ""),
-                    "operation_id": action.get("operationId", ""),
-                    "connector_display_name": "",
-                })
+                details.append(
+                    {
+                        "kind": kind,
+                        "connection_reference": action.get("connectionReference", ""),
+                        "operation_id": action.get("operationId", ""),
+                        "connector_display_name": "",
+                    }
+                )
         for key in ("actions", "elseActions"):
             nested = action.get(key)
             if isinstance(nested, list):
@@ -267,7 +271,9 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
     has_external_calls = False
     if kind == "DialogComponent":
         model_description = dialog.get("modelDescription")
-        trigger_queries = [tq for tq in (begin_dialog.get("intent", {}).get("triggerQueries", []) or []) if isinstance(tq, str)]
+        trigger_queries = [
+            tq for tq in (begin_dialog.get("intent", {}).get("triggerQueries", []) or []) if isinstance(tq, str)
+        ]
         dialog_actions = begin_dialog.get("actions", []) or []
         action_summary = _count_action_kinds(dialog_actions)
         action_details = _extract_action_details(dialog_actions)
@@ -281,7 +287,10 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
         ks_config = comp.get("configuration", {}) or {}
         source = ks_config.get("source", {}) or {}
         source_kind = source.get("kind")
-        source_site = source.get("siteName") or source.get("siteUrl")
+        # `site` is the canonical field for SharePointSearchSource; older runtimes
+        # also emit `siteName`/`siteUrl`. Accept all so endpoint→component lookups
+        # downstream can resolve regardless of export format.
+        source_site = source.get("site") or source.get("siteName") or source.get("siteUrl")
         tc = source.get("triggerCondition")
         trigger_condition_raw = str(tc) if tc is not None else None
 

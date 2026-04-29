@@ -159,7 +159,7 @@ def render_knowledge_search_section(
             f"**0 orchestrator searches · {len(gen_traces)} topic-level Search & Summarize call"
             f"{'s' if len(gen_traces) != 1 else ''}** | General Knowledge: {gk}\n"
         )
-        lines.append(render_generative_answer_traces(gen_traces))
+        lines.append(render_generative_answer_traces(gen_traces, profile))
         return "\n".join(lines)
 
     # Group searches by triggering_user_message (preserve order)
@@ -208,7 +208,7 @@ def render_knowledge_search_section(
     gen_traces = getattr(timeline, "generative_answer_traces", []) or []
     if gen_traces:
         lines.append("")
-        lines.append(render_generative_answer_traces(gen_traces))
+        lines.append(render_generative_answer_traces(gen_traces, profile))
 
     return "\n".join(lines)
 
@@ -223,12 +223,53 @@ def _rank_badge(score: float | None) -> str:
     return f"🟠 {score:.2f}"
 
 
-def _classify_trace_outcome(trace: GenerativeAnswerTrace) -> tuple[str, str, str]:
+def _normalize_url(url: str) -> str:
+    """URL-decode and lowercase a URL for tolerant matching.
+
+    Trace endpoints arrive decoded ("Shared Documents/...") while the YAML
+    `site:` field is percent-encoded ("Shared%20Documents/..."). Normalising
+    both sides lets us reliably match endpoint→component without false misses.
+    """
+    from urllib.parse import unquote
+
+    return unquote(url or "").strip().lower()
+
+
+def _trigger_disabled_endpoints(
+    trace: GenerativeAnswerTrace,
+    profile: BotProfile | None,
+) -> list[str]:
+    """Endpoints whose backing KnowledgeSourceComponent has triggerCondition=false.
+
+    Returned URLs are the original (un-normalised) endpoint strings so callers
+    can quote them directly.
+    """
+    if profile is None or not trace.endpoints:
+        return []
+    disabled_sites = {
+        _normalize_url(c.source_site or "")
+        for c in profile.components
+        if c.kind == "KnowledgeSourceComponent"
+        and (c.trigger_condition_raw or "").strip().lower() == "false"
+        and c.source_site
+    }
+    if not disabled_sites:
+        return []
+    return [ep for ep in trace.endpoints if _normalize_url(ep) in disabled_sites]
+
+
+def _classify_trace_outcome(
+    trace: GenerativeAnswerTrace,
+    profile: BotProfile | None = None,
+) -> tuple[str, str, str]:
     """Classify a generative-answer trace into a single human-readable outcome.
 
     Returns (icon, short_label, plain_english_explanation). The classification
-    is derived solely from fields the platform emits in `GenerativeAnswersSupportData`,
-    so the verdict reflects what the platform reported — not a guess.
+    is derived from fields the platform emits in `GenerativeAnswersSupportData`,
+    plus an optional cross-reference against `profile.components` to detect
+    the special case where every endpoint maps to a knowledge source whose
+    `triggerCondition` is the literal `false` (i.e. the connector is wired up
+    but gated off, so no actual backend call is ever made).
     """
     state = (trace.gpt_answer_state or "").strip()
     state_l = state.lower()
@@ -265,26 +306,47 @@ def _classify_trace_outcome(trace: GenerativeAnswerTrace) -> tuple[str, str, str
             f"(typically blocked by moderation, provenance, or confidential-data filter).",
         )
     if not has_results and not has_errors:
+        ep_count = len(trace.endpoints)
+        gated = _trigger_disabled_endpoints(trace, profile)
+        if ep_count > 0 and len(gated) == ep_count:
+            # All endpoints are gated off — the connector never queried anything.
+            return (
+                "🟠",
+                "Trigger Gated Off",
+                f"All {ep_count} configured knowledge source(s) have "
+                f"`triggerCondition: false` — they are wired up but gated off, "
+                f"so the SearchAndSummarizeContent connector never queried them. "
+                f"Empty `searchResults`/`searchLogs`/`searchErrors` reflect a "
+                f"short-circuit before any backend call. Fix the trigger "
+                f"condition on the knowledge source to allow searches to fire.",
+            )
         keyword_hint = (
             f' (rewritten query: "{trace.rewritten_keywords or trace.rewritten_message}")'
             if trace.rewritten_keywords or trace.rewritten_message
             else ""
         )
-        ep_count = len(trace.endpoints)
+        partial_gated_hint = (
+            f" Note: {len(gated)} of {ep_count} endpoint(s) have `triggerCondition: false` and were never queried."
+            if gated and len(gated) < ep_count
+            else ""
+        )
         return (
             "🟡",
             "No Search Results",
             f"Search ran on {ep_count} endpoint(s) with no errors, but 0 documents matched"
             f"{keyword_hint}. No fallback to GPT default was triggered. "
             f"This usually means the indexed content did not match the rewritten query, "
-            f"or the search subsystem returned nothing without logging.",
+            f"or the search subsystem returned nothing without logging.{partial_gated_hint}",
         )
     return ("⚪", state or "Unknown", "—")
 
 
-def _gen_answer_status_badge(trace: GenerativeAnswerTrace) -> str:
+def _gen_answer_status_badge(
+    trace: GenerativeAnswerTrace,
+    profile: BotProfile | None = None,
+) -> str:
     """Single-glance status for a generative answer."""
-    icon, label, _ = _classify_trace_outcome(trace)
+    icon, label, _ = _classify_trace_outcome(trace, profile)
     return f"{icon} {label}"
 
 
@@ -319,7 +381,10 @@ def _platform_diagnostics_line(trace: GenerativeAnswerTrace) -> str:
     return " · ".join(bits)
 
 
-def render_generative_answer_traces(traces: list[GenerativeAnswerTrace]) -> str:
+def render_generative_answer_traces(
+    traces: list[GenerativeAnswerTrace],
+    profile: BotProfile | None = None,
+) -> str:
     """Render diagnostic data captured from topic-level SearchAndSummarizeContent nodes.
 
     Each trace gives a deeper view than the orchestrator-level Knowledge search:
@@ -328,6 +393,11 @@ def render_generative_answer_traces(traces: list[GenerativeAnswerTrace]) -> str:
     safety-pipeline outcomes. We surface all of it here so debugging an
     underperforming generative answer doesn't require unzipping the bot export
     by hand.
+
+    Passing `profile` enables a cross-reference: when every endpoint maps to a
+    KnowledgeSourceComponent with `triggerCondition: false`, the verdict is
+    upgraded from generic "No Search Results" to "Trigger Gated Off" with a
+    pointer to the misconfigured source.
     """
     if not traces:
         return ""
@@ -342,7 +412,7 @@ def render_generative_answer_traces(traces: list[GenerativeAnswerTrace]) -> str:
     for i, trace in enumerate(traces, 1):
         topic = trace.topic_name or "(unknown topic)"
         attempt = f"↻ Retry #{trace.attempt_index}" if trace.is_retry else f"#{trace.attempt_index}"
-        outcome_icon, outcome_label, outcome_explanation = _classify_trace_outcome(trace)
+        outcome_icon, outcome_label, outcome_explanation = _classify_trace_outcome(trace, profile)
         lines.append(f"### {attempt} · {topic} · {outcome_icon} {outcome_label}\n")
         lines.append(f"> _{outcome_explanation}_\n")
         lines.append(f"<sub>{_platform_diagnostics_line(trace)}</sub>\n")
