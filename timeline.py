@@ -249,9 +249,8 @@ def _build_generative_answer_trace(
     # in newer payloads — fall back to the legacy top-level location for compatibility.
     rewrite_response_inner = rewrite_resp.get("Response") or {}
     if isinstance(rewrite_response_inner, dict):
-        hypo_query = (
-            rewrite_response_inner.get("HypotheticalSnippetQuery")
-            or rewrite_resp.get("HypotheticalSnippetQuery")
+        hypo_query = rewrite_response_inner.get("HypotheticalSnippetQuery") or rewrite_resp.get(
+            "HypotheticalSnippetQuery"
         )
     else:
         hypo_query = rewrite_resp.get("HypotheticalSnippetQuery")
@@ -283,7 +282,12 @@ def _build_generative_answer_trace(
         endpoints=list(value.get("endpoints") or []),
         search_results=search_results,
         shadow_search_results=shadow_results,
-        search_errors=list(value.get("searchErrors") or []),
+        search_errors=[str(e) for e in (value.get("searchErrors") or [])],
+        search_logs=[str(e) for e in (value.get("searchLogs") or [])],
+        search_terms_used=[str(t) for t in (value.get("searchTerms") or [])],
+        shadow_search_terms=[str(t) for t in (value.get("ShadowSearchTerms") or [])],
+        shadow_search_logs=[str(e) for e in (value.get("ShadowSearchLogs") or [])],
+        shadow_search_errors=[str(e) for e in (value.get("ShadowSearchErrors") or [])],
         search_type=search_type,
         summary_text=summarize_result.get("Summary") if isinstance(summarize_result, dict) else None,
         text_summary=summarize_result.get("TextSummary") if isinstance(summarize_result, dict) else None,
@@ -295,6 +299,7 @@ def _build_generative_answer_trace(
             summarize_result.get("ContainsConfidentialData") if isinstance(summarize_result, dict) else False
         ),
         filtered_summary=value.get("filteredOpenAISummary"),
+        screened_summary=value.get("screenedOpenAISummary"),
         gpt_answer_state=value.get("gptAnswerState"),
         completion_state=value.get("completionState"),
         triggered_fallback=bool(value.get("triggeredGptFallback")),
@@ -523,7 +528,9 @@ def _process_trace_event(
                 )
             )
 
-            state.phases.append(_build_phase(topic, value, trigger_ts, timestamp, duration_ms, step_state, trigger_type))
+            state.phases.append(
+                _build_phase(topic, value, trigger_ts, timestamp, duration_ms, step_state, trigger_type)
+            )
 
             # Build ToolCall for all non-knowledge-search tools
             if task_dialog_id != "P:UniversalSearchTool":
@@ -538,7 +545,9 @@ def _process_trace_event(
                     except (TypeError, ValueError):
                         pass
                     obs_content = raw_observation.get("content", []) if isinstance(raw_observation, dict) else []
-                    obs_structured = raw_observation.get("structuredContent") if isinstance(raw_observation, dict) else None
+                    obs_structured = (
+                        raw_observation.get("structuredContent") if isinstance(raw_observation, dict) else None
+                    )
                     tc_observation = ToolCallObservation(
                         content=obs_content,
                         structured_content=obs_structured,
@@ -639,9 +648,7 @@ def _process_trace_event(
 
             # Generic: capture arguments for any tool
             if bind_step_id and bind_arguments:
-                state.pending_tool_args[bind_step_id] = {
-                    k: str(v) for k, v in bind_arguments.items()
-                }
+                state.pending_tool_args[bind_step_id] = {k: str(v) for k, v in bind_arguments.items()}
 
             # Existing knowledge search argument capture (preserve exactly)
             if bind_task_dialog_id == "P:UniversalSearchTool":
@@ -803,9 +810,9 @@ def _synthesize_orchestrator_phases(state: _TimelineState) -> None:
         is_thinking_gap = False
         context_label = ""
 
-        if (
-            ev.event_type == EventType.STEP_FINISHED
-            and nxt.event_type in (EventType.PLAN_RECEIVED, EventType.PLAN_FINISHED)
+        if ev.event_type == EventType.STEP_FINISHED and nxt.event_type in (
+            EventType.PLAN_RECEIVED,
+            EventType.PLAN_FINISHED,
         ):
             is_thinking_gap = True
             prev_type = phase_type_by_label.get(ev.topic_name or "", "")
@@ -816,10 +823,7 @@ def _synthesize_orchestrator_phases(state: _TimelineState) -> None:
             else:
                 context_label = f"Planning after: {ev.topic_name or 'step'}"
 
-        elif (
-            ev.event_type == EventType.USER_MESSAGE
-            and nxt.event_type == EventType.PLAN_RECEIVED
-        ):
+        elif ev.event_type == EventType.USER_MESSAGE and nxt.event_type == EventType.PLAN_RECEIVED:
             is_thinking_gap = True
             context_label = "Planning response"
 

@@ -232,6 +232,11 @@ class GenerativeAnswerTrace(BaseModel):
     search_results: list[SearchResult] = Field(default_factory=list)
     shadow_search_results: list[SearchResult] = Field(default_factory=list)
     search_errors: list[str] = Field(default_factory=list)
+    search_logs: list[str] = Field(default_factory=list)
+    search_terms_used: list[str] = Field(default_factory=list)
+    shadow_search_terms: list[str] = Field(default_factory=list)
+    shadow_search_logs: list[str] = Field(default_factory=list)
+    shadow_search_errors: list[str] = Field(default_factory=list)
     search_type: str | None = None
     # generated answer
     summary_text: str | None = None
@@ -241,6 +246,7 @@ class GenerativeAnswerTrace(BaseModel):
     performed_content_provenance: bool = False
     contains_confidential: bool = False
     filtered_summary: str | None = None
+    screened_summary: str | None = None
     gpt_answer_state: str | None = None
     completion_state: str | None = None
     triggered_fallback: bool = False

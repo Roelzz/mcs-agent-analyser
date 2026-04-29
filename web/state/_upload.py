@@ -12,7 +12,7 @@ from parser import detect_trigger_overlaps, parse_dialog_json, parse_yaml, valid
 from renderer import render_instruction_drift, render_report, render_transcript_report  # noqa: E402
 from renderer._helpers import _format_duration, _parse_execution_time_ms, _pct  # noqa: E402
 from renderer.timeline_render import render_gantt_chart, render_mermaid_sequence  # noqa: E402
-from renderer.knowledge import _grounding_score, _source_efficiency  # noqa: E402
+from renderer.knowledge import _classify_trace_outcome, _grounding_score, _source_efficiency  # noqa: E402
 from renderer.profile import (  # noqa: E402
     _AUTOMATION_TRIGGERS,
     _CATEGORY_ORDER,
@@ -366,13 +366,15 @@ class UploadMixin(rx.State, mixin=True):
                 # Per-step breakdown rows
                 step_rows = []
                 for i, item in enumerate(credit_estimate.line_items, 1):
-                    step_rows.append({
-                        "index": str(i),
-                        "step_name": item.step_name,
-                        "step_type": item.step_type,
-                        "credits": f"{item.credits:.0f}",
-                        "detail": item.detail or "",
-                    })
+                    step_rows.append(
+                        {
+                            "index": str(i),
+                            "step_name": item.step_name,
+                            "step_type": item.step_type,
+                            "credits": f"{item.credits:.0f}",
+                            "detail": item.detail or "",
+                        }
+                    )
                 self.mcs_credit_step_rows = step_rows  # type: ignore[attr-defined]
                 # Credit flow Mermaid
                 from renderer.report import render_credit_estimate as _render_credit_md
@@ -466,7 +468,14 @@ class UploadMixin(rx.State, mixin=True):
         quick_wins: list[dict] = []
         for comp in profile.components:
             if comp.kind == "DialogComponent" and comp.state != "Active":
-                quick_wins.append({"severity": "warn", "icon": "alert-triangle", "text": f'Disabled topic: "{comp.display_name}"', "detail": "Topic is inactive. Enable or remove to reduce clutter."})
+                quick_wins.append(
+                    {
+                        "severity": "warn",
+                        "icon": "alert-triangle",
+                        "text": f'Disabled topic: "{comp.display_name}"',
+                        "detail": "Topic is inactive. Enable or remove to reduce clutter.",
+                    }
+                )
         for comp in profile.components:
             if (
                 comp.kind == "DialogComponent"
@@ -475,7 +484,14 @@ class UploadMixin(rx.State, mixin=True):
                 and comp.trigger_kind not in _SYSTEM_TRIGGERS
                 and comp.trigger_kind not in _AUTOMATION_TRIGGERS
             ):
-                quick_wins.append({"severity": "warn", "icon": "alert-triangle", "text": f'No trigger queries: "{comp.display_name}"', "detail": "User topic has no trigger phrases. It may never be matched by the recognizer."})
+                quick_wins.append(
+                    {
+                        "severity": "warn",
+                        "icon": "alert-triangle",
+                        "text": f'No trigger queries: "{comp.display_name}"',
+                        "detail": "User topic has no trigger phrases. It may never be matched by the recognizer.",
+                    }
+                )
         for comp in profile.components:
             if comp.kind == "DialogComponent":
                 desc = comp.description
@@ -486,15 +502,36 @@ class UploadMixin(rx.State, mixin=True):
                         _reason = f'too short: "{desc}"'
                     else:
                         _reason = "matches display name"
-                    quick_wins.append({"severity": "info", "icon": "info", "text": f'Weak description: "{comp.display_name}" — {_reason}', "detail": "A clear model description helps the orchestrator choose the right topic. Aim for 20+ chars that explain what the topic handles."})
+                    quick_wins.append(
+                        {
+                            "severity": "info",
+                            "icon": "info",
+                            "text": f'Weak description: "{comp.display_name}" — {_reason}',
+                            "detail": "A clear model description helps the orchestrator choose the right topic. Aim for 20+ chars that explain what the topic handles.",
+                        }
+                    )
         trigger_kinds = {c.trigger_kind for c in profile.components if c.trigger_kind}
         for trigger in ("OnError", "OnUnknownIntent", "OnEscalate"):
             if trigger not in trigger_kinds:
-                quick_wins.append({"severity": "warn", "icon": "alert-triangle", "text": f"Missing system topic: {trigger}", "detail": "No handler for this lifecycle event. The bot may fail silently when this event occurs."})
+                quick_wins.append(
+                    {
+                        "severity": "warn",
+                        "icon": "alert-triangle",
+                        "text": f"Missing system topic: {trigger}",
+                        "detail": "No handler for this lifecycle event. The bot may fail silently when this event occurs.",
+                    }
+                )
         conn_issues = validate_connections(profile)
         for issue in conn_issues:
             sev = "warn" if issue["severity"] == "warning" else "info"
-            quick_wins.append({"severity": sev, "icon": "alert-triangle" if sev == "warn" else "info", "text": issue["message"], "detail": issue.get("detail", "")})
+            quick_wins.append(
+                {
+                    "severity": sev,
+                    "icon": "alert-triangle" if sev == "warn" else "info",
+                    "text": issue["message"],
+                    "detail": issue.get("detail", ""),
+                }
+            )
 
         # Unused global variables (heuristic)
         global_vars = [c for c in profile.components if c.kind == "GlobalVariableComponent"]
@@ -509,12 +546,14 @@ class UploadMixin(rx.State, mixin=True):
             all_text = " ".join(other_schemas)
             for gv in global_vars:
                 if gv.schema_name and gv.schema_name not in all_text:
-                    quick_wins.append({
-                        "severity": "info",
-                        "icon": "info",
-                        "text": f'Possibly unused variable: "{gv.display_name}"',
-                        "detail": "Schema name not found in other component references (heuristic). May be safe to remove.",
-                    })
+                    quick_wins.append(
+                        {
+                            "severity": "info",
+                            "icon": "info",
+                            "text": f'Possibly unused variable: "{gv.display_name}"',
+                            "detail": "Schema name not found in other component references (heuristic). May be safe to remove.",
+                        }
+                    )
 
         # KPIs
         total_comps = sum(len(v) for k, v in by_cat.items() if k in _CATEGORY_ORDER)
@@ -522,7 +561,12 @@ class UploadMixin(rx.State, mixin=True):
             {"label": "Components", "value": str(total_comps), "hint": "Total config items", "tone": "neutral"},
             {"label": "User Topics", "value": str(len(user_topics)), "hint": "Trigger-based", "tone": "neutral"},
             {"label": "Tools", "value": str(len(tools)), "hint": "Agent tools", "tone": "neutral"},
-            {"label": "Quick Wins", "value": str(len(quick_wins)), "hint": "Actionable issues", "tone": "warn" if quick_wins else "neutral"},
+            {
+                "label": "Quick Wins",
+                "value": str(len(quick_wins)),
+                "hint": "Actionable issues",
+                "tone": "warn" if quick_wins else "neutral",
+            },
         ]
 
         # AI Configuration
@@ -545,7 +589,9 @@ class UploadMixin(rx.State, mixin=True):
                 self.mcs_profile_instructions_text = gpt.instructions  # type: ignore[attr-defined]
             else:
                 self.mcs_profile_instructions_text = ""  # type: ignore[attr-defined]
-            starters = [{"title": s.get("title", "—"), "message": s.get("message", "—")} for s in gpt.conversation_starters]
+            starters = [
+                {"title": s.get("title", "—"), "message": s.get("message", "—")} for s in gpt.conversation_starters
+            ]
         else:
             self.mcs_profile_instructions_text = ""  # type: ignore[attr-defined]
         self.mcs_profile_ai_config = ai_config  # type: ignore[attr-defined]
@@ -557,8 +603,16 @@ class UploadMixin(rx.State, mixin=True):
         if profile.authentication_trigger != "Unknown":
             auth_display += f" ({profile.authentication_trigger})"
         self.mcs_profile_security_chips = [  # type: ignore[attr-defined]
-            {"title": "Auth Mode", "value": auth_display, "tone": "good" if profile.authentication_mode != "Unknown" else "info"},
-            {"title": "Access Control", "value": profile.access_control_policy, "tone": "good" if profile.access_control_policy != "Unknown" else "info"},
+            {
+                "title": "Auth Mode",
+                "value": auth_display,
+                "tone": "good" if profile.authentication_mode != "Unknown" else "info",
+            },
+            {
+                "title": "Access Control",
+                "value": profile.access_control_policy,
+                "tone": "good" if profile.access_control_policy != "Unknown" else "info",
+            },
             {"title": "Agent Connectable", "value": "Yes" if profile.is_agent_connectable else "No", "tone": "info"},
         ]
 
@@ -570,10 +624,15 @@ class UploadMixin(rx.State, mixin=True):
             {"property": "Recognizer", "value": profile.recognizer_kind},
             {"property": "Orchestrator", "value": "Yes" if profile.is_orchestrator else "No"},
             {"property": "Authentication", "value": auth_display},
-            {"property": "Generative Actions", "value": "Enabled" if profile.generative_actions_enabled else "Disabled"},
+            {
+                "property": "Generative Actions",
+                "value": "Enabled" if profile.generative_actions_enabled else "Disabled",
+            },
         ]
         meta.append({"property": "Access Control", "value": profile.access_control_policy})
-        meta.append({"property": "Lightweight Bot", "value": "Yes" if getattr(profile, 'is_lightweight_bot', False) else "No"})
+        meta.append(
+            {"property": "Lightweight Bot", "value": "Yes" if getattr(profile, "is_lightweight_bot", False) else "No"}
+        )
         if profile.app_insights:
             ai_obj = profile.app_insights
             flags = []
@@ -616,11 +675,13 @@ class UploadMixin(rx.State, mixin=True):
             connector = ref.get("connectorId", "—")
             if "/" in connector:
                 connector = connector.rsplit("/", 1)[-1]
-            conn_refs.append({
-                "name": ref.get("displayName", ref.get("connectionReferenceLogicalName", "—")),
-                "connector": connector,
-                "custom": "Yes" if ref.get("customConnectorId") else "No",
-            })
+            conn_refs.append(
+                {
+                    "name": ref.get("displayName", ref.get("connectionReferenceLogicalName", "—")),
+                    "connector": connector,
+                    "custom": "Yes" if ref.get("customConnectorId") else "No",
+                }
+            )
         self.mcs_profile_conn_refs = conn_refs  # type: ignore[attr-defined]
 
         # Connector definitions
@@ -687,25 +748,30 @@ class UploadMixin(rx.State, mixin=True):
 
         # External calls detail (per-action rows from action_details, deduplicated)
         from collections import Counter
+
         raw_ext: list[tuple[str, str, str, str]] = []
         for c in profile.components:
             if c.kind == "DialogComponent" and c.has_external_calls and c.action_details:
                 for detail in c.action_details:
-                    raw_ext.append((
-                        c.display_name,
-                        detail.get("kind", "—"),
-                        detail.get("connector_display_name") or detail.get("connection_reference") or "—",
-                        detail.get("operation_id") or "—",
-                    ))
+                    raw_ext.append(
+                        (
+                            c.display_name,
+                            detail.get("kind", "—"),
+                            detail.get("connector_display_name") or detail.get("connection_reference") or "—",
+                            detail.get("operation_id") or "—",
+                        )
+                    )
         ext_rows: list[dict] = []
         for (topic, kind, connector, operation), count in Counter(raw_ext).items():
             op_display = f"{operation} (×{count})" if count > 1 else operation
-            ext_rows.append({
-                "topic": topic,
-                "kind": kind,
-                "connector": connector,
-                "operation": op_display,
-            })
+            ext_rows.append(
+                {
+                    "topic": topic,
+                    "kind": kind,
+                    "connector": connector,
+                    "operation": op_display,
+                }
+            )
         self.mcs_tools_external_calls = ext_rows  # type: ignore[attr-defined]
 
         # Mermaid integration map — extract raw source without fences
@@ -764,7 +830,12 @@ class UploadMixin(rx.State, mixin=True):
 
         active_count = sum(1 for c in ks_comps + file_comps if c.state == "Active")
         self.mcs_knowledge_kpis = [  # type: ignore[attr-defined]
-            {"label": "Knowledge Sources", "value": str(len(ks_comps)), "hint": "Configured sources", "tone": "neutral"},
+            {
+                "label": "Knowledge Sources",
+                "value": str(len(ks_comps)),
+                "hint": "Configured sources",
+                "tone": "neutral",
+            },
             {"label": "File Attachments", "value": str(len(file_comps)), "hint": "Uploaded files", "tone": "neutral"},
             {"label": "Active", "value": str(active_count), "hint": "Currently enabled", "tone": "neutral"},
             {"label": "Searches", "value": str(len(searches)), "hint": "In this session", "tone": "neutral"},
@@ -806,13 +877,15 @@ class UploadMixin(rx.State, mixin=True):
                 notes_parts.append("Trigger disabled")
             elif trigger in ("—", "None"):
                 notes_parts.append("Always-on")
-            coverage.append({
-                "name": comp.display_name,
-                "source_type": source_type,
-                "state": comp.state,
-                "trigger": trigger,
-                "notes": "; ".join(notes_parts) if notes_parts else "—",
-            })
+            coverage.append(
+                {
+                    "name": comp.display_name,
+                    "source_type": source_type,
+                    "state": comp.state,
+                    "trigger": trigger,
+                    "notes": "; ".join(notes_parts) if notes_parts else "—",
+                }
+            )
         self.mcs_knowledge_coverage = coverage  # type: ignore[attr-defined]
 
         # Source details
@@ -834,16 +907,27 @@ class UploadMixin(rx.State, mixin=True):
             msg = ks.triggering_user_message or ""
             if msg != current_user_msg:
                 current_user_msg = msg
-                search_rows.append({
-                    "kind": "header",
-                    "user_message": msg if msg else "System-initiated",
-                    # Pad remaining fields for type consistency
-                    "index": "", "query": "", "keywords": "", "sources": "",
-                    "duration": "", "grounding_label": "", "grounding_tone": "",
-                    "thought": "", "output_sources": "", "efficiency": "",
-                    "errors": "", "result_count": "", "results_text": "",
-                    "has_urls": "",
-                })
+                search_rows.append(
+                    {
+                        "kind": "header",
+                        "user_message": msg if msg else "System-initiated",
+                        # Pad remaining fields for type consistency
+                        "index": "",
+                        "query": "",
+                        "keywords": "",
+                        "sources": "",
+                        "duration": "",
+                        "grounding_label": "",
+                        "grounding_tone": "",
+                        "thought": "",
+                        "output_sources": "",
+                        "efficiency": "",
+                        "errors": "",
+                        "result_count": "",
+                        "results_text": "",
+                        "has_urls": "",
+                    }
+                )
             badge, label = _grounding_score(ks)
             grounding_tone = "good" if label == "Strong" else ("info" if label == "Moderate" else "bad")
             dur_ms = _parse_execution_time_ms(ks.execution_time)
@@ -865,25 +949,34 @@ class UploadMixin(rx.State, mixin=True):
             # Clean up efficiency string (strip markdown)
             eff_clean = ""
             if eff:
-                eff_clean = eff.replace("**", "").replace("`", "").replace("🟢 ", "").replace("🟡 ", "").replace("🔴 ", "").replace("⚫ ", "")
-            search_rows.append({
-                "kind": "search",
-                "user_message": "",
-                "index": str(i),
-                "query": ks.search_query or "—",
-                "keywords": ks.search_keywords or "—",
-                "sources": ", ".join(ks.knowledge_sources) if ks.knowledge_sources else "—",
-                "duration": dur,
-                "grounding_label": f"{badge} {label}",
-                "grounding_tone": grounding_tone,
-                "thought": ks.thought or "",
-                "output_sources": ", ".join(ks.output_knowledge_sources) if ks.output_knowledge_sources else "",
-                "efficiency": eff_clean,
-                "errors": "; ".join(ks.search_errors) if ks.search_errors else "",
-                "result_count": str(result_count),
-                "results_text": results_text,
-                "has_urls": ", ".join(url_parts) if url_parts else "",
-            })
+                eff_clean = (
+                    eff.replace("**", "")
+                    .replace("`", "")
+                    .replace("🟢 ", "")
+                    .replace("🟡 ", "")
+                    .replace("🔴 ", "")
+                    .replace("⚫ ", "")
+                )
+            search_rows.append(
+                {
+                    "kind": "search",
+                    "user_message": "",
+                    "index": str(i),
+                    "query": ks.search_query or "—",
+                    "keywords": ks.search_keywords or "—",
+                    "sources": ", ".join(ks.knowledge_sources) if ks.knowledge_sources else "—",
+                    "duration": dur,
+                    "grounding_label": f"{badge} {label}",
+                    "grounding_tone": grounding_tone,
+                    "thought": ks.thought or "",
+                    "output_sources": ", ".join(ks.output_knowledge_sources) if ks.output_knowledge_sources else "",
+                    "efficiency": eff_clean,
+                    "errors": "; ".join(ks.search_errors) if ks.search_errors else "",
+                    "result_count": str(result_count),
+                    "results_text": results_text,
+                    "has_urls": ", ".join(url_parts) if url_parts else "",
+                }
+            )
         self.mcs_knowledge_searches = search_rows  # type: ignore[attr-defined]
 
         # Custom search steps
@@ -910,20 +1003,17 @@ class UploadMixin(rx.State, mixin=True):
         for idx, trace in enumerate(traces, 1):
             if trace.topic_name:
                 gen_topics.add(trace.topic_name)
-            # Status badge
-            state_str = trace.gpt_answer_state or "Unknown"
-            if trace.triggered_fallback:
-                status_label = f"🔴 {state_str} (fallback)"
-                status_tone = "bad"
-            elif state_str.lower() == "answered":
-                status_label = f"🟢 {state_str}"
+            # Outcome verdict — single source of truth shared with markdown report
+            outcome_icon, outcome_label_text, outcome_explanation = _classify_trace_outcome(trace)
+            status_label = f"{outcome_icon} {outcome_label_text}"
+            if outcome_icon == "🟢":
                 status_tone = "good"
-            elif state_str.lower() in {"noanswer", "notanswered", "noresult"}:
-                status_label = f"🟠 {state_str}"
-                status_tone = "warn"
-            else:
-                status_label = f"🟡 {state_str}"
+            elif outcome_icon == "🔴":
+                status_tone = "bad"
+            elif outcome_icon == "🟡":
                 status_tone = "info"
+            else:
+                status_tone = "neutral"
 
             # Token totals
             total_prompt = (trace.rewrite_prompt_tokens or 0) + (trace.summarize_prompt_tokens or 0)
@@ -948,15 +1038,17 @@ class UploadMixin(rx.State, mixin=True):
                 else:
                     delta_label = "—"
                 snippet = (r.text or "").replace("\r", "")
-                result_rows.append({
-                    "index": str(j),
-                    "title": r.name or r.url or f"Result {j}",
-                    "url": r.url or "",
-                    "rank": rank_label,
-                    "delta": delta_label,
-                    "snippet": snippet,
-                    "snippet_len": str(len(snippet)),
-                })
+                result_rows.append(
+                    {
+                        "index": str(j),
+                        "title": r.name or r.url or f"Result {j}",
+                        "url": r.url or "",
+                        "rank": rank_label,
+                        "delta": delta_label,
+                        "snippet": snippet,
+                        "snippet_len": str(len(snippet)),
+                    }
+                )
 
             # Detect "all zero rank" anomaly — strong signal that the search ranker
             # is disabled or misconfigured against this tenant's backend.
@@ -968,82 +1060,115 @@ class UploadMixin(rx.State, mixin=True):
             shadow_label = (
                 f"🟠 live={live_count} · shadow={shadow_count} (parallel backend retrieved more)"
                 if shadow_anomaly
-                else f"🟢 live={live_count} · shadow={shadow_count}" if shadow_count else ""
+                else f"🟢 live={live_count} · shadow={shadow_count}"
+                if shadow_count
+                else ""
             )
 
             # Citation rows — keep the full snippet; the UI wraps + scrolls
             citation_rows: list[dict] = []
             for j, c in enumerate(trace.citations, 1):
                 snippet = (c.snippet or "").replace("\r", "")
-                citation_rows.append({
-                    "index": str(j),
-                    "title": c.title or c.url or f"Citation {j}",
-                    "url": c.url or "",
-                    "snippet": snippet,
-                })
+                citation_rows.append(
+                    {
+                        "index": str(j),
+                        "title": c.title or c.url or f"Citation {j}",
+                        "url": c.url or "",
+                        "snippet": snippet,
+                    }
+                )
 
             # Safety chips
             safety_chips = [
-                {"label": "Moderation", "icon": "🟢" if trace.performed_content_moderation else "⚫",
-                 "tone": "good" if trace.performed_content_moderation else "neutral"},
-                {"label": "Provenance", "icon": "🟢" if trace.performed_content_provenance else "⚫",
-                 "tone": "good" if trace.performed_content_provenance else "neutral"},
-                {"label": "Confidential data", "icon": "🔴" if trace.contains_confidential else "🟢",
-                 "tone": "bad" if trace.contains_confidential else "good"},
-                {"label": "Fallback", "icon": "🔴" if trace.triggered_fallback else "🟢",
-                 "tone": "bad" if trace.triggered_fallback else "good"},
+                {
+                    "label": "Moderation",
+                    "icon": "🟢" if trace.performed_content_moderation else "⚫",
+                    "tone": "good" if trace.performed_content_moderation else "neutral",
+                },
+                {
+                    "label": "Provenance",
+                    "icon": "🟢" if trace.performed_content_provenance else "⚫",
+                    "tone": "good" if trace.performed_content_provenance else "neutral",
+                },
+                {
+                    "label": "Confidential data",
+                    "icon": "🔴" if trace.contains_confidential else "🟢",
+                    "tone": "bad" if trace.contains_confidential else "good",
+                },
+                {
+                    "label": "GPT default fallback" if trace.triggered_fallback else "No fallback",
+                    "icon": "🔴" if trace.triggered_fallback else "🟢",
+                    "tone": "bad" if trace.triggered_fallback else "good",
+                },
             ]
 
-            attempt_label = (
-                f"↻ Retry #{trace.attempt_index}"
-                if trace.is_retry
-                else f"#{trace.attempt_index}"
+            attempt_label = f"↻ Retry #{trace.attempt_index}" if trace.is_retry else f"#{trace.attempt_index}"
+            gen_rows.append(
+                {
+                    "index": str(idx),
+                    "attempt_label": attempt_label,
+                    "is_retry": "true" if trace.is_retry else "",
+                    "retry_reason": trace.previous_attempt_state or "",
+                    "topic": trace.topic_name or "—",
+                    "status_label": status_label,
+                    "status_tone": status_tone,
+                    "outcome_icon": outcome_icon,
+                    "outcome_label_text": outcome_label_text,
+                    "outcome_explanation": outcome_explanation,
+                    "answer_state": trace.gpt_answer_state or "—",
+                    "completion_state": trace.completion_state or "—",
+                    "fallback_flag": "true" if trace.triggered_fallback else "false",
+                    "search_log_count": str(len(trace.search_logs)),
+                    "search_term_count": str(len(trace.search_terms_used)),
+                    "shadow_result_count": str(len(trace.shadow_search_results)),
+                    "shadow_error_count": str(len(trace.shadow_search_errors)),
+                    "shadow_log_count": str(len(trace.shadow_search_logs)),
+                    "shadow_errors": "; ".join(trace.shadow_search_errors) if trace.shadow_search_errors else "",
+                    "search_logs_text": "\n".join(trace.search_logs) if trace.search_logs else "",
+                    "shadow_logs_text": "\n".join(trace.shadow_search_logs) if trace.shadow_search_logs else "",
+                    "search_terms_used_text": ", ".join(trace.search_terms_used) if trace.search_terms_used else "",
+                    "user_msg": trace.original_message or trace.triggering_user_message or "—",
+                    "screened": trace.screened_message or "",
+                    "rewritten": trace.rewritten_message or "",
+                    "keywords": trace.rewritten_keywords or "",
+                    "rewrite_model": trace.rewrite_model or "—",
+                    "summarize_model": trace.summarize_model or "—",
+                    "tokens_label": tokens_label,
+                    "rewrite_tokens": (
+                        f"{trace.rewrite_prompt_tokens or 0} / {trace.rewrite_completion_tokens or 0}"
+                        if trace.rewrite_prompt_tokens or trace.rewrite_completion_tokens
+                        else "—"
+                    ),
+                    "summarize_tokens": (
+                        f"{trace.summarize_prompt_tokens or 0} / {trace.summarize_completion_tokens or 0}"
+                        if trace.summarize_prompt_tokens or trace.summarize_completion_tokens
+                        else "—"
+                    ),
+                    "search_type": trace.search_type or "—",
+                    "result_count": str(len(trace.search_results)),
+                    "citation_count": str(len(trace.citations)),
+                    "endpoint_count": str(len(trace.endpoints)),
+                    "endpoints": trace.endpoints,
+                    "results": result_rows,
+                    "citations": citation_rows,
+                    "safety_chips": safety_chips,
+                    "summary_text": trace.summary_text or "",
+                    "search_errors": "; ".join(trace.search_errors) if trace.search_errors else "",
+                    "rewrite_total_tokens": str(trace.rewrite_total_tokens) if trace.rewrite_total_tokens else "",
+                    "summarize_total_tokens": str(trace.summarize_total_tokens) if trace.summarize_total_tokens else "",
+                    "rewrite_cached_tokens": str(trace.rewrite_cached_tokens) if trace.rewrite_cached_tokens else "",
+                    "summarize_cached_tokens": str(trace.summarize_cached_tokens)
+                    if trace.summarize_cached_tokens
+                    else "",
+                    "all_zero_rank": "true" if all_zero_rank else "",
+                    "shadow_label": shadow_label,
+                    "shadow_anomaly": "true" if shadow_anomaly else "",
+                    "rewrite_system_prompt": trace.rewrite_system_prompt or "",
+                    "summarize_system_prompt": trace.summarize_system_prompt or "",
+                    "rewrite_raw_response": trace.rewrite_raw_response or "",
+                    "hypothetical_snippet": trace.hypothetical_snippet_query or "",
+                }
             )
-            gen_rows.append({
-                "index": str(idx),
-                "attempt_label": attempt_label,
-                "is_retry": "true" if trace.is_retry else "",
-                "retry_reason": trace.previous_attempt_state or "",
-                "topic": trace.topic_name or "—",
-                "status_label": status_label,
-                "status_tone": status_tone,
-                "user_msg": trace.original_message or trace.triggering_user_message or "—",
-                "screened": trace.screened_message or "",
-                "rewritten": trace.rewritten_message or "",
-                "keywords": trace.rewritten_keywords or "",
-                "rewrite_model": trace.rewrite_model or "—",
-                "summarize_model": trace.summarize_model or "—",
-                "tokens_label": tokens_label,
-                "rewrite_tokens": (
-                    f"{trace.rewrite_prompt_tokens or 0} / {trace.rewrite_completion_tokens or 0}"
-                    if trace.rewrite_prompt_tokens or trace.rewrite_completion_tokens else "—"
-                ),
-                "summarize_tokens": (
-                    f"{trace.summarize_prompt_tokens or 0} / {trace.summarize_completion_tokens or 0}"
-                    if trace.summarize_prompt_tokens or trace.summarize_completion_tokens else "—"
-                ),
-                "search_type": trace.search_type or "—",
-                "result_count": str(len(trace.search_results)),
-                "citation_count": str(len(trace.citations)),
-                "endpoint_count": str(len(trace.endpoints)),
-                "endpoints": trace.endpoints,
-                "results": result_rows,
-                "citations": citation_rows,
-                "safety_chips": safety_chips,
-                "summary_text": trace.summary_text or "",
-                "search_errors": "; ".join(trace.search_errors) if trace.search_errors else "",
-                "rewrite_total_tokens": str(trace.rewrite_total_tokens) if trace.rewrite_total_tokens else "",
-                "summarize_total_tokens": str(trace.summarize_total_tokens) if trace.summarize_total_tokens else "",
-                "rewrite_cached_tokens": str(trace.rewrite_cached_tokens) if trace.rewrite_cached_tokens else "",
-                "summarize_cached_tokens": str(trace.summarize_cached_tokens) if trace.summarize_cached_tokens else "",
-                "all_zero_rank": "true" if all_zero_rank else "",
-                "shadow_label": shadow_label,
-                "shadow_anomaly": "true" if shadow_anomaly else "",
-                "rewrite_system_prompt": trace.rewrite_system_prompt or "",
-                "summarize_system_prompt": trace.summarize_system_prompt or "",
-                "rewrite_raw_response": trace.rewrite_raw_response or "",
-                "hypothetical_snippet": trace.hypothetical_snippet_query or "",
-            })
 
         self.mcs_generative_traces = gen_rows  # type: ignore[attr-defined]
         self.mcs_generative_topics = sorted(gen_topics)  # type: ignore[attr-defined]
@@ -1065,16 +1190,37 @@ class UploadMixin(rx.State, mixin=True):
         orch_topics = by_cat.get("orchestrator_topics", [])
 
         # KPIs
-        external_calls_total = sum(1 for c in profile.components if c.kind == "DialogComponent" and c.has_external_calls)
+        external_calls_total = sum(
+            1 for c in profile.components if c.kind == "DialogComponent" and c.has_external_calls
+        )
         self.mcs_topics_kpis = [  # type: ignore[attr-defined]
             {"label": "User Topics", "value": str(len(user_topics)), "hint": "Trigger-based", "tone": "neutral"},
-            {"label": "System Topics", "value": str(len(system_topics)), "hint": "System + Automation", "tone": "neutral"},
+            {
+                "label": "System Topics",
+                "value": str(len(system_topics)),
+                "hint": "System + Automation",
+                "tone": "neutral",
+            },
             {"label": "Orchestrator", "value": str(len(orch_topics)), "hint": "Task/Agent dialogs", "tone": "neutral"},
-            {"label": "External Calls", "value": str(external_calls_total), "hint": "Topics with actions", "tone": "neutral"},
+            {
+                "label": "External Calls",
+                "value": str(external_calls_total),
+                "hint": "Topics with actions",
+                "tone": "neutral",
+            },
         ]
 
         # Category summary
-        cat_order = ["user_topics", "system_topics", "automation_topics", "orchestrator_topics", "skills", "custom_entities", "variables", "settings"]
+        cat_order = [
+            "user_topics",
+            "system_topics",
+            "automation_topics",
+            "orchestrator_topics",
+            "skills",
+            "custom_entities",
+            "variables",
+            "settings",
+        ]
         cat_display = {
             "user_topics": ("User Topics", "user-round"),
             "system_topics": ("System Topics", "settings"),
@@ -1092,13 +1238,15 @@ class UploadMixin(rx.State, mixin=True):
                 continue
             display, icon = cat_display.get(cat, (cat, "list"))
             active = sum(1 for c in comps if c.state == "Active")
-            summary_rows.append({
-                "category": display,
-                "count": str(len(comps)),
-                "active": str(active),
-                "inactive": str(len(comps) - active),
-                "icon": icon,
-            })
+            summary_rows.append(
+                {
+                    "category": display,
+                    "count": str(len(comps)),
+                    "active": str(active),
+                    "inactive": str(len(comps) - active),
+                    "icon": icon,
+                }
+            )
         self.mcs_topics_summary = summary_rows  # type: ignore[attr-defined]
 
         # User topics detail
@@ -1107,7 +1255,9 @@ class UploadMixin(rx.State, mixin=True):
                 "name": c.display_name,
                 "schema": c.schema_name,
                 "state": c.state,
-                "triggers": ", ".join(c.trigger_queries[:3]) + ("..." if len(c.trigger_queries) > 3 else "") if c.trigger_queries else "—",
+                "triggers": ", ".join(c.trigger_queries[:3]) + ("..." if len(c.trigger_queries) > 3 else "")
+                if c.trigger_queries
+                else "—",
                 "description": (c.description or "—")[:150],
             }
             for c in user_topics
@@ -1141,15 +1291,15 @@ class UploadMixin(rx.State, mixin=True):
 
         # Coverage
         dialog_comps = [
-            c for c in profile.components
+            c
+            for c in profile.components
             if c.kind == "DialogComponent"
             and c.trigger_kind not in (_SYSTEM_TRIGGERS | _AUTOMATION_TRIGGERS | {None})
             and c.dialog_kind not in ("TaskDialog", "AgentDialog")
         ]
         if timeline is not None:
             triggered_names = {
-                ev.topic_name for ev in timeline.events
-                if ev.event_type == EventType.STEP_TRIGGERED and ev.topic_name
+                ev.topic_name for ev in timeline.events if ev.event_type == EventType.STEP_TRIGGERED and ev.topic_name
             }
         else:
             triggered_names = set()
@@ -1180,9 +1330,21 @@ class UploadMixin(rx.State, mixin=True):
         # Graph anomalies
         anomalies = detect_topic_graph_anomalies(profile)
         self.mcs_topics_anomalies = [  # type: ignore[attr-defined]
-            {"title": "Orphaned Topics", "value": str(anomalies["orphaned"]), "tone": "bad" if anomalies["orphaned"] > 0 else "good"},
-            {"title": "Dead Ends", "value": str(anomalies["dead_ends"]), "tone": "bad" if anomalies["dead_ends"] > 0 else "good"},
-            {"title": "Cycles", "value": str(anomalies["cycles"]), "tone": "bad" if anomalies["cycles"] > 0 else "good"},
+            {
+                "title": "Orphaned Topics",
+                "value": str(anomalies["orphaned"]),
+                "tone": "bad" if anomalies["orphaned"] > 0 else "good",
+            },
+            {
+                "title": "Dead Ends",
+                "value": str(anomalies["dead_ends"]),
+                "tone": "bad" if anomalies["dead_ends"] > 0 else "good",
+            },
+            {
+                "title": "Cycles",
+                "value": str(anomalies["cycles"]),
+                "tone": "bad" if anomalies["cycles"] > 0 else "good",
+            },
         ]
 
         # Mermaid topic graph — extract raw source
@@ -1244,13 +1406,15 @@ class UploadMixin(rx.State, mixin=True):
         # Full catalogue
         catalogue: list[dict] = []
         for key, info in _MODEL_CATALOGUE.items():
-            catalogue.append({
-                "model": info["display"],
-                "tier": info["tier"],
-                "context": info["context_window"],
-                "cost": info["cost_tier"],
-                "is_current": "yes" if key == cat_key else "no",
-            })
+            catalogue.append(
+                {
+                    "model": info["display"],
+                    "tier": info["tier"],
+                    "context": info["context_window"],
+                    "cost": info["cost_tier"],
+                    "is_current": "yes" if key == cat_key else "no",
+                }
+            )
         self.mcs_model_catalogue = catalogue  # type: ignore[attr-defined]
 
     # ── Conversation tab data extraction ────────────────────────────────────
@@ -1264,7 +1428,10 @@ class UploadMixin(rx.State, mixin=True):
             {"property": "Bot Name", "value": timeline.bot_name or "—"},
             {"property": "Conversation ID", "value": timeline.conversation_id or "—"},
             {"property": "User Query", "value": timeline.user_query or "—"},
-            {"property": "Total Elapsed", "value": _format_duration(timeline.total_elapsed_ms) if timeline.total_elapsed_ms else "—"},
+            {
+                "property": "Total Elapsed",
+                "value": _format_duration(timeline.total_elapsed_ms) if timeline.total_elapsed_ms else "—",
+            },
         ]
 
         # Phase breakdown
@@ -1355,18 +1522,20 @@ class UploadMixin(rx.State, mixin=True):
                 # Merge has_recommendations from trigger or finish
                 has_recs = "true" if ev.has_recommendations or fin_has_recs else ""
 
-                reasoning.append({
-                    "step": str(step_num),
-                    "topic": ev.topic_name or "—",
-                    "reasoning": ev.thought,
-                    "step_type": step_type,
-                    "orchestrator_ask": last_ask,
-                    "status": fin_status,
-                    "duration": duration_label,
-                    "error": fin_error,
-                    "has_recommendations": has_recs,
-                    "used_outputs": fin_used_outputs,
-                })
+                reasoning.append(
+                    {
+                        "step": str(step_num),
+                        "topic": ev.topic_name or "—",
+                        "reasoning": ev.thought,
+                        "step_type": step_type,
+                        "orchestrator_ask": last_ask,
+                        "status": fin_status,
+                        "duration": duration_label,
+                        "error": fin_error,
+                        "has_recommendations": has_recs,
+                        "used_outputs": fin_used_outputs,
+                    }
+                )
         self.mcs_conv_reasoning = reasoning  # type: ignore[attr-defined]
 
         # Mermaid diagrams — strip fences
@@ -1416,7 +1585,11 @@ class UploadMixin(rx.State, mixin=True):
                 {"label": "Avg Plans/Turn", "value": f"{tr.avg_plans_per_turn:.1f}"},
                 {"label": "Avg Tools/Turn", "value": f"{tr.avg_tools_per_turn:.1f}"},
                 {"label": "Thinking Ratio", "value": f"{tr.avg_thinking_ratio:.0%}"},
-                {"label": "Inefficient", "value": str(tr.inefficient_turn_count), "tone": "warn" if tr.inefficient_turn_count > 0 else ""},
+                {
+                    "label": "Inefficient",
+                    "value": str(tr.inefficient_turn_count),
+                    "tone": "warn" if tr.inefficient_turn_count > 0 else "",
+                },
             ]
             self.mcs_ins_turn_rows = [  # type: ignore[attr-defined]
                 {
@@ -1438,9 +1611,21 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_ins_quality_kpis = [  # type: ignore[attr-defined]
                 {"label": "Responses", "value": str(total_resp)},
                 {"label": "Grounded", "value": str(qr.grounded_count)},
-                {"label": "Ungrounded", "value": str(qr.ungrounded_count), "tone": "warn" if qr.ungrounded_count > 0 else ""},
-                {"label": "High Risk", "value": str(qr.high_risk_count), "tone": "danger" if qr.high_risk_count > 0 else ""},
-                {"label": "Swallowed Errors", "value": str(qr.swallowed_error_count), "tone": "warn" if qr.swallowed_error_count > 0 else ""},
+                {
+                    "label": "Ungrounded",
+                    "value": str(qr.ungrounded_count),
+                    "tone": "warn" if qr.ungrounded_count > 0 else "",
+                },
+                {
+                    "label": "High Risk",
+                    "value": str(qr.high_risk_count),
+                    "tone": "danger" if qr.high_risk_count > 0 else "",
+                },
+                {
+                    "label": "Swallowed Errors",
+                    "value": str(qr.swallowed_error_count),
+                    "tone": "warn" if qr.swallowed_error_count > 0 else "",
+                },
             ]
             self.mcs_ins_quality_rows = [  # type: ignore[attr-defined]
                 {
@@ -1455,11 +1640,23 @@ class UploadMixin(rx.State, mixin=True):
 
             # Plan Diff
             pr = analyze_plan_diffs(timeline)
-            self.mcs_ins_plan_kpis = [  # type: ignore[attr-defined]
-                {"label": "Re-plans", "value": str(pr.total_replans)},
-                {"label": "Thrashing", "value": str(pr.thrashing_count), "tone": "danger" if pr.thrashing_count > 0 else ""},
-                {"label": "Scope Creep", "value": str(pr.scope_creep_count), "tone": "warn" if pr.scope_creep_count > 0 else ""},
-            ] if pr.total_replans > 0 else []
+            self.mcs_ins_plan_kpis = (
+                [  # type: ignore[attr-defined]
+                    {"label": "Re-plans", "value": str(pr.total_replans)},
+                    {
+                        "label": "Thrashing",
+                        "value": str(pr.thrashing_count),
+                        "tone": "danger" if pr.thrashing_count > 0 else "",
+                    },
+                    {
+                        "label": "Scope Creep",
+                        "value": str(pr.scope_creep_count),
+                        "tone": "warn" if pr.scope_creep_count > 0 else "",
+                    },
+                ]
+                if pr.total_replans > 0
+                else []
+            )
             self.mcs_ins_plan_diffs = [  # type: ignore[attr-defined]
                 {
                     "turn": str(d.turn_index),
@@ -1473,11 +1670,19 @@ class UploadMixin(rx.State, mixin=True):
 
             # Knowledge Effectiveness
             ke = analyze_knowledge_effectiveness([timeline])
-            self.mcs_ins_ke_kpis = [  # type: ignore[attr-defined]
-                {"label": "Searches", "value": str(ke.total_searches)},
-                {"label": "Avg Sources/Search", "value": f"{ke.avg_sources_per_search:.1f}"},
-                {"label": "Zero Results", "value": str(ke.zero_result_searches), "tone": "warn" if ke.zero_result_searches > 0 else ""},
-            ] if ke.total_searches > 0 else []
+            self.mcs_ins_ke_kpis = (
+                [  # type: ignore[attr-defined]
+                    {"label": "Searches", "value": str(ke.total_searches)},
+                    {"label": "Avg Sources/Search", "value": f"{ke.avg_sources_per_search:.1f}"},
+                    {
+                        "label": "Zero Results",
+                        "value": str(ke.zero_result_searches),
+                        "tone": "warn" if ke.zero_result_searches > 0 else "",
+                    },
+                ]
+                if ke.total_searches > 0
+                else []
+            )
             self.mcs_ins_ke_rows = [  # type: ignore[attr-defined]
                 {
                     "source": s.source_name,
@@ -1498,28 +1703,38 @@ class UploadMixin(rx.State, mixin=True):
 
             # Latency
             lr = analyze_latency_bottlenecks(timeline)
-            self.mcs_ins_latency_kpis = [  # type: ignore[attr-defined]
-                {"label": "Turns", "value": str(len(lr.turns))},
-                {"label": "Bottlenecks", "value": str(lr.bottleneck_turn_count), "tone": "warn" if lr.bottleneck_turn_count > 0 else ""},
-                {"label": "Avg Thinking", "value": f"{lr.avg_thinking_pct:.0f}%"},
-                {"label": "Avg Tools", "value": f"{lr.avg_tool_pct:.0f}%"},
-            ] if lr.turns else []
+            self.mcs_ins_latency_kpis = (
+                [  # type: ignore[attr-defined]
+                    {"label": "Turns", "value": str(len(lr.turns))},
+                    {
+                        "label": "Bottlenecks",
+                        "value": str(lr.bottleneck_turn_count),
+                        "tone": "warn" if lr.bottleneck_turn_count > 0 else "",
+                    },
+                    {"label": "Avg Thinking", "value": f"{lr.avg_thinking_pct:.0f}%"},
+                    {"label": "Avg Tools", "value": f"{lr.avg_tool_pct:.0f}%"},
+                ]
+                if lr.turns
+                else []
+            )
             latency_rows = []
             for t in lr.turns:
                 seg_map = {s.category: s for s in t.segments}
                 th = seg_map.get("thinking")
                 to = seg_map.get("tool")
                 kn = seg_map.get("knowledge")
-                latency_rows.append({
-                    "turn": str(t.turn_index),
-                    "message": t.user_message[:40] or "—",
-                    "total": f"{t.total_ms:.0f}ms",
-                    "thinking": f"{th.duration_ms:.0f}ms ({th.percentage:.0f}%)" if th else "—",
-                    "tools": f"{to.duration_ms:.0f}ms ({to.percentage:.0f}%)" if to else "—",
-                    "knowledge": f"{kn.duration_ms:.0f}ms ({kn.percentage:.0f}%)" if kn else "—",
-                    "bottleneck": t.bottleneck or "—",
-                    "bottleneck_tone": "warn" if t.bottleneck else "",
-                })
+                latency_rows.append(
+                    {
+                        "turn": str(t.turn_index),
+                        "message": t.user_message[:40] or "—",
+                        "total": f"{t.total_ms:.0f}ms",
+                        "thinking": f"{th.duration_ms:.0f}ms ({th.percentage:.0f}%)" if th else "—",
+                        "tools": f"{to.duration_ms:.0f}ms ({to.percentage:.0f}%)" if to else "—",
+                        "knowledge": f"{kn.duration_ms:.0f}ms ({kn.percentage:.0f}%)" if kn else "—",
+                        "bottleneck": t.bottleneck or "—",
+                        "bottleneck_tone": "warn" if t.bottleneck else "",
+                    }
+                )
             self.mcs_ins_latency_rows = latency_rows  # type: ignore[attr-defined]
             # Mermaid Gantt for latency
             if len(lr.turns) <= 10 and lr.turns:
@@ -1567,12 +1782,24 @@ class UploadMixin(rx.State, mixin=True):
 
             # Delegation
             dl = analyze_delegations(timeline, profile)
-            self.mcs_ins_deleg_kpis = [  # type: ignore[attr-defined]
-                {"label": "Configured", "value": str(len(dl.configured_agents))},
-                {"label": "Delegations", "value": str(len(dl.delegations))},
-                {"label": "Dead Agents", "value": str(len(dl.dead_agents)), "tone": "warn" if dl.dead_agents else ""},
-                {"label": "Always Failing", "value": str(len(dl.failing_agents)), "tone": "danger" if dl.failing_agents else ""},
-            ] if dl.configured_agents or dl.delegations else []
+            self.mcs_ins_deleg_kpis = (
+                [  # type: ignore[attr-defined]
+                    {"label": "Configured", "value": str(len(dl.configured_agents))},
+                    {"label": "Delegations", "value": str(len(dl.delegations))},
+                    {
+                        "label": "Dead Agents",
+                        "value": str(len(dl.dead_agents)),
+                        "tone": "warn" if dl.dead_agents else "",
+                    },
+                    {
+                        "label": "Always Failing",
+                        "value": str(len(dl.failing_agents)),
+                        "tone": "danger" if dl.failing_agents else "",
+                    },
+                ]
+                if dl.configured_agents or dl.delegations
+                else []
+            )
             self.mcs_ins_deleg_rows = [  # type: ignore[attr-defined]
                 {
                     "agent": d.agent_name,
@@ -1594,7 +1821,11 @@ class UploadMixin(rx.State, mixin=True):
                 score_tone = "good" if al.coverage_score >= 0.8 else ("warn" if al.coverage_score >= 0.5 else "danger")
                 self.mcs_ins_align_kpis = [  # type: ignore[attr-defined]
                     {"label": "Directives", "value": str(al.directives_found)},
-                    {"label": "Violations", "value": str(len(al.violations)), "tone": "danger" if al.violations else ""},
+                    {
+                        "label": "Violations",
+                        "value": str(len(al.violations)),
+                        "tone": "danger" if al.violations else "",
+                    },
                     {"label": "Compliance", "value": f"{al.coverage_score:.0%}", "tone": score_tone},
                 ]
                 self.mcs_ins_align_rows = [  # type: ignore[attr-defined]

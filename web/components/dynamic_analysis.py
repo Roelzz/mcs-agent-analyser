@@ -148,16 +148,28 @@ def _mcs_credit_step_row(item: dict) -> rx.Component:
     return rx.grid(
         rx.text(item["index"], font_size="13px", color="var(--gray-a9)", text_align="right"),
         rx.text(item["step_name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-        rx.badge(item["step_type"], color_scheme=rx.match(
+        rx.badge(
             item["step_type"],
-            ("generative_answer", "green"),
-            ("agent_action", "purple"),
-            ("classic_answer", "blue"),
-            ("flow_action", "amber"),
-            "gray",
-        ), variant="soft", size="1"),
+            color_scheme=rx.match(
+                item["step_type"],
+                ("generative_answer", "green"),
+                ("agent_action", "purple"),
+                ("classic_answer", "blue"),
+                ("flow_action", "amber"),
+                "gray",
+            ),
+            variant="soft",
+            size="1",
+        ),
         rx.text(item["credits"], font_size="13px", color="var(--gray-11)", font_weight="600", text_align="right"),
-        rx.text(item["detail"], font_size="12px", color="var(--gray-a9)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+        rx.text(
+            item["detail"],
+            font_size="12px",
+            color="var(--gray-a9)",
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+        ),
         columns="0.5fr 2fr 1fr 0.5fr 3fr",
         gap="8px",
         align="center",
@@ -329,7 +341,13 @@ def _flow_event_detail_accordion(item: dict) -> rx.Component:
             content=rx.vstack(
                 rx.cond(
                     item["thought"] != "",
-                    rx.text(item["thought"], font_size="11px", font_style="italic", color="var(--gray-a7)", line_height="1.4"),
+                    rx.text(
+                        item["thought"],
+                        font_size="11px",
+                        font_style="italic",
+                        color="var(--gray-a7)",
+                        line_height="1.4",
+                    ),
                     rx.box(),
                 ),
                 rx.cond(
@@ -674,11 +692,16 @@ def _mcs_conversation_visual_dashboard() -> rx.Component:
             rx.grid(
                 rx.box(
                     rx.text(
-                        "Event Mix", font_size="13px", color="var(--gray-12)", font_weight="700",
+                        "Event Mix",
+                        font_size="13px",
+                        color="var(--gray-12)",
+                        font_weight="700",
                     ),
                     rx.text(
                         "Breakdown of all events in the conversation by category.",
-                        font_size="11px", color="var(--gray-a9)", margin_bottom="8px",
+                        font_size="11px",
+                        color="var(--gray-a9)",
+                        margin_bottom="8px",
                     ),
                     rx.vstack(rx.foreach(State.mcs_conv_event_mix, _mcs_mix_row), spacing="2", width="100%"),
                     border=f"1px solid {SURFACE_BORDER}",
@@ -695,7 +718,9 @@ def _mcs_conversation_visual_dashboard() -> rx.Component:
                     ),
                     rx.text(
                         "How long the agent takes to respond — green is fast, red is slow.",
-                        font_size="11px", color="var(--gray-a9)", margin_bottom="8px",
+                        font_size="11px",
+                        color="var(--gray-a9)",
+                        margin_bottom="8px",
                     ),
                     rx.vstack(rx.foreach(State.mcs_conv_latency_bands, _mcs_mix_row), spacing="2", width="100%"),
                     border=f"1px solid {SURFACE_BORDER}",
@@ -728,10 +753,7 @@ def _mcs_conversation_visual_dashboard() -> rx.Component:
 def _grid_header(*cols: str, template: str) -> rx.Component:
     """Render a header row for a data grid."""
     return rx.grid(
-        *[
-            rx.text(c, font_size="12px", color="var(--gray-a9)", font_weight="700")
-            for c in cols
-        ],
+        *[rx.text(c, font_size="12px", color="var(--gray-a9)", font_weight="700") for c in cols],
         columns=template,
         gap="8px",
         padding_y="8px",
@@ -1092,30 +1114,82 @@ def _mcs_profile_panel() -> rx.Component:
         rx.cond(
             State.mcs_model_kpis.length() > 0,  # type: ignore[union-attr]
             card(
-                rx.hstack(rx.icon("bar-chart-2", size=16, color="var(--violet-9)"), section_heading("Model Configuration"), spacing="2", align="center"),
-                rx.hstack(rx.foreach(State.mcs_model_kpis, _mcs_kpi_card), spacing="3", width="100%", overflow_x="auto", padding_y="8px"),
+                rx.hstack(
+                    rx.icon("bar-chart-2", size=16, color="var(--violet-9)"),
+                    section_heading("Model Configuration"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.hstack(
+                    rx.foreach(State.mcs_model_kpis, _mcs_kpi_card),
+                    spacing="3",
+                    width="100%",
+                    overflow_x="auto",
+                    padding_y="8px",
+                ),
                 rx.cond(
                     State.mcs_model_strengths.length() > 0,  # type: ignore[union-attr]
                     rx.grid(
                         rx.box(
-                            rx.hstack(rx.icon("check-circle", size=14, color=PRIMARY), rx.text("Strengths", font_size="12px", font_weight="700", color="var(--gray-a9)"), spacing="2", align="center"),
-                            rx.vstack(rx.foreach(State.mcs_model_strengths, lambda s: rx.text(f"• {s}", font_size="12px", color="var(--gray-11)")), spacing="1", padding_top="6px"),
-                            padding="12px", border=f"1px solid {SURFACE_BORDER}", border_radius="10px",
+                            rx.hstack(
+                                rx.icon("check-circle", size=14, color=PRIMARY),
+                                rx.text("Strengths", font_size="12px", font_weight="700", color="var(--gray-a9)"),
+                                spacing="2",
+                                align="center",
+                            ),
+                            rx.vstack(
+                                rx.foreach(
+                                    State.mcs_model_strengths,
+                                    lambda s: rx.text(f"• {s}", font_size="12px", color="var(--gray-11)"),
+                                ),
+                                spacing="1",
+                                padding_top="6px",
+                            ),
+                            padding="12px",
+                            border=f"1px solid {SURFACE_BORDER}",
+                            border_radius="10px",
                         ),
                         rx.box(
-                            rx.hstack(rx.icon("alert-triangle", size=14, color="var(--amber-9)"), rx.text("Limitations", font_size="12px", font_weight="700", color="var(--gray-a9)"), spacing="2", align="center"),
-                            rx.vstack(rx.foreach(State.mcs_model_limitations, lambda s: rx.text(f"• {s}", font_size="12px", color="var(--gray-11)")), spacing="1", padding_top="6px"),
-                            padding="12px", border=f"1px solid {SURFACE_BORDER}", border_radius="10px",
+                            rx.hstack(
+                                rx.icon("alert-triangle", size=14, color="var(--amber-9)"),
+                                rx.text("Limitations", font_size="12px", font_weight="700", color="var(--gray-a9)"),
+                                spacing="2",
+                                align="center",
+                            ),
+                            rx.vstack(
+                                rx.foreach(
+                                    State.mcs_model_limitations,
+                                    lambda s: rx.text(f"• {s}", font_size="12px", color="var(--gray-11)"),
+                                ),
+                                spacing="1",
+                                padding_top="6px",
+                            ),
+                            padding="12px",
+                            border=f"1px solid {SURFACE_BORDER}",
+                            border_radius="10px",
                         ),
-                        columns="1fr 1fr", gap="12px", width="100%", padding_top="8px",
+                        columns="1fr 1fr",
+                        gap="12px",
+                        width="100%",
+                        padding_top="8px",
                     ),
                 ),
                 rx.cond(
                     State.mcs_model_recommendation != "",
                     rx.box(
-                        rx.hstack(rx.icon("lightbulb", size=14, color="var(--amber-9)"), rx.text("Recommendation", font_size="12px", font_weight="700", color="var(--gray-a9)"), spacing="2", align="center"),
-                        rx.text(State.mcs_model_recommendation, font_size="13px", color="var(--gray-11)", padding_top="4px"),
-                        padding="12px", border=f"1px solid {SURFACE_BORDER}", border_radius="10px", margin_top="8px",
+                        rx.hstack(
+                            rx.icon("lightbulb", size=14, color="var(--amber-9)"),
+                            rx.text("Recommendation", font_size="12px", font_weight="700", color="var(--gray-a9)"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        rx.text(
+                            State.mcs_model_recommendation, font_size="13px", color="var(--gray-11)", padding_top="4px"
+                        ),
+                        padding="12px",
+                        border=f"1px solid {SURFACE_BORDER}",
+                        border_radius="10px",
+                        margin_top="8px",
                     ),
                 ),
                 width="100%",
@@ -1157,7 +1231,14 @@ def _mcs_tool_row(item: dict) -> rx.Component:
             variant="soft",
             size="1",
         ),
-        rx.text(item["description"], font_size="12px", color="var(--gray-a9)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+        rx.text(
+            item["description"],
+            font_size="12px",
+            color="var(--gray-a9)",
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+        ),
         columns="2fr 1fr 1fr 1fr 1fr 3fr",
         gap="8px",
         align="center",
@@ -1206,7 +1287,12 @@ def _mcs_tools_chain_card(item: dict) -> rx.Component:
             rx.text(item["tool"], font_size="13px", font_weight="600", color="var(--gray-12)"),
             rx.badge(item["call_count_label"], color_scheme="purple", variant="soft", size="1"),
             rx.text(item["total_duration"], font_size="12px", color="var(--gray-a9)"),
-            rx.badge(item["final_state"], color_scheme=rx.cond(item["final_state"] == "completed", "green", "red"), variant="soft", size="1"),
+            rx.badge(
+                item["final_state"],
+                color_scheme=rx.cond(item["final_state"] == "completed", "green", "red"),
+                variant="soft",
+                size="1",
+            ),
             spacing="2",
             align="center",
         ),
@@ -1243,7 +1329,9 @@ def _mcs_tools_reasoning_row(item: dict) -> rx.Component:
         [
             rx.text(item["index"], font_size="13px", color="var(--gray-a9)"),
             rx.text(item["tool"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-            rx.text(item["thought"], font_size="12px", color="var(--gray-11)", overflow="hidden", text_overflow="ellipsis"),
+            rx.text(
+                item["thought"], font_size="12px", color="var(--gray-11)", overflow="hidden", text_overflow="ellipsis"
+            ),
         ],
         template="0.3fr 2fr 5fr",
     )
@@ -1279,7 +1367,9 @@ def _mcs_tools_detail_card(item: dict) -> rx.Component:
         rx.cond(
             item["thought"] != "",
             rx.box(
-                rx.text(item["thought"], font_size="12px", font_style="italic", color="var(--gray-a9)", line_height="1.4"),
+                rx.text(
+                    item["thought"], font_size="12px", font_style="italic", color="var(--gray-a9)", line_height="1.4"
+                ),
                 padding="8px 12px",
                 border_left="3px solid var(--green-a6)",
                 background="var(--green-a2)",
@@ -1396,7 +1486,9 @@ def _mcs_tools_panel() -> rx.Component:
             card(
                 section_heading("Tool Inventory"),
                 rx.box(
-                    _grid_header("Tool", "Type", "Connector", "Mode", "State", "Description", template="2fr 1fr 1fr 1fr 1fr 3fr"),
+                    _grid_header(
+                        "Tool", "Type", "Connector", "Mode", "State", "Description", template="2fr 1fr 1fr 1fr 1fr 3fr"
+                    ),
                     rx.foreach(State.mcs_tools_rows, _mcs_tool_row),
                     width="100%",
                     border=f"1px solid {SURFACE_BORDER}",
@@ -1494,17 +1586,33 @@ def _mcs_tools_panel() -> rx.Component:
         rx.cond(
             State.mcs_ins_deleg_kpis.length() > 0,  # type: ignore[union-attr]
             card(
-                _ins_card_header("network", "var(--cyan-9)", "Multi-Agent Delegation", "How the orchestrator delegates to child and connected agents."),
-                rx.hstack(rx.foreach(State.mcs_ins_deleg_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                _ins_card_header(
+                    "network",
+                    "var(--cyan-9)",
+                    "Multi-Agent Delegation",
+                    "How the orchestrator delegates to child and connected agents.",
+                ),
+                rx.hstack(
+                    rx.foreach(State.mcs_ins_deleg_kpis, _ins_kpi),
+                    spacing="3",
+                    width="100%",
+                    overflow_x="auto",
+                    padding_y="12px",
+                ),
                 rx.cond(
                     State.mcs_ins_deleg_rows.length() > 0,  # type: ignore[union-attr]
                     rx.box(
                         rx.grid(
-                            rx.text("Agent", **_INS_HEADER_CELL), rx.text("Type", **_INS_HEADER_CELL),
-                            rx.text("State", **_INS_HEADER_CELL), rx.text("Duration", **_INS_HEADER_CELL, text_align="right"),
+                            rx.text("Agent", **_INS_HEADER_CELL),
+                            rx.text("Type", **_INS_HEADER_CELL),
+                            rx.text("State", **_INS_HEADER_CELL),
+                            rx.text("Duration", **_INS_HEADER_CELL, text_align="right"),
                             rx.text("Reasoning", **_INS_HEADER_CELL),
-                            columns="1.2fr 0.8fr 0.8fr 0.7fr 3fr", gap="8px", padding_y="8px",
-                            border_bottom=f"2px solid {SURFACE_BORDER}", width="100%",
+                            columns="1.2fr 0.8fr 0.8fr 0.7fr 3fr",
+                            gap="8px",
+                            padding_y="8px",
+                            border_bottom=f"2px solid {SURFACE_BORDER}",
+                            width="100%",
                         ),
                         rx.foreach(State.mcs_ins_deleg_rows, _ins_deleg_row),
                         width="100%",
@@ -1512,7 +1620,14 @@ def _mcs_tools_panel() -> rx.Component:
                 ),
                 rx.cond(
                     State.mcs_ins_deleg_warnings.length() > 0,  # type: ignore[union-attr]
-                    rx.box(rx.foreach(State.mcs_ins_deleg_warnings, lambda w: rx.text(f"⚠ {w}", font_size="12px", color="var(--amber-9)")), padding_top="8px", width="100%"),
+                    rx.box(
+                        rx.foreach(
+                            State.mcs_ins_deleg_warnings,
+                            lambda w: rx.text(f"⚠ {w}", font_size="12px", color="var(--amber-9)"),
+                        ),
+                        padding_top="8px",
+                        width="100%",
+                    ),
                 ),
                 width="100%",
             ),
@@ -1611,7 +1726,9 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
             # Thought
             rx.cond(
                 item["thought"] != "",
-                rx.text(item["thought"], font_size="12px", color="var(--gray-a9)", font_style="italic", padding_y="2px"),
+                rx.text(
+                    item["thought"], font_size="12px", color="var(--gray-a9)", font_style="italic", padding_y="2px"
+                ),
             ),
             # Output sources
             rx.cond(
@@ -1704,7 +1821,10 @@ def _mcs_ks_custom_step(item: dict) -> rx.Component:
             size="1",
         ),
         rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-        rx.cond(item["thought"] != "", rx.text(item["thought"], font_size="12px", color="var(--gray-a9)", font_style="italic")),
+        rx.cond(
+            item["thought"] != "",
+            rx.text(item["thought"], font_size="12px", color="var(--gray-a9)", font_style="italic"),
+        ),
         rx.cond(item["error"] != "", rx.text(item["error"], font_size="12px", color="var(--red-11)")),
         rx.text(item["duration"], font_size="12px", color="var(--gray-a8)", font_family=_MONO),
         width="100%",
@@ -1727,7 +1847,10 @@ def _gen_trace_result_row(r: dict) -> rx.Component:
             rx.text(r["delta"], font_size="11px", color="var(--gray-a8)", font_family=_MONO, width="70px"),
             rx.text(
                 rx.cond(r["snippet_len"] != "0", f"{r['snippet_len']} chars", "no content"),
-                font_size="10px", color="var(--gray-a7)", font_family=_MONO, width="80px",
+                font_size="10px",
+                color="var(--gray-a7)",
+                font_family=_MONO,
+                width="80px",
             ),
             spacing="2",
             align="center",
@@ -1883,6 +2006,75 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                     width="100%",
                 ),
             ),
+            # Outcome verdict — answers "what happened?" before the user has to read further
+            rx.box(
+                rx.hstack(
+                    rx.text(trace["outcome_icon"], font_size="14px"),
+                    rx.text(
+                        trace["outcome_label_text"],
+                        font_size="12px",
+                        font_weight="700",
+                        color="var(--gray-12)",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    trace["outcome_explanation"],
+                    font_size="12px",
+                    color="var(--gray-11)",
+                    line_height="1.5",
+                    margin_top="3px",
+                ),
+                # Platform diagnostic strings — show what the SearchAndSummarizeContent
+                # node literally reported, so users can distinguish "ran with 0 hits"
+                # from "errored" or "skipped silently".
+                rx.hstack(
+                    rx.text("answer state:", font_size="10px", color="var(--gray-a8)"),
+                    rx.code(trace["answer_state"], font_size="10px"),
+                    rx.text("completion:", font_size="10px", color="var(--gray-a8)"),
+                    rx.code(trace["completion_state"], font_size="10px"),
+                    rx.text("fallback:", font_size="10px", color="var(--gray-a8)"),
+                    rx.code(trace["fallback_flag"], font_size="10px"),
+                    rx.text("errors:", font_size="10px", color="var(--gray-a8)"),
+                    rx.code(
+                        rx.cond(trace["search_errors"] != "", "see below", "0"),
+                        font_size="10px",
+                    ),
+                    rx.text("logs:", font_size="10px", color="var(--gray-a8)"),
+                    rx.code(trace["search_log_count"], font_size="10px"),
+                    rx.text("shadow:", font_size="10px", color="var(--gray-a8)"),
+                    rx.code(trace["shadow_result_count"], font_size="10px"),
+                    spacing="2",
+                    wrap="wrap",
+                    margin_top="6px",
+                ),
+                width="100%",
+                padding="10px 12px",
+                background="var(--gray-a2)",
+                border_left="3px solid var(--gray-a6)",
+                border_radius="6px",
+            ),
+            # Shadow errors — only shown when the parallel shadow lane reported any
+            rx.cond(
+                trace["shadow_errors"] != "",
+                rx.box(
+                    rx.hstack(
+                        rx.icon("triangle-alert", size=12, color="var(--red-9)"),
+                        rx.text(
+                            f"Shadow search errors: {trace['shadow_errors']}",
+                            font_size="12px",
+                            color="var(--red-11)",
+                        ),
+                        spacing="2",
+                        align="center",
+                    ),
+                    background="var(--red-a2)",
+                    border="1px solid var(--red-a4)",
+                    border_radius="6px",
+                    padding="4px 8px",
+                ),
+            ),
             # Query transformation chain
             rx.box(
                 rx.text("Query transformation", font_size="11px", color="var(--gray-a8)", font_weight="700"),
@@ -1897,15 +2089,19 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                     rx.hstack(
                         rx.text("🛡", font_size="12px"),
                         rx.text(trace["screened"], font_size="12px", color="var(--gray-11)"),
-                        spacing="2", align="center",
+                        spacing="2",
+                        align="center",
                     ),
                 ),
                 rx.cond(
-                    (trace["rewritten"] != "") & (trace["rewritten"] != trace["user_msg"]) & (trace["rewritten"] != trace["screened"]),
+                    (trace["rewritten"] != "")
+                    & (trace["rewritten"] != trace["user_msg"])
+                    & (trace["rewritten"] != trace["screened"]),
                     rx.hstack(
                         rx.text("✏️", font_size="12px"),
                         rx.text(trace["rewritten"], font_size="12px", color="var(--gray-11)"),
-                        spacing="2", align="center",
+                        spacing="2",
+                        align="center",
                     ),
                 ),
                 rx.cond(
@@ -1913,7 +2109,8 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                     rx.hstack(
                         rx.text("🔑", font_size="12px"),
                         rx.code(trace["keywords"], font_size="11px"),
-                        spacing="2", align="center",
+                        spacing="2",
+                        align="center",
                     ),
                 ),
                 width="100%",
@@ -1928,39 +2125,65 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                     rx.text(trace["rewrite_tokens"], font_size="12px", color="var(--gray-12)", font_family=_MONO),
                     rx.cond(
                         trace["rewrite_total_tokens"] != "",
-                        rx.text(f"total {trace['rewrite_total_tokens']}", font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                        rx.text(
+                            f"total {trace['rewrite_total_tokens']}",
+                            font_size="10px",
+                            color="var(--gray-a8)",
+                            font_family=_MONO,
+                        ),
                     ),
                     rx.cond(
                         trace["rewrite_cached_tokens"] != "",
-                        rx.text(f"cached {trace['rewrite_cached_tokens']}", font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                        rx.text(
+                            f"cached {trace['rewrite_cached_tokens']}",
+                            font_size="10px",
+                            color="var(--gray-a8)",
+                            font_family=_MONO,
+                        ),
                     ),
                     rx.code(trace["rewrite_model"], font_size="10px"),
-                    spacing="0", align="start",
+                    spacing="0",
+                    align="start",
                 ),
                 rx.vstack(
                     rx.text("Summarize", font_size="10px", color="var(--gray-a8)", font_weight="700"),
                     rx.text(trace["summarize_tokens"], font_size="12px", color="var(--gray-12)", font_family=_MONO),
                     rx.cond(
                         trace["summarize_total_tokens"] != "",
-                        rx.text(f"total {trace['summarize_total_tokens']}", font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                        rx.text(
+                            f"total {trace['summarize_total_tokens']}",
+                            font_size="10px",
+                            color="var(--gray-a8)",
+                            font_family=_MONO,
+                        ),
                     ),
                     rx.cond(
                         trace["summarize_cached_tokens"] != "",
-                        rx.text(f"cached {trace['summarize_cached_tokens']}", font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                        rx.text(
+                            f"cached {trace['summarize_cached_tokens']}",
+                            font_size="10px",
+                            color="var(--gray-a8)",
+                            font_family=_MONO,
+                        ),
                     ),
                     rx.code(trace["summarize_model"], font_size="10px"),
-                    spacing="0", align="start",
+                    spacing="0",
+                    align="start",
                 ),
                 rx.vstack(
                     rx.text("Backend", font_size="10px", color="var(--gray-a8)", font_weight="700"),
                     rx.text(trace["search_type"], font_size="12px", color="var(--gray-12)"),
-                    rx.text(f"{trace['result_count']} hits · {trace['citation_count']} citations",
-                           font_size="11px", color="var(--gray-a9)"),
+                    rx.text(
+                        f"{trace['result_count']} hits · {trace['citation_count']} citations",
+                        font_size="11px",
+                        color="var(--gray-a9)",
+                    ),
                     rx.cond(
                         trace["shadow_label"] != "",
                         rx.text(trace["shadow_label"], font_size="10px", color="var(--gray-a9)"),
                     ),
-                    spacing="0", align="start",
+                    spacing="0",
+                    align="start",
                 ),
                 spacing="6",
                 width="100%",
@@ -1974,9 +2197,12 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                         rx.icon("triangle-alert", size=12, color="var(--amber-9)"),
                         rx.text(
                             "All search ranks are 0 — search ranker likely disabled or misconfigured against the backend.",
-                            font_size="11px", color="var(--amber-11)", font_weight="600",
+                            font_size="11px",
+                            color="var(--amber-11)",
+                            font_weight="600",
                         ),
-                        spacing="2", align="center",
+                        spacing="2",
+                        align="center",
                     ),
                     background="var(--amber-a3)",
                     border="1px solid var(--amber-a5)",
@@ -1992,9 +2218,12 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                         rx.icon("triangle-alert", size=12, color="var(--amber-9)"),
                         rx.text(
                             "Parallel shadow search lane retrieved more results than the live lane — possible backend mismatch.",
-                            font_size="11px", color="var(--amber-11)", font_weight="600",
+                            font_size="11px",
+                            color="var(--amber-11)",
+                            font_weight="600",
                         ),
-                        spacing="2", align="center",
+                        spacing="2",
+                        align="center",
                     ),
                     background="var(--amber-a3)",
                     border="1px solid var(--amber-a5)",
@@ -2006,12 +2235,20 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
             rx.cond(
                 trace["hypothetical_snippet"] != "",
                 rx.box(
-                    rx.text("LLM's hypothetical answer (what the rewriter expected to find)",
-                           font_size="11px", color="var(--gray-a8)", font_weight="700", margin_bottom="4px"),
+                    rx.text(
+                        "LLM's hypothetical answer (what the rewriter expected to find)",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_weight="700",
+                        margin_bottom="4px",
+                    ),
                     rx.text(
                         trace["hypothetical_snippet"],
-                        font_size="11px", color="var(--gray-a10)", font_style="italic",
-                        white_space="pre-wrap", word_break="break-word",
+                        font_size="11px",
+                        color="var(--gray-a10)",
+                        font_style="italic",
+                        white_space="pre-wrap",
+                        word_break="break-word",
                     ),
                     padding="6px 10px",
                     background="var(--violet-a2)",
@@ -2031,7 +2268,13 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
             rx.cond(
                 trace["endpoint_count"] != "0",
                 rx.box(
-                    rx.text("Knowledge endpoints queried", font_size="11px", color="var(--gray-a8)", font_weight="700", margin_bottom="4px"),
+                    rx.text(
+                        "Knowledge endpoints queried",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_weight="700",
+                        margin_bottom="4px",
+                    ),
                     rx.foreach(trace["endpoints"].to(list[str]), _gen_trace_endpoint_row),
                     width="100%",
                 ),
@@ -2040,7 +2283,13 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
             rx.cond(
                 trace["result_count"] != "0",
                 rx.box(
-                    rx.text("Search results", font_size="11px", color="var(--gray-a8)", font_weight="700", margin_bottom="4px"),
+                    rx.text(
+                        "Search results",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_weight="700",
+                        margin_bottom="4px",
+                    ),
                     rx.foreach(trace["results"].to(list[dict]), _gen_trace_result_row),
                     width="100%",
                     padding="6px 0",
@@ -2050,7 +2299,13 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
             rx.cond(
                 trace["citation_count"] != "0",
                 rx.box(
-                    rx.text("Citations cited in answer", font_size="11px", color="var(--gray-a8)", font_weight="700", margin_bottom="4px"),
+                    rx.text(
+                        "Citations cited in answer",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_weight="700",
+                        margin_bottom="4px",
+                    ),
                     rx.foreach(trace["citations"].to(list[dict]), _gen_trace_citation_row),
                     width="100%",
                 ),
@@ -2098,12 +2353,52 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                     rx.hstack(
                         rx.icon("triangle-alert", size=12, color="var(--red-9)"),
                         rx.text(trace["search_errors"], font_size="12px", color="var(--red-11)"),
-                        spacing="2", align="center",
+                        spacing="2",
+                        align="center",
                     ),
                     background="var(--red-a2)",
                     border="1px solid var(--red-a4)",
                     border_radius="6px",
                     padding="4px 8px",
+                ),
+            ),
+            # Search backend logs — collapsible, only shown when present
+            rx.cond(
+                trace["search_logs_text"] != "",
+                rx.accordion.root(
+                    rx.accordion.item(
+                        header=rx.text(
+                            "Search backend logs",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                        ),
+                        content=_gen_trace_prompt_block(trace["search_logs_text"]),
+                        value="search_logs",
+                    ),
+                    type="single",
+                    collapsible=True,
+                    width="100%",
+                    variant="ghost",
+                ),
+            ),
+            rx.cond(
+                trace["shadow_logs_text"] != "",
+                rx.accordion.root(
+                    rx.accordion.item(
+                        header=rx.text(
+                            "Shadow search backend logs",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                        ),
+                        content=_gen_trace_prompt_block(trace["shadow_logs_text"]),
+                        value="shadow_logs",
+                    ),
+                    type="single",
+                    collapsible=True,
+                    width="100%",
+                    variant="ghost",
                 ),
             ),
             # Deepest debug signal: full system prompts the LLM saw.
@@ -2113,33 +2408,51 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                 trace["rewrite_system_prompt"] != "",
                 rx.accordion.root(
                     rx.accordion.item(
-                        header=rx.text("Query-rewrite system prompt", font_size="11px", color="var(--gray-a9)", font_weight="700"),
+                        header=rx.text(
+                            "Query-rewrite system prompt", font_size="11px", color="var(--gray-a9)", font_weight="700"
+                        ),
                         content=_gen_trace_prompt_block(trace["rewrite_system_prompt"]),
                         value="rewrite_prompt",
                     ),
-                    type="single", collapsible=True, width="100%", variant="ghost",
+                    type="single",
+                    collapsible=True,
+                    width="100%",
+                    variant="ghost",
                 ),
             ),
             rx.cond(
                 trace["summarize_system_prompt"] != "",
                 rx.accordion.root(
                     rx.accordion.item(
-                        header=rx.text("Summarization system prompt + retrieved context", font_size="11px", color="var(--gray-a9)", font_weight="700"),
+                        header=rx.text(
+                            "Summarization system prompt + retrieved context",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                        ),
                         content=_gen_trace_prompt_block(trace["summarize_system_prompt"]),
                         value="summarize_prompt",
                     ),
-                    type="single", collapsible=True, width="100%", variant="ghost",
+                    type="single",
+                    collapsible=True,
+                    width="100%",
+                    variant="ghost",
                 ),
             ),
             rx.cond(
                 trace["rewrite_raw_response"] != "",
                 rx.accordion.root(
                     rx.accordion.item(
-                        header=rx.text("Raw rewrite LLM response", font_size="11px", color="var(--gray-a9)", font_weight="700"),
+                        header=rx.text(
+                            "Raw rewrite LLM response", font_size="11px", color="var(--gray-a9)", font_weight="700"
+                        ),
                         content=_gen_trace_prompt_block(trace["rewrite_raw_response"]),
                         value="rewrite_raw",
                     ),
-                    type="single", collapsible=True, width="100%", variant="ghost",
+                    type="single",
+                    collapsible=True,
+                    width="100%",
+                    variant="ghost",
                 ),
             ),
             spacing="3",
@@ -2249,7 +2562,9 @@ def _mcs_knowledge_panel() -> rx.Component:
                     section_heading("Topic-Level Generative Answers"),
                     rx.badge(
                         State.mcs_generative_traces.length(),  # type: ignore[union-attr]
-                        color_scheme="green", variant="soft", size="1",
+                        color_scheme="green",
+                        variant="soft",
+                        size="1",
                     ),
                     spacing="2",
                     align="center",
@@ -2270,15 +2585,32 @@ def _mcs_knowledge_panel() -> rx.Component:
         rx.cond(
             State.mcs_ins_ke_kpis.length() > 0,  # type: ignore[union-attr]
             card(
-                _ins_card_header("database", "var(--amber-9)", "Knowledge Source Effectiveness", "Per-source hit rate and contribution to grounded responses."),
-                rx.hstack(rx.foreach(State.mcs_ins_ke_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                _ins_card_header(
+                    "database",
+                    "var(--amber-9)",
+                    "Knowledge Source Effectiveness",
+                    "Per-source hit rate and contribution to grounded responses.",
+                ),
+                rx.hstack(
+                    rx.foreach(State.mcs_ins_ke_kpis, _ins_kpi),
+                    spacing="3",
+                    width="100%",
+                    overflow_x="auto",
+                    padding_y="12px",
+                ),
                 rx.box(
                     rx.grid(
-                        rx.text("Source", **_INS_HEADER_CELL), rx.text("Queries", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Contributed", **_INS_HEADER_CELL, text_align="right"), rx.text("Hit Rate", **_INS_HEADER_CELL),
-                        rx.text("Errors", **_INS_HEADER_CELL, text_align="right"), rx.text("Avg Results", **_INS_HEADER_CELL, text_align="right"),
-                        columns="2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr", gap="8px", padding_y="8px",
-                        border_bottom=f"2px solid {SURFACE_BORDER}", width="100%",
+                        rx.text("Source", **_INS_HEADER_CELL),
+                        rx.text("Queries", **_INS_HEADER_CELL, text_align="right"),
+                        rx.text("Contributed", **_INS_HEADER_CELL, text_align="right"),
+                        rx.text("Hit Rate", **_INS_HEADER_CELL),
+                        rx.text("Errors", **_INS_HEADER_CELL, text_align="right"),
+                        rx.text("Avg Results", **_INS_HEADER_CELL, text_align="right"),
+                        columns="2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr",
+                        gap="8px",
+                        padding_y="8px",
+                        border_bottom=f"2px solid {SURFACE_BORDER}",
+                        width="100%",
                     ),
                     rx.foreach(State.mcs_ins_ke_rows, _ins_ke_row),
                     width="100%",
@@ -2286,8 +2618,17 @@ def _mcs_knowledge_panel() -> rx.Component:
                 rx.cond(
                     State.mcs_ins_ke_warnings.length() > 0,  # type: ignore[union-attr]
                     rx.box(
-                        rx.text("Low-performing sources", font_size="12px", font_weight="700", color="var(--amber-9)", padding_top="12px"),
-                        rx.foreach(State.mcs_ins_ke_warnings, lambda w: rx.text(f"• {w}", font_size="12px", color="var(--gray-a9)")),
+                        rx.text(
+                            "Low-performing sources",
+                            font_size="12px",
+                            font_weight="700",
+                            color="var(--amber-9)",
+                            padding_top="12px",
+                        ),
+                        rx.foreach(
+                            State.mcs_ins_ke_warnings,
+                            lambda w: rx.text(f"• {w}", font_size="12px", color="var(--gray-a9)"),
+                        ),
                         width="100%",
                     ),
                 ),
@@ -2313,9 +2654,9 @@ def _mcs_lifecycle_card(item: dict) -> rx.Component:
                 rx.badge(
                     item["name"],
                     color_scheme=rx.cond(
-                        is_failed, "red",
-                        rx.cond(is_pending, "amber",
-                                rx.cond(is_redirected, "blue", "teal")),
+                        is_failed,
+                        "red",
+                        rx.cond(is_pending, "amber", rx.cond(is_redirected, "blue", "teal")),
                     ),
                     variant="soft",
                     size="1",
@@ -2323,9 +2664,9 @@ def _mcs_lifecycle_card(item: dict) -> rx.Component:
                 rx.badge(
                     item["status"],
                     color_scheme=rx.cond(
-                        is_failed, "red",
-                        rx.cond(is_pending, "amber",
-                                rx.cond(is_redirected, "blue", "green")),
+                        is_failed,
+                        "red",
+                        rx.cond(is_pending, "amber", rx.cond(is_redirected, "blue", "green")),
                     ),
                     variant="outline",
                     size="1",
@@ -2570,7 +2911,15 @@ def _mcs_decision_item(item: dict) -> rx.Component:
                         rx.badge(item.get("topic_name", ""), color_scheme="purple", variant="soft", size="1"),
                         rx.box(),
                     ),
-                    rx.text(item.get("summary", ""), font_size="11px", color="var(--gray-a8)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap", max_width="400px"),
+                    rx.text(
+                        item.get("summary", ""),
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        overflow="hidden",
+                        text_overflow="ellipsis",
+                        white_space="nowrap",
+                        max_width="400px",
+                    ),
                     rx.cond(
                         item.get("error", "") != "",
                         rx.text(item.get("error", ""), font_size="11px", color="var(--red-9)"),
@@ -2787,10 +3136,21 @@ def _mcs_routing_panel() -> rx.Component:
         rx.cond(
             State.mcs_ins_plan_diffs.length() > 0,  # type: ignore[union-attr]
             card(
-                _ins_card_header("git-compare", "var(--violet-9)", "Plan Evolution Diffs", "How the orchestrator changed its plan within a single turn."),
+                _ins_card_header(
+                    "git-compare",
+                    "var(--violet-9)",
+                    "Plan Evolution Diffs",
+                    "How the orchestrator changed its plan within a single turn.",
+                ),
                 rx.cond(
                     State.mcs_ins_plan_kpis.length() > 0,  # type: ignore[union-attr]
-                    rx.hstack(rx.foreach(State.mcs_ins_plan_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                    rx.hstack(
+                        rx.foreach(State.mcs_ins_plan_kpis, _ins_kpi),
+                        spacing="3",
+                        width="100%",
+                        overflow_x="auto",
+                        padding_y="12px",
+                    ),
                 ),
                 rx.foreach(State.mcs_ins_plan_diffs, _ins_plan_diff_item),
                 width="100%",
@@ -2800,10 +3160,26 @@ def _mcs_routing_panel() -> rx.Component:
         rx.cond(
             State.mcs_topics_coverage.length() > 0,  # type: ignore[union-attr]
             card(
-                rx.hstack(rx.icon("scan-search", size=16, color="var(--teal-9)"), section_heading("Topic Coverage"), spacing="2", align="center"),
-                rx.text(State.mcs_topics_coverage_summary, font_size="13px", color="var(--gray-12)", font_weight="600", padding_bottom="8px"),
+                rx.hstack(
+                    rx.icon("scan-search", size=16, color="var(--teal-9)"),
+                    section_heading("Topic Coverage"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    State.mcs_topics_coverage_summary,
+                    font_size="13px",
+                    color="var(--gray-12)",
+                    font_weight="600",
+                    padding_bottom="8px",
+                ),
                 sub_heading("Not triggered in this session"),
-                _data_table(["Topic", "State", "External Calls"], "3fr 1fr 1fr", State.mcs_topics_coverage, _mcs_topics_coverage_row),
+                _data_table(
+                    ["Topic", "State", "External Calls"],
+                    "3fr 1fr 1fr",
+                    State.mcs_topics_coverage,
+                    _mcs_topics_coverage_row,
+                ),
                 width="100%",
             ),
         ),
@@ -2832,9 +3208,28 @@ def _mcs_topics_user_row(item: dict) -> rx.Component:
         [
             rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
             rx.text(item["schema"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
-            rx.badge(item["state"], color_scheme=rx.cond(item["state"] == "Active", "green", "gray"), variant="soft", size="1"),
-            rx.text(item["triggers"], font_size="12px", color="var(--gray-a9)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
-            rx.text(item["description"], font_size="12px", color="var(--gray-a9)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+            rx.badge(
+                item["state"],
+                color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
+                variant="soft",
+                size="1",
+            ),
+            rx.text(
+                item["triggers"],
+                font_size="12px",
+                color="var(--gray-a9)",
+                overflow="hidden",
+                text_overflow="ellipsis",
+                white_space="nowrap",
+            ),
+            rx.text(
+                item["description"],
+                font_size="12px",
+                color="var(--gray-a9)",
+                overflow="hidden",
+                text_overflow="ellipsis",
+                white_space="nowrap",
+            ),
         ],
         template="2fr 2fr 1fr 2fr 2fr",
     )
@@ -2844,7 +3239,12 @@ def _mcs_topics_orch_row(item: dict) -> rx.Component:
     return _grid_row(
         [
             rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-            rx.badge(item["state"], color_scheme=rx.cond(item["state"] == "Active", "green", "gray"), variant="soft", size="1"),
+            rx.badge(
+                item["state"],
+                color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
+                variant="soft",
+                size="1",
+            ),
             rx.text(item["tool_type"], font_size="13px", color="var(--gray-a9)"),
             rx.text(item["connector"], font_size="13px", color="var(--gray-a9)"),
             rx.text(item["mode"], font_size="13px", color="var(--gray-11)"),
@@ -2858,7 +3258,12 @@ def _mcs_topics_system_row(item: dict) -> rx.Component:
         [
             rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
             rx.text(item["schema"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
-            rx.badge(item["state"], color_scheme=rx.cond(item["state"] == "Active", "green", "gray"), variant="soft", size="1"),
+            rx.badge(
+                item["state"],
+                color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
+                variant="soft",
+                size="1",
+            ),
             rx.text(item["trigger"], font_size="13px", color="var(--gray-a9)"),
         ],
         template="2fr 2fr 1fr 1fr",
@@ -2883,7 +3288,12 @@ def _mcs_topics_coverage_row(item: dict) -> rx.Component:
     return _grid_row(
         [
             rx.text(item["name"], font_size="13px", color="var(--gray-12)"),
-            rx.badge(item["state"], color_scheme=rx.cond(item["state"] == "Active", "green", "gray"), variant="soft", size="1"),
+            rx.badge(
+                item["state"],
+                color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
+                variant="soft",
+                size="1",
+            ),
             rx.text(item["has_external_calls"], font_size="13px", color="var(--gray-a9)"),
         ],
         template="3fr 1fr 1fr",
@@ -3410,7 +3820,9 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                         align="center",
                     ),
                     rx.box(
-                        _grid_header("Phase", "Type", "Duration", "% of Total", "Status", template="2fr 1fr 1fr 1fr 1fr"),
+                        _grid_header(
+                            "Phase", "Type", "Duration", "% of Total", "Status", template="2fr 1fr 1fr 1fr 1fr"
+                        ),
                         rx.foreach(State.mcs_conv_phases, _mcs_conv_phase_row),
                         width="100%",
                         border=f"1px solid {SURFACE_BORDER}",
@@ -3581,7 +3993,9 @@ def _mcs_custom_findings_section() -> rx.Component:
 
 # ── Insights panel (conversation analysis features) ───────────────────────────
 
-_INS_LABEL = dict(font_size="11px", font_weight="700", color="var(--gray-a9)", text_transform="uppercase", letter_spacing="0.04em")
+_INS_LABEL = dict(
+    font_size="11px", font_weight="700", color="var(--gray-a9)", text_transform="uppercase", letter_spacing="0.04em"
+)
 _INS_CELL = dict(font_size="13px", color="var(--gray-12)", font_family=_MONO)
 _INS_HEADER_CELL = dict(font_size="11px", font_weight="700", color="var(--gray-a9)")
 _INS_ROW_BORDER = f"1px solid {SURFACE_BORDER}"
@@ -3592,9 +4006,15 @@ def _ins_kpi(item: dict) -> rx.Component:
     return rx.box(
         rx.text(item["label"], **_INS_LABEL),
         rx.text(item["value"], font_size="22px", font_weight="800", color="var(--gray-12)", line_height="1.2"),
-        border=rx.cond(tone == "warn", "1px solid var(--amber-8)",
-               rx.cond(tone == "danger", "1px solid var(--red-8)",
-               rx.cond(tone == "good", f"1px solid {PRIMARY}", f"1px solid {SURFACE_BORDER}"))),
+        border=rx.cond(
+            tone == "warn",
+            "1px solid var(--amber-8)",
+            rx.cond(
+                tone == "danger",
+                "1px solid var(--red-8)",
+                rx.cond(tone == "good", f"1px solid {PRIMARY}", f"1px solid {SURFACE_BORDER}"),
+            ),
+        ),
         border_radius="10px",
         background="var(--gray-a2)",
         padding="10px 14px",
@@ -3614,13 +4034,24 @@ def _ins_card_header(icon_name: str, icon_color: str, title: str, subtitle: str)
 def _ins_turn_row(item: dict) -> rx.Component:
     return rx.grid(
         rx.text(item["turn"], **_INS_CELL, text_align="right"),
-        rx.text(item["message"], font_size="13px", color="var(--gray-12)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+        rx.text(
+            item["message"],
+            font_size="13px",
+            color="var(--gray-12)",
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+        ),
         rx.text(item["plans"], **_INS_CELL, text_align="right"),
         rx.text(item["tools"], **_INS_CELL, text_align="right"),
         rx.text(item["searches"], **_INS_CELL, text_align="right"),
         rx.text(item["thinking"], **_INS_CELL, text_align="right"),
         rx.text(item["total"], **_INS_CELL, text_align="right"),
-        rx.cond(item["flags"] != "", rx.badge(item["flags"], color_scheme="amber", variant="soft", size="1"), rx.text("—", color="var(--gray-a7)", font_size="12px")),
+        rx.cond(
+            item["flags"] != "",
+            rx.badge(item["flags"], color_scheme="amber", variant="soft", size="1"),
+            rx.text("—", color="var(--gray-a7)", font_size="12px"),
+        ),
         columns="0.4fr 2.5fr 0.5fr 0.5fr 0.6fr 0.8fr 0.8fr 2fr",
         gap="8px",
         align="center",
@@ -3633,7 +4064,12 @@ def _ins_turn_row(item: dict) -> rx.Component:
 def _ins_quality_row(item: dict) -> rx.Component:
     return rx.grid(
         rx.text(item["turn"], **_INS_CELL, text_align="right"),
-        rx.badge(item["risk"], color_scheme=rx.match(item["risk"], ("high", "red"), ("medium", "amber"), "green"), variant="soft", size="1"),
+        rx.badge(
+            item["risk"],
+            color_scheme=rx.match(item["risk"], ("high", "red"), ("medium", "amber"), "green"),
+            variant="soft",
+            size="1",
+        ),
         rx.badge(item["source"], variant="outline", size="1"),
         rx.text(item["flags"], font_size="12px", color="var(--gray-11)"),
         columns="0.4fr 0.8fr 0.8fr 4fr",
@@ -3649,14 +4085,35 @@ def _ins_plan_diff_item(item: dict) -> rx.Component:
     return rx.box(
         rx.hstack(
             rx.badge(f"Turn {item['turn']}", variant="soft", color_scheme="violet", size="1"),
-            rx.cond(item["is_thrashing"] == "yes", rx.badge("THRASHING", color_scheme="red", variant="solid", size="1")),
+            rx.cond(
+                item["is_thrashing"] == "yes", rx.badge("THRASHING", color_scheme="red", variant="solid", size="1")
+            ),
             spacing="2",
             align="center",
         ),
-        rx.cond(item["ask"] != "", rx.text(item["ask"], font_size="12px", color="var(--gray-a9)", font_style="italic", padding_top="4px")),
+        rx.cond(
+            item["ask"] != "",
+            rx.text(item["ask"], font_size="12px", color="var(--gray-a9)", font_style="italic", padding_top="4px"),
+        ),
         rx.hstack(
-            rx.cond(item["added"] != "", rx.hstack(rx.text("+", color="var(--green-9)", font_weight="700"), rx.text(item["added"], font_size="12px", font_family=_MONO, color="var(--green-11)"), spacing="1", align="center")),
-            rx.cond(item["removed"] != "", rx.hstack(rx.text("−", color="var(--red-9)", font_weight="700"), rx.text(item["removed"], font_size="12px", font_family=_MONO, color="var(--red-11)"), spacing="1", align="center")),
+            rx.cond(
+                item["added"] != "",
+                rx.hstack(
+                    rx.text("+", color="var(--green-9)", font_weight="700"),
+                    rx.text(item["added"], font_size="12px", font_family=_MONO, color="var(--green-11)"),
+                    spacing="1",
+                    align="center",
+                ),
+            ),
+            rx.cond(
+                item["removed"] != "",
+                rx.hstack(
+                    rx.text("−", color="var(--red-9)", font_weight="700"),
+                    rx.text(item["removed"], font_size="12px", font_family=_MONO, color="var(--red-11)"),
+                    spacing="1",
+                    align="center",
+                ),
+            ),
             spacing="4",
             padding_top="4px",
         ),
@@ -3668,10 +4125,22 @@ def _ins_plan_diff_item(item: dict) -> rx.Component:
 
 def _ins_ke_row(item: dict) -> rx.Component:
     return rx.grid(
-        rx.text(item["source"], font_size="13px", color="var(--gray-12)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+        rx.text(
+            item["source"],
+            font_size="13px",
+            color="var(--gray-12)",
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+        ),
         rx.text(item["queries"], **_INS_CELL, text_align="right"),
         rx.text(item["contributions"], **_INS_CELL, text_align="right"),
-        rx.badge(item["hit_rate"], color_scheme=rx.match(item["hit_tone"], ("good", "green"), ("warn", "amber"), "red"), variant="soft", size="1"),
+        rx.badge(
+            item["hit_rate"],
+            color_scheme=rx.match(item["hit_tone"], ("good", "green"), ("warn", "amber"), "red"),
+            variant="soft",
+            size="1",
+        ),
         rx.text(item["errors"], **_INS_CELL, text_align="right"),
         rx.text(item["avg_results"], **_INS_CELL, text_align="right"),
         columns="2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr",
@@ -3685,9 +4154,24 @@ def _ins_ke_row(item: dict) -> rx.Component:
 
 def _ins_dead_row(item: dict) -> rx.Component:
     return rx.grid(
-        rx.badge(item["kind"], variant="soft", color_scheme=rx.match(item["kind"], ("Tool", "purple"), ("KnowledgeSource", "amber"), ("Variable", "cyan"), "gray"), size="1"),
+        rx.badge(
+            item["kind"],
+            variant="soft",
+            color_scheme=rx.match(
+                item["kind"], ("Tool", "purple"), ("KnowledgeSource", "amber"), ("Variable", "cyan"), "gray"
+            ),
+            size="1",
+        ),
         rx.text(item["name"], font_size="13px", color="var(--gray-12)"),
-        rx.text(item["schema"], font_size="12px", color="var(--gray-a8)", font_family=_MONO, overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+        rx.text(
+            item["schema"],
+            font_size="12px",
+            color="var(--gray-a8)",
+            font_family=_MONO,
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+        ),
         columns="0.8fr 2fr 3fr",
         gap="8px",
         align="center",
@@ -3700,14 +4184,23 @@ def _ins_dead_row(item: dict) -> rx.Component:
 def _ins_latency_row(item: dict) -> rx.Component:
     return rx.grid(
         rx.text(item["turn"], **_INS_CELL, text_align="right"),
-        rx.text(item["message"], font_size="13px", color="var(--gray-12)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+        rx.text(
+            item["message"],
+            font_size="13px",
+            color="var(--gray-12)",
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+        ),
         rx.text(item["total"], **_INS_CELL, text_align="right", font_weight="600"),
         rx.text(item["thinking"], **_INS_CELL, text_align="right"),
         rx.text(item["tools"], **_INS_CELL, text_align="right"),
         rx.text(item["knowledge"], **_INS_CELL, text_align="right"),
-        rx.cond(item["bottleneck"] != "—",
-                rx.badge(item["bottleneck"], color_scheme="amber", variant="soft", size="1"),
-                rx.text("—", color="var(--gray-a7)", font_size="12px")),
+        rx.cond(
+            item["bottleneck"] != "—",
+            rx.badge(item["bottleneck"], color_scheme="amber", variant="soft", size="1"),
+            rx.text("—", color="var(--gray-a7)", font_size="12px"),
+        ),
         columns="0.4fr 2fr 0.8fr 1.2fr 1.2fr 1.2fr 1.5fr",
         gap="8px",
         align="center",
@@ -3721,9 +4214,21 @@ def _ins_deleg_row(item: dict) -> rx.Component:
     return rx.grid(
         rx.text(item["agent"], font_size="13px", color="var(--gray-12)", font_weight="500"),
         rx.badge(item["type"], variant="outline", size="1"),
-        rx.badge(item["state"], color_scheme=rx.match(item["state"], ("completed", "green"), ("failed", "red"), "gray"), variant="soft", size="1"),
+        rx.badge(
+            item["state"],
+            color_scheme=rx.match(item["state"], ("completed", "green"), ("failed", "red"), "gray"),
+            variant="soft",
+            size="1",
+        ),
         rx.text(item["duration"], **_INS_CELL, text_align="right"),
-        rx.text(item["thought"], font_size="12px", color="var(--gray-a9)", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+        rx.text(
+            item["thought"],
+            font_size="12px",
+            color="var(--gray-a9)",
+            overflow="hidden",
+            text_overflow="ellipsis",
+            white_space="nowrap",
+        ),
         columns="1.2fr 0.8fr 0.8fr 0.7fr 3fr",
         gap="8px",
         align="center",
@@ -3736,7 +4241,18 @@ def _ins_deleg_row(item: dict) -> rx.Component:
 def _ins_align_row(item: dict) -> rx.Component:
     return rx.grid(
         rx.text(item["directive"], font_size="13px", color="var(--gray-12)"),
-        rx.badge(item["type"], color_scheme=rx.match(item["type"], ("language_mismatch", "blue"), ("missing_escalation", "amber"), ("scope_breach", "red"), "gray"), variant="soft", size="1"),
+        rx.badge(
+            item["type"],
+            color_scheme=rx.match(
+                item["type"],
+                ("language_mismatch", "blue"),
+                ("missing_escalation", "amber"),
+                ("scope_breach", "red"),
+                "gray",
+            ),
+            variant="soft",
+            size="1",
+        ),
         rx.text(item["evidence"], font_size="12px", color="var(--gray-a9)"),
         columns="2fr 1.2fr 3fr",
         gap="8px",
@@ -3769,8 +4285,18 @@ def _mcs_quality_panel() -> rx.Component:
         rx.cond(
             State.mcs_profile_quick_wins.length() > 0,  # type: ignore[union-attr]
             card(
-                rx.hstack(rx.icon("zap", size=16, color="var(--amber-9)"), section_heading("Quick Wins"), spacing="2", align="center"),
-                rx.vstack(rx.foreach(State.mcs_profile_quick_wins, _mcs_profile_quick_win_row), spacing="1", width="100%", padding_top="8px"),
+                rx.hstack(
+                    rx.icon("zap", size=16, color="var(--amber-9)"),
+                    section_heading("Quick Wins"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.vstack(
+                    rx.foreach(State.mcs_profile_quick_wins, _mcs_profile_quick_win_row),
+                    spacing="1",
+                    width="100%",
+                    padding_top="8px",
+                ),
                 width="100%",
             ),
         ),
@@ -3778,8 +4304,19 @@ def _mcs_quality_panel() -> rx.Component:
         rx.cond(
             State.mcs_ins_quality_kpis.length() > 0,  # type: ignore[union-attr]
             card(
-                _ins_card_header("shield-check", "var(--blue-9)", "Response Quality", "Groundedness and hallucination risk for bot responses."),
-                rx.hstack(rx.foreach(State.mcs_ins_quality_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                _ins_card_header(
+                    "shield-check",
+                    "var(--blue-9)",
+                    "Response Quality",
+                    "Groundedness and hallucination risk for bot responses.",
+                ),
+                rx.hstack(
+                    rx.foreach(State.mcs_ins_quality_kpis, _ins_kpi),
+                    spacing="3",
+                    width="100%",
+                    overflow_x="auto",
+                    padding_y="12px",
+                ),
                 rx.cond(
                     State.mcs_ins_quality_rows.length() > 0,  # type: ignore[union-attr]
                     rx.box(
@@ -3797,7 +4334,9 @@ def _mcs_quality_panel() -> rx.Component:
                         rx.foreach(State.mcs_ins_quality_rows, _ins_quality_row),
                         width="100%",
                     ),
-                    rx.text("All responses appear grounded.", font_size="13px", color="var(--green-11)", padding_top="8px"),
+                    rx.text(
+                        "All responses appear grounded.", font_size="13px", color="var(--green-11)", padding_top="8px"
+                    ),
                 ),
                 width="100%",
             ),
@@ -3806,8 +4345,19 @@ def _mcs_quality_panel() -> rx.Component:
         rx.cond(
             State.mcs_ins_dead_summary != "",
             card(
-                _ins_card_header("trash-2", "var(--red-9)", "Dead Code Detection", "Components with no runtime evidence of being used."),
-                rx.text(State.mcs_ins_dead_summary, font_size="14px", color="var(--gray-12)", font_weight="500", padding_y="8px"),
+                _ins_card_header(
+                    "trash-2",
+                    "var(--red-9)",
+                    "Dead Code Detection",
+                    "Components with no runtime evidence of being used.",
+                ),
+                rx.text(
+                    State.mcs_ins_dead_summary,
+                    font_size="14px",
+                    color="var(--gray-12)",
+                    font_weight="500",
+                    padding_y="8px",
+                ),
                 rx.cond(
                     State.mcs_ins_dead_rows.length() > 0,  # type: ignore[union-attr]
                     rx.box(
@@ -3832,8 +4382,19 @@ def _mcs_quality_panel() -> rx.Component:
         rx.cond(
             State.mcs_ins_align_kpis.length() > 0,  # type: ignore[union-attr]
             card(
-                _ins_card_header("scale", "var(--pink-9)", "Instruction Alignment", "Whether the bot's runtime behavior matches its system instructions."),
-                rx.hstack(rx.foreach(State.mcs_ins_align_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                _ins_card_header(
+                    "scale",
+                    "var(--pink-9)",
+                    "Instruction Alignment",
+                    "Whether the bot's runtime behavior matches its system instructions.",
+                ),
+                rx.hstack(
+                    rx.foreach(State.mcs_ins_align_kpis, _ins_kpi),
+                    spacing="3",
+                    width="100%",
+                    overflow_x="auto",
+                    padding_y="12px",
+                ),
                 rx.cond(
                     State.mcs_ins_align_rows.length() > 0,  # type: ignore[union-attr]
                     rx.box(
@@ -3862,7 +4423,11 @@ def _mcs_quality_panel() -> rx.Component:
                 rx.vstack(
                     rx.icon("shield-check", size=48, color="var(--gray-a5)"),
                     rx.text("No quality data available", size="3", color="var(--gray-a7)"),
-                    rx.text("Upload a bot export or transcript to generate quality analysis", size="2", color="var(--gray-a6)"),
+                    rx.text(
+                        "Upload a bot export or transcript to generate quality analysis",
+                        size="2",
+                        color="var(--gray-a6)",
+                    ),
                     align="center",
                     spacing="2",
                     padding="60px 0",
@@ -3986,21 +4551,40 @@ def dynamic_analysis_viewer() -> rx.Component:
                             rx.cond(
                                 State.mcs_ins_turn_kpis.length() > 0,  # type: ignore[union-attr]
                                 card(
-                                    _ins_card_header("gauge", PRIMARY, "Turn Efficiency", "How efficiently the orchestrator resolves each user turn."),
-                                    rx.hstack(rx.foreach(State.mcs_ins_turn_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                                    _ins_card_header(
+                                        "gauge",
+                                        PRIMARY,
+                                        "Turn Efficiency",
+                                        "How efficiently the orchestrator resolves each user turn.",
+                                    ),
+                                    rx.hstack(
+                                        rx.foreach(State.mcs_ins_turn_kpis, _ins_kpi),
+                                        spacing="3",
+                                        width="100%",
+                                        overflow_x="auto",
+                                        padding_y="12px",
+                                    ),
                                     rx.cond(
                                         State.mcs_ins_turn_rows.length() > 0,  # type: ignore[union-attr]
                                         rx.box(
                                             rx.grid(
-                                                rx.text("#", **_INS_HEADER_CELL, text_align="right"), rx.text("User Message", **_INS_HEADER_CELL),
-                                                rx.text("Plans", **_INS_HEADER_CELL, text_align="right"), rx.text("Tools", **_INS_HEADER_CELL, text_align="right"),
-                                                rx.text("Search", **_INS_HEADER_CELL, text_align="right"), rx.text("Thinking", **_INS_HEADER_CELL, text_align="right"),
-                                                rx.text("Total", **_INS_HEADER_CELL, text_align="right"), rx.text("Flags", **_INS_HEADER_CELL),
-                                                columns="0.4fr 2.5fr 0.5fr 0.5fr 0.6fr 0.8fr 0.8fr 2fr", gap="8px", padding_y="8px",
-                                                border_bottom=f"2px solid {SURFACE_BORDER}", width="100%",
+                                                rx.text("#", **_INS_HEADER_CELL, text_align="right"),
+                                                rx.text("User Message", **_INS_HEADER_CELL),
+                                                rx.text("Plans", **_INS_HEADER_CELL, text_align="right"),
+                                                rx.text("Tools", **_INS_HEADER_CELL, text_align="right"),
+                                                rx.text("Search", **_INS_HEADER_CELL, text_align="right"),
+                                                rx.text("Thinking", **_INS_HEADER_CELL, text_align="right"),
+                                                rx.text("Total", **_INS_HEADER_CELL, text_align="right"),
+                                                rx.text("Flags", **_INS_HEADER_CELL),
+                                                columns="0.4fr 2.5fr 0.5fr 0.5fr 0.6fr 0.8fr 0.8fr 2fr",
+                                                gap="8px",
+                                                padding_y="8px",
+                                                border_bottom=f"2px solid {SURFACE_BORDER}",
+                                                width="100%",
                                             ),
                                             rx.foreach(State.mcs_ins_turn_rows, _ins_turn_row),
-                                            width="100%", overflow_x="auto",
+                                            width="100%",
+                                            overflow_x="auto",
                                         ),
                                     ),
                                     width="100%",
@@ -4010,24 +4594,50 @@ def dynamic_analysis_viewer() -> rx.Component:
                             rx.cond(
                                 State.mcs_ins_latency_kpis.length() > 0,  # type: ignore[union-attr]
                                 card(
-                                    _ins_card_header("timer", "var(--orange-9)", "Latency Bottlenecks", "Where time is spent per turn — thinking, tools, knowledge, or delivery."),
-                                    rx.hstack(rx.foreach(State.mcs_ins_latency_kpis, _ins_kpi), spacing="3", width="100%", overflow_x="auto", padding_y="12px"),
+                                    _ins_card_header(
+                                        "timer",
+                                        "var(--orange-9)",
+                                        "Latency Bottlenecks",
+                                        "Where time is spent per turn — thinking, tools, knowledge, or delivery.",
+                                    ),
+                                    rx.hstack(
+                                        rx.foreach(State.mcs_ins_latency_kpis, _ins_kpi),
+                                        spacing="3",
+                                        width="100%",
+                                        overflow_x="auto",
+                                        padding_y="12px",
+                                    ),
                                     rx.box(
                                         rx.grid(
-                                            rx.text("#", **_INS_HEADER_CELL, text_align="right"), rx.text("Message", **_INS_HEADER_CELL),
-                                            rx.text("Total", **_INS_HEADER_CELL, text_align="right"), rx.text("Thinking", **_INS_HEADER_CELL, text_align="right"),
-                                            rx.text("Tools", **_INS_HEADER_CELL, text_align="right"), rx.text("Knowledge", **_INS_HEADER_CELL, text_align="right"),
+                                            rx.text("#", **_INS_HEADER_CELL, text_align="right"),
+                                            rx.text("Message", **_INS_HEADER_CELL),
+                                            rx.text("Total", **_INS_HEADER_CELL, text_align="right"),
+                                            rx.text("Thinking", **_INS_HEADER_CELL, text_align="right"),
+                                            rx.text("Tools", **_INS_HEADER_CELL, text_align="right"),
+                                            rx.text("Knowledge", **_INS_HEADER_CELL, text_align="right"),
                                             rx.text("Bottleneck", **_INS_HEADER_CELL),
-                                            columns="0.4fr 2fr 0.8fr 1.2fr 1.2fr 1.2fr 1.5fr", gap="8px", padding_y="8px",
-                                            border_bottom=f"2px solid {SURFACE_BORDER}", width="100%",
+                                            columns="0.4fr 2fr 0.8fr 1.2fr 1.2fr 1.2fr 1.5fr",
+                                            gap="8px",
+                                            padding_y="8px",
+                                            border_bottom=f"2px solid {SURFACE_BORDER}",
+                                            width="100%",
                                         ),
                                         rx.foreach(State.mcs_ins_latency_rows, _ins_latency_row),
-                                        width="100%", overflow_x="auto",
+                                        width="100%",
+                                        overflow_x="auto",
                                     ),
                                     rx.cond(
                                         State.mcs_ins_latency_mermaid != "",
-                                        rx.box(rx.el.pre(State.mcs_ins_latency_mermaid, class_name="mermaid"), width="100%", overflow_x="auto", padding="22px",
-                                               background="var(--green-a2)", border="1px solid var(--green-a4)", border_radius="14px", margin_top="12px"),
+                                        rx.box(
+                                            rx.el.pre(State.mcs_ins_latency_mermaid, class_name="mermaid"),
+                                            width="100%",
+                                            overflow_x="auto",
+                                            padding="22px",
+                                            background="var(--green-a2)",
+                                            border="1px solid var(--green-a4)",
+                                            border_radius="14px",
+                                            margin_top="12px",
+                                        ),
                                     ),
                                     width="100%",
                                 ),

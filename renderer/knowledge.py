@@ -223,16 +223,69 @@ def _rank_badge(score: float | None) -> str:
     return f"🟠 {score:.2f}"
 
 
+def _classify_trace_outcome(trace: GenerativeAnswerTrace) -> tuple[str, str, str]:
+    """Classify a generative-answer trace into a single human-readable outcome.
+
+    Returns (icon, short_label, plain_english_explanation). The classification
+    is derived solely from fields the platform emits in `GenerativeAnswersSupportData`,
+    so the verdict reflects what the platform reported — not a guess.
+    """
+    state = (trace.gpt_answer_state or "").strip()
+    state_l = state.lower()
+    has_results = bool(trace.search_results)
+    has_summary = bool(trace.summary_text or trace.text_summary)
+    has_errors = bool(trace.search_errors or trace.shadow_search_errors)
+
+    if has_errors:
+        n_errors = len(trace.search_errors) + len(trace.shadow_search_errors)
+        return (
+            "🔴",
+            "Search Errored",
+            f"Search backend returned {n_errors} error(s); see Search errors below. No grounded answer was produced.",
+        )
+    if trace.triggered_fallback:
+        return (
+            "🔴",
+            "GPT Default Fallback",
+            f"Topic fell back to the GPT default response (state: {state or 'unknown'}). "
+            f"The model answered from training data, not from your knowledge sources.",
+        )
+    if state_l == "answered" and has_summary:
+        return (
+            "🟢",
+            "Answered",
+            f"Search returned {len(trace.search_results)} result(s); the summariser produced "
+            f"a grounded answer with {len(trace.citations)} citation(s).",
+        )
+    if has_results and not has_summary:
+        return (
+            "🟡",
+            "Hits but Filtered",
+            f"Search returned {len(trace.search_results)} hit(s), but no summary was produced "
+            f"(typically blocked by moderation, provenance, or confidential-data filter).",
+        )
+    if not has_results and not has_errors:
+        keyword_hint = (
+            f' (rewritten query: "{trace.rewritten_keywords or trace.rewritten_message}")'
+            if trace.rewritten_keywords or trace.rewritten_message
+            else ""
+        )
+        ep_count = len(trace.endpoints)
+        return (
+            "🟡",
+            "No Search Results",
+            f"Search ran on {ep_count} endpoint(s) with no errors, but 0 documents matched"
+            f"{keyword_hint}. No fallback to GPT default was triggered. "
+            f"This usually means the indexed content did not match the rewritten query, "
+            f"or the search subsystem returned nothing without logging.",
+        )
+    return ("⚪", state or "Unknown", "—")
+
+
 def _gen_answer_status_badge(trace: GenerativeAnswerTrace) -> str:
     """Single-glance status for a generative answer."""
-    state = trace.gpt_answer_state or "Unknown"
-    if trace.triggered_fallback:
-        return f"🔴 {state} (fallback triggered)"
-    if state.lower() == "answered":
-        return f"🟢 {state}"
-    if state.lower() in {"noanswer", "notanswered", "noresult"}:
-        return f"🟠 {state}"
-    return f"🟡 {state}"
+    icon, label, _ = _classify_trace_outcome(trace)
+    return f"{icon} {label}"
 
 
 def _safety_line(trace: GenerativeAnswerTrace) -> str:
@@ -240,7 +293,28 @@ def _safety_line(trace: GenerativeAnswerTrace) -> str:
         ("🟢" if trace.performed_content_moderation else "⚫") + " Moderation",
         ("🟢" if trace.performed_content_provenance else "⚫") + " Provenance",
         ("🔴" if trace.contains_confidential else "🟢") + " Confidential data",
-        ("🔴" if trace.triggered_fallback else "🟢") + " Fallback",
+        (
+            ("🔴" if trace.triggered_fallback else "🟢")
+            + (" GPT default fallback" if trace.triggered_fallback else " No fallback")
+        ),
+    ]
+    return " · ".join(bits)
+
+
+def _platform_diagnostics_line(trace: GenerativeAnswerTrace) -> str:
+    """Compact one-liner exposing the raw platform state strings.
+
+    Surfaces what the SearchAndSummarizeContent node reported so the user
+    doesn't have to dig into the trace JSON to distinguish "ran with 0 hits"
+    from "errored" or "skipped silently".
+    """
+    bits = [
+        f"`gptAnswerState`: {trace.gpt_answer_state or '—'}",
+        f"`completionState`: {trace.completion_state or '—'}",
+        f"`triggeredGptFallback`: {str(trace.triggered_fallback).lower()}",
+        f"errors: {len(trace.search_errors)}",
+        f"logs: {len(trace.search_logs)}",
+        f"shadow results: {len(trace.shadow_search_results)}",
     ]
     return " · ".join(bits)
 
@@ -267,16 +341,13 @@ def render_generative_answer_traces(traces: list[GenerativeAnswerTrace]) -> str:
 
     for i, trace in enumerate(traces, 1):
         topic = trace.topic_name or "(unknown topic)"
-        attempt = (
-            f"↻ Retry #{trace.attempt_index}"
-            if trace.is_retry
-            else f"#{trace.attempt_index}"
-        )
-        lines.append(f"### {attempt} · {topic} · {_gen_answer_status_badge(trace)}\n")
+        attempt = f"↻ Retry #{trace.attempt_index}" if trace.is_retry else f"#{trace.attempt_index}"
+        outcome_icon, outcome_label, outcome_explanation = _classify_trace_outcome(trace)
+        lines.append(f"### {attempt} · {topic} · {outcome_icon} {outcome_label}\n")
+        lines.append(f"> _{outcome_explanation}_\n")
+        lines.append(f"<sub>{_platform_diagnostics_line(trace)}</sub>\n")
         if trace.is_retry and trace.previous_attempt_state:
-            lines.append(
-                f"> _Retried because previous attempt result was: **{trace.previous_attempt_state}**_\n"
-            )
+            lines.append(f"> _Retried because previous attempt result was: **{trace.previous_attempt_state}**_\n")
 
         # Query transformation chain
         lines.append("**Query transformation**\n")
@@ -322,11 +393,12 @@ def render_generative_answer_traces(traces: list[GenerativeAnswerTrace]) -> str:
         # Search results — now with snippets and zero-rank anomaly flagging
         if trace.search_results:
             backend = f" · {trace.search_type}" if trace.search_type else ""
-            all_zero_rank = (
-                len(trace.search_results) > 0
-                and all((r.rank_score or 0) == 0 for r in trace.search_results)
+            all_zero_rank = len(trace.search_results) > 0 and all(
+                (r.rank_score or 0) == 0 for r in trace.search_results
             )
-            zero_warn = " ⚠ **All ranks are 0 — search ranker likely disabled or misconfigured**" if all_zero_rank else ""
+            zero_warn = (
+                " ⚠ **All ranks are 0 — search ranker likely disabled or misconfigured**" if all_zero_rank else ""
+            )
             lines.append(f"**Search results ({len(trace.search_results)} hits{backend}){zero_warn}**\n")
             for j, r in enumerate(trace.search_results, 1):
                 title = (r.name or r.url or f"Result {j}").replace("|", "\\|")
@@ -392,6 +464,18 @@ def render_generative_answer_traces(traces: list[GenerativeAnswerTrace]) -> str:
             for err in trace.search_errors:
                 lines.append(f"> ⚠ Search error: `{err}`")
             lines.append("")
+        if trace.shadow_search_errors:
+            for err in trace.shadow_search_errors:
+                lines.append(f"> ⚠ Shadow search error: `{err}`")
+            lines.append("")
+        if trace.search_logs or trace.shadow_search_logs:
+            log_count = len(trace.search_logs) + len(trace.shadow_search_logs)
+            log_body = "\n".join(trace.search_logs + trace.shadow_search_logs)
+            lines.append(f"<details><summary>Search backend logs ({log_count})</summary>\n")
+            lines.append("```")
+            lines.append(log_body)
+            lines.append("```")
+            lines.append("</details>\n")
 
         # System prompts (collapsible) — gives the deepest debugging signal
         # by exposing exactly what the LLM saw at each stage.
