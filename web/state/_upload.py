@@ -713,6 +713,8 @@ class UploadMixin(rx.State, mixin=True):
 
     def _populate_tools_data(self, profile, timeline=None) -> None:
         """Extract structured data for the Tools tab."""
+        from renderer.topic_explainer import load_kb, settings_rows_for_dialog_component
+
         tools = [c for c in profile.components if c.tool_type]
         connector_tools = sum(1 for t in tools if t.tool_type == "ConnectorTool")
         agent_tools = sum(1 for t in tools if t.tool_type in ("ChildAgent", "ConnectedAgent", "A2AAgent"))
@@ -725,6 +727,30 @@ class UploadMixin(rx.State, mixin=True):
             {"label": "MCP Servers", "value": str(mcp_servers), "hint": "Model Context Protocol", "tone": "neutral"},
         ]
 
+        # Load explainer KB once. Failure is non-fatal — tools render without
+        # the settings panel rather than crashing the whole tab.
+        try:
+            explainer_kb: dict | None = load_kb()
+        except Exception as e:
+            logger.warning(f"Tool explainer KB load failed: {e}")
+            explainer_kb = None
+
+        def _tool_settings_rows(comp) -> list[dict]:
+            if not explainer_kb or not comp.raw_dialog:
+                return []
+            try:
+                rows = settings_rows_for_dialog_component(comp, explainer_kb)
+            except Exception as e:
+                logger.warning(f"Explainer flatten failed for {comp.schema_name}: {e}")
+                return []
+            # Pre-compute UI fields server-side. Reflex can't do f-string concat
+            # or compute labels off dict-indexed Vars at the component layer.
+            for r in rows:
+                r["indent_px"] = f"{int(r['depth']) * 16}px"
+                r["label"] = r["kind"] if r["row_type"] == "kind" else r["path"]
+                r["display_value"] = "" if r["row_type"] == "kind" else (r["value"] or "—")
+            return rows
+
         _type_colors = {
             "ConnectorTool": "blue",
             "ChildAgent": "green",
@@ -733,8 +759,10 @@ class UploadMixin(rx.State, mixin=True):
             "MCPServer": "purple",
             "FlowTool": "amber",
         }
-        self.mcs_tools_rows = [  # type: ignore[attr-defined]
-            {
+
+        def _build_tool_row(t) -> dict:
+            rows = _tool_settings_rows(t)
+            return {
                 "name": t.display_name,
                 "tool_type": t.tool_type or "—",
                 "connector": t.connector_display_name or "—",
@@ -742,9 +770,11 @@ class UploadMixin(rx.State, mixin=True):
                 "state": t.state,
                 "description": (t.description or t.model_description or "—")[:200],
                 "type_color": _type_colors.get(t.tool_type or "", "gray"),
+                "settings_rows": rows,
+                "has_settings": "true" if rows else "",
             }
-            for t in tools
-        ]
+
+        self.mcs_tools_rows = [_build_tool_row(t) for t in tools]  # type: ignore[attr-defined]
 
         # External calls detail (per-action rows from action_details, deduplicated)
         from collections import Counter
@@ -1180,7 +1210,7 @@ class UploadMixin(rx.State, mixin=True):
     def _populate_topics_data(self, profile, timeline) -> None:
         """Extract structured data for the Topics tab."""
         from models import EventType
-        from renderer.topic_explainer import load_kb, settings_rows_for_topic
+        from renderer.topic_explainer import load_kb, settings_rows_for_dialog_component
 
         # Load explainer KB once and reuse across topic rows. If the KB file is
         # missing or malformed, fall back to empty rows rather than crash.
@@ -1194,7 +1224,7 @@ class UploadMixin(rx.State, mixin=True):
             if not explainer_kb or not comp.raw_dialog:
                 return []
             try:
-                rows = settings_rows_for_topic(comp, explainer_kb)
+                rows = settings_rows_for_dialog_component(comp, explainer_kb)
             except Exception as e:
                 logger.warning(f"Explainer flatten failed for {comp.schema_name}: {e}")
                 return []

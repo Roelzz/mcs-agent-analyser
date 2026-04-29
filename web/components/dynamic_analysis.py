@@ -1206,44 +1206,49 @@ def _mcs_profile_panel() -> rx.Component:
 
 
 def _mcs_tool_row(item: dict) -> rx.Component:
-    return rx.grid(
-        rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-        rx.badge(
-            item["tool_type"],
-            color_scheme=rx.match(
-                item["type_color"],
-                ("blue", "blue"),
-                ("green", "green"),
-                ("teal", "teal"),
-                ("cyan", "cyan"),
-                ("purple", "purple"),
-                ("amber", "amber"),
-                "gray",
+    return rx.vstack(
+        rx.grid(
+            rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+            rx.badge(
+                item["tool_type"],
+                color_scheme=rx.match(
+                    item["type_color"],
+                    ("blue", "blue"),
+                    ("green", "green"),
+                    ("teal", "teal"),
+                    ("cyan", "cyan"),
+                    ("purple", "purple"),
+                    ("amber", "amber"),
+                    "gray",
+                ),
+                variant="soft",
+                size="1",
             ),
-            variant="soft",
-            size="1",
+            rx.text(item["connector"], font_size="13px", color="var(--gray-a9)"),
+            rx.text(item["mode"], font_size="13px", color="var(--gray-11)"),
+            rx.badge(
+                item["state"],
+                color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
+                variant="soft",
+                size="1",
+            ),
+            rx.text(
+                item["description"],
+                font_size="12px",
+                color="var(--gray-a9)",
+                overflow="hidden",
+                text_overflow="ellipsis",
+                white_space="nowrap",
+            ),
+            columns="2fr 1fr 1fr 1fr 1fr 3fr",
+            gap="8px",
+            align="center",
+            padding_y="6px",
+            border_bottom=f"1px solid {SURFACE_BORDER}",
+            width="100%",
         ),
-        rx.text(item["connector"], font_size="13px", color="var(--gray-a9)"),
-        rx.text(item["mode"], font_size="13px", color="var(--gray-11)"),
-        rx.badge(
-            item["state"],
-            color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
-            variant="soft",
-            size="1",
-        ),
-        rx.text(
-            item["description"],
-            font_size="12px",
-            color="var(--gray-a9)",
-            overflow="hidden",
-            text_overflow="ellipsis",
-            white_space="nowrap",
-        ),
-        columns="2fr 1fr 1fr 1fr 1fr 3fr",
-        gap="8px",
-        align="center",
-        padding_y="6px",
-        border_bottom=f"1px solid {SURFACE_BORDER}",
+        _settings_explained_accordion(item),
+        spacing="0",
         width="100%",
     )
 

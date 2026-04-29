@@ -13,7 +13,7 @@ from renderer.topic_explainer import (
     collect_kinds,
     collect_undocumented,
     explain_component,
-    explain_topic,
+    explain_dialog_component,
     load_kb,
     render_explainer_for_topic,
     render_explainer_node_markdown,
@@ -101,7 +101,7 @@ def _ct7500_topic() -> ComponentSummary:
 
 def test_explainer_walks_ct7500_topic(kb):
     """End-to-end walk of the user's actual topic produces the expected tree."""
-    root = explain_topic(_ct7500_topic(), kb)
+    root = explain_dialog_component(_ct7500_topic(), kb)
     assert root is not None
     assert root.kind == "OnRecognizedIntent"
     assert root.documented is True
@@ -117,7 +117,7 @@ def test_explainer_resolves_searchallknowledgesources_enum(kb):
     """The user's bug — `knowledgeSources.kind: SearchAllKnowledgeSources` —
     must resolve to a property entry whose summary calls out the
     triggerCondition interaction (the whole reason this feature exists)."""
-    root = explain_topic(_ct7500_topic(), kb)
+    root = explain_dialog_component(_ct7500_topic(), kb)
     sas = next(c for c in root.children if c.kind == "SearchAndSummarizeContent")
     ks_prop = next(p for p in sas.properties if p.path == "knowledgeSources.kind")
     assert ks_prop.documented is True
@@ -126,7 +126,7 @@ def test_explainer_resolves_searchallknowledgesources_enum(kb):
 
 
 def test_explainer_resolves_setvariable_properties(kb):
-    root = explain_topic(_ct7500_topic(), kb)
+    root = explain_dialog_component(_ct7500_topic(), kb)
     sv = next(c for c in root.children if c.kind == "SetVariable")
     paths = {p.path: p for p in sv.properties}
     assert "variable" in paths
@@ -153,7 +153,7 @@ def test_undocumented_kind_emits_sentinel(kb):
             }
         },
     )
-    root = explain_topic(fake_topic, kb)
+    root = explain_dialog_component(fake_topic, kb)
     undoc = collect_undocumented(root)
     assert any(n.kind == "SomeFutureActionThatDoesntExist" for n in undoc)
     md = "\n".join(render_explainer_node_markdown(root))
@@ -171,7 +171,7 @@ def test_explainer_returns_none_for_non_topic_components(kb):
         trigger_condition_raw="False",
         source_site="https://example/sites/x.pdf",
     )
-    assert explain_topic(ks, kb) is None
+    assert explain_dialog_component(ks, kb) is None
 
 
 def test_explain_component_for_knowledge_source(kb):
@@ -213,6 +213,141 @@ def test_render_markdown_renders_full_tree_with_links(kb):
     assert "`SearchAllKnowledgeSources`" in md
 
 
+def _connector_tool_component() -> ComponentSummary:
+    """Mimics a TaskDialog wrapping an InvokeConnectedAgentTaskAction —
+    the shape the parser produces for a Copilot Studio "Connected Agent" tool.
+    Real bot fixture: `botContent (1)` Equippy."""
+    return ComponentSummary(
+        kind="DialogComponent",
+        display_name="Equippy",
+        schema_name="rrs_bot.InvokeConnectedAgentTaskAction.Equippy",
+        dialog_kind="TaskDialog",
+        action_kind="InvokeConnectedAgentTaskAction",
+        tool_type="ConnectedAgent",
+        connected_bot_schema="rrs_Equippy",
+        raw_dialog={
+            "kind": "TaskDialog",
+            "modelDisplayName": "Equippy",
+            "modelDescription": "Connected agent for IT asset management.",
+            "action": {
+                "kind": "InvokeConnectedAgentTaskAction",
+                "botSchemaName": "rrs_Equippy",
+                "historyType": {"kind": "ConversationHistory"},
+            },
+        },
+    )
+
+
+def _child_agent_component() -> ComponentSummary:
+    """Mimics an AgentDialog (child agent) — Belgibud from `botContent (1)`."""
+    return ComponentSummary(
+        kind="DialogComponent",
+        display_name="Belgibud",
+        schema_name="rrs_bot.agent.Belgibud",
+        dialog_kind="AgentDialog",
+        tool_type="ChildAgent",
+        agent_instructions="You are Belgibud...",
+        raw_dialog={
+            "kind": "AgentDialog",
+            "beginDialog": {
+                "kind": "OnToolSelected",
+                "id": "main",
+                "description": "Child agent for Belgium-specific FAQ.",
+            },
+            "settings": {"instructions": "You are Belgibud, the FAQ assistant for Contoso."},
+        },
+    )
+
+
+def _a2a_external_agent_component() -> ComponentSummary:
+    """Mimics a TaskDialog wrapping InvokeExternalAgentTaskAction with the
+    AgentToAgentProtocolMetadata shape — the user's pydantic_ai sample."""
+    return ComponentSummary(
+        kind="DialogComponent",
+        display_name="pydantic_ai",
+        schema_name="rrs_bot.topic.pydantic_ai",
+        dialog_kind="TaskDialog",
+        action_kind="InvokeExternalAgentTaskAction",
+        tool_type="A2AAgent",
+        external_agent_protocol="AgentToAgentProtocolMetadata",
+        raw_dialog={
+            "kind": "TaskDialog",
+            "modelDisplayName": "pydantic_ai",
+            "modelDescription": "pydantic_ai",
+            "action": {
+                "kind": "InvokeExternalAgentTaskAction",
+                "connectionReference": "rrs_bot.shared_pydantic_ai",
+                "connectionProperties": {"mode": "Invoker"},
+                "operationDetails": {
+                    "kind": "AgentToAgentProtocolMetadata",
+                    "operationId": "InvokeA2A",
+                },
+            },
+            "outputMode": "All",
+        },
+    )
+
+
+def test_explainer_walks_connected_agent_tool(kb):
+    """A connected-agent tool surfaces TaskDialog → InvokeConnectedAgentTaskAction
+    with both wrapper-level (modelDisplayName/Description) and inner-action
+    (botSchemaName, historyType) properties documented."""
+    root = explain_dialog_component(_connector_tool_component(), kb)
+    assert root is not None
+    assert root.kind == "TaskDialog"
+    assert root.documented is True
+    kinds = collect_kinds(root)
+    assert kinds == {"TaskDialog", "InvokeConnectedAgentTaskAction"}
+
+    # Wrapper-level properties on TaskDialog
+    paths = {p.path: p for p in root.properties}
+    assert paths["modelDisplayName"].documented is True
+    assert paths["modelDescription"].documented is True
+
+    # Inner action properties
+    inner = root.children[0]
+    assert inner.kind == "InvokeConnectedAgentTaskAction"
+    inner_paths = {p.path: p for p in inner.properties}
+    assert inner_paths["botSchemaName"].value == "rrs_Equippy"
+    assert inner_paths["botSchemaName"].documented is True
+    assert inner_paths["historyType.kind"].value == "ConversationHistory"
+    assert inner_paths["historyType.kind"].documented is True
+
+
+def test_explainer_walks_child_agent_tool(kb):
+    """An AgentDialog (child agent) surfaces settings.instructions as a
+    documented property and recurses into its OnToolSelected trigger."""
+    root = explain_dialog_component(_child_agent_component(), kb)
+    assert root is not None
+    assert root.kind == "AgentDialog"
+    paths = {p.path: p for p in root.properties}
+    assert paths["settings.instructions"].documented is True
+    assert "You are Belgibud" in paths["settings.instructions"].value
+
+    # Trigger is recursed as a child node
+    trigger = next(c for c in root.children if c.kind == "OnToolSelected")
+    assert trigger.documented is True
+    trigger_paths = {p.path: p for p in trigger.properties}
+    assert trigger_paths["description"].documented is True
+
+
+def test_explainer_walks_a2a_external_agent_tool(kb):
+    """An A2A external-agent tool surfaces operationDetails.kind as an enum
+    that distinguishes the A2A protocol from MCP."""
+    root = explain_dialog_component(_a2a_external_agent_component(), kb)
+    assert root is not None
+    inner = next(c for c in root.children if c.kind == "InvokeExternalAgentTaskAction")
+    paths = {p.path: p for p in inner.properties}
+    assert paths["operationDetails.kind"].value == "AgentToAgentProtocolMetadata"
+    assert paths["operationDetails.kind"].documented is True
+    assert "Agent2Agent" in (paths["operationDetails.kind"].summary or "")
+    assert paths["operationDetails.operationId"].value == "InvokeA2A"
+    assert paths["operationDetails.operationId"].documented is True
+    assert paths["connectionReference"].documented is True
+    assert paths["connectionProperties.mode"].value == "Invoker"
+    assert paths["connectionProperties.mode"].documented is True
+
+
 def test_explainer_handles_condition_groups(kb):
     """ConditionGroup branches and elseActions must be walked — children of
     each branch's `actions` and the top-level `elseActions` show up as
@@ -241,7 +376,7 @@ def test_explainer_handles_condition_groups(kb):
             }
         },
     )
-    root = explain_topic(topic, kb)
+    root = explain_dialog_component(topic, kb)
     cg = next(c for c in root.children if c.kind == "ConditionGroup")
     child_kinds = {c.kind for c in cg.children}
     assert child_kinds == {"SetVariable", "SendActivity"}

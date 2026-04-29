@@ -25,7 +25,15 @@ _NOT_DOCUMENTED_SUMMARY = "Not yet documented in the explainer KB — add an ent
 
 # Keys we walk into recursively or handle separately. Everything else on an
 # action dict is treated as a property to look up.
-_STRUCTURAL_KEYS: frozenset[str] = frozenset({"kind", "id", "actions", "elseActions", "conditions"})
+#
+# - `kind`, `id` → metadata, surfaced separately on the node.
+# - `actions`, `elseActions`, `conditions` → topic-style action lists.
+# - `action` (singular) → TaskDialog wraps a single action (e.g. an
+#   InvokeConnectorTaskAction) under this key.
+# - `beginDialog` → AdaptiveDialog / AgentDialog entry point.
+_STRUCTURAL_KEYS: frozenset[str] = frozenset(
+    {"kind", "id", "actions", "elseActions", "conditions", "action", "beginDialog"}
+)
 
 
 @dataclass
@@ -197,7 +205,9 @@ def _walk_action(action: dict, kb: dict) -> ExplainerNode:
             )
         )
 
-    # Recurse into children: `actions`, `elseActions`, and condition branches.
+    # Recurse into children: action lists (topics), single-action wrappers
+    # (TaskDialog), nested dialog entries (AgentDialog wraps an OnToolSelected
+    # under `beginDialog`), plus condition branches.
     children: list[ExplainerNode] = []
     for sub in action.get("actions") or []:
         if isinstance(sub, dict):
@@ -211,6 +221,12 @@ def _walk_action(action: dict, kb: dict) -> ExplainerNode:
     for sub in action.get("elseActions") or []:
         if isinstance(sub, dict):
             children.append(_walk_action(sub, kb))
+    single_action = action.get("action")  # TaskDialog singular wrapper
+    if isinstance(single_action, dict):
+        children.append(_walk_action(single_action, kb))
+    nested_begin = action.get("beginDialog")  # AgentDialog wraps a trigger here
+    if isinstance(nested_begin, dict):
+        children.append(_walk_action(nested_begin, kb))
 
     return ExplainerNode(
         kind=kind,
@@ -224,27 +240,45 @@ def _walk_action(action: dict, kb: dict) -> ExplainerNode:
     )
 
 
-def explain_topic(component: ComponentSummary, kb: dict) -> ExplainerNode | None:
-    """Walk a topic component's dialog tree.
+def explain_dialog_component(component: ComponentSummary, kb: dict) -> ExplainerNode | None:
+    """Walk a DialogComponent's dialog tree.
 
-    Returns None when the component isn't a topic (no `raw_dialog`) so callers
-    can cleanly skip non-topic components.
+    Two YAML shapes are handled:
+
+    - **Topic-style** (AdaptiveDialog, often without an explicit top-level
+      `kind`): walk `raw.beginDialog` as the root so the trigger node is
+      the visible entry. This matches the historical topic-explainer output.
+    - **Tool-style** (TaskDialog with `kind: TaskDialog` and a singular
+      `action:` child; AgentDialog with `kind: AgentDialog` plus a
+      `beginDialog`): walk `raw` itself as the root so the dialog wrapper
+      surfaces as a node and its sibling fields (`settings.instructions`,
+      `modelDescription`, etc.) become properties.
+
+    Returns None when the component isn't a DialogComponent or has no parsed
+    dialog so callers can cleanly skip non-dialog components.
     """
     if component.kind != "DialogComponent" or not component.raw_dialog:
         return None
     raw = component.raw_dialog
+    # Tool-style: an explicit dialog kind at the top level.
+    if isinstance(raw.get("kind"), str):
+        return _walk_action(raw, kb)
+    # Topic-style: implicit AdaptiveDialog wrapper, walk beginDialog directly.
     begin = raw.get("beginDialog")
-    if not isinstance(begin, dict):
-        # Topic without a beginDialog (rare — probably a malformed export).
-        return ExplainerNode(
-            kind="DialogComponent",
-            node_id=component.schema_name,
-            category="component",
-            summary=f"Topic `{component.display_name}` has no `beginDialog` — cannot walk action tree.",
-            doc_url=None,
-            documented=False,
-        )
-    return _walk_action(begin, kb)
+    if isinstance(begin, dict):
+        return _walk_action(begin, kb)
+    return ExplainerNode(
+        kind="DialogComponent",
+        node_id=component.schema_name,
+        category="component",
+        summary=(f"`{component.display_name}` has no recognisable dialog shape — cannot walk action tree."),
+        doc_url=None,
+        documented=False,
+    )
+
+
+# Backwards-compatible alias — older code still calls explain_topic.
+explain_topic = explain_dialog_component
 
 
 def explain_component(component: ComponentSummary, kb: dict) -> ExplainerNode:
@@ -398,15 +432,20 @@ def flatten_to_rows(node: ExplainerNode, depth: int = 0) -> list[dict]:
     return rows
 
 
-def settings_rows_for_topic(component: ComponentSummary, kb: dict) -> list[dict]:
-    """Produce a flat list of UI rows for a topic component.
+def settings_rows_for_dialog_component(component: ComponentSummary, kb: dict) -> list[dict]:
+    """Produce a flat list of UI rows for a DialogComponent (topic OR tool).
 
-    Returns an empty list when the component isn't a topic.
+    Returns an empty list when the component isn't a DialogComponent or has no
+    parsed dialog tree.
     """
-    root = explain_topic(component, kb)
+    root = explain_dialog_component(component, kb)
     if root is None:
         return []
     return flatten_to_rows(root)
+
+
+# Backwards-compatible alias for callers still using the old name.
+settings_rows_for_topic = settings_rows_for_dialog_component
 
 
 # ── Markdown rendering ──────────────────────────────────────────────────────

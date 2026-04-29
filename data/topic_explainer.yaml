@@ -78,11 +78,34 @@ kinds:
     category: dialog
     summary: "A connector or flow action invocation, surfaced as a tool the orchestrator can call. Wraps a connector operation, Power Automate flow, or HTTP request."
     doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
+    properties:
+      modelDisplayName:
+        summary: "Display name for the tool. The orchestrator uses this when surfacing the tool in citations and reasoning."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
+      modelDescription:
+        summary: "Free-text description shown to the orchestrator. The LLM uses it to decide whether to invoke this tool — Microsoft's authoring guidance is to make it precise so tool selection is reliable."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/guidance/generative-mode-guidance"
+      outputMode:
+        summary: "Controls how much of the tool's response is exposed back to the orchestrator/conversation (e.g. `All` to surface the full result)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
 
   AgentDialog:
     category: dialog
-    summary: "An external or connected agent invocation (Agent-to-Agent protocol or Model Context Protocol). The orchestrator delegates work to another agent."
-    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/multiple-bots"
+    summary: "An external or connected agent invocation (Agent-to-Agent protocol, Model Context Protocol, or another Copilot Studio agent in the same tenant). The orchestrator delegates work to another agent."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-add-other-agents"
+    properties:
+      settings.instructions:
+        summary: "Free-text instructions for the wrapped child/external agent. Used by the orchestrator to bias the agent's behaviour for this specific invocation, in addition to whatever instructions the agent itself carries."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-instructions"
+
+  OnToolSelected:
+    category: trigger
+    summary: "Trigger fires when the orchestrator selects a child or connected agent as the next tool to invoke. Carries the description the orchestrator used to make the selection."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-add-other-agents"
+    properties:
+      description:
+        summary: "Description used by the orchestrator to decide when to select this child/connected agent. Quality of this description directly affects tool-selection accuracy."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/guidance/generative-mode-guidance"
 
   # ─── Actions: control flow ──────────────────────────────────────────────
 
@@ -270,16 +293,54 @@ kinds:
     category: action
     summary: "Calls a connector that is registered as a tool (TaskDialog) — surfaced for orchestrator selection rather than hard-wired into a topic."
     doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
+    properties:
+      connectionReference:
+        summary: "Logical reference to the connection used to authenticate the call. Resolves to a connector instance at runtime."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-connections"
+      operationId:
+        summary: "Specific connector operation invoked (one of the actions exposed by the connector definition)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-plugin-actions"
 
   InvokeExternalAgentTaskAction:
     category: action
-    summary: "Delegates a turn to an external agent (e.g. an Azure AI Foundry agent or a third-party A2A endpoint). Configured by `externalAgentProtocol` and the protocol-specific metadata."
-    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/multiple-bots"
+    summary: "Delegates a turn to an external agent over a documented protocol — A2A or MCP. Configured by `connectionReference` and `operationDetails.kind`."
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-add-other-agents"
+    properties:
+      connectionReference:
+        summary: "Logical reference to the authenticated connection used to reach the external agent. Resolves to a Power Platform connection at runtime."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-connections"
+      operationId:
+        summary: "Top-level operation identifier on the action."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-add-other-agents"
+      operationDetails.operationId:
+        summary: "Protocol-specific operation identifier (e.g. `InvokeA2A` for A2A endpoints, MCP-tool name for MCP servers)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/add-agent-agent-to-agent"
+      operationDetails.kind:
+        type: enum
+        summary: "Discriminates the protocol used by this external-agent invocation."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-add-other-agents"
+        values:
+          AgentToAgentProtocolMetadata:
+            summary: "Agent2Agent (A2A) protocol — Microsoft's open standard for agent-to-agent communication, used to invoke external agents hosted outside Copilot Studio."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/add-agent-agent-to-agent"
+          ModelContextProtocolMetadata:
+            summary: "Model Context Protocol (MCP) — open standard for tool/resource servers. Used to extend agents with tools provided by an MCP server."
+            doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/agent-extend-action-mcp"
+      connectionProperties.mode:
+        summary: "Connection role for this external-agent invocation. `Invoker` means this agent is the caller (outbound); the remote agent receives tasks."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-connections"
 
   InvokeConnectedAgentTaskAction:
     category: action
     summary: "Delegates a turn to another Copilot Studio agent in the same tenant (Connected Agent pattern)."
-    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/multiple-bots"
+    doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/add-agent-copilot-studio-agent"
+    properties:
+      botSchemaName:
+        summary: "Schema name of the connected agent in the same tenant. Identifies which agent the orchestrator should delegate the turn to."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/add-agent-copilot-studio-agent"
+      historyType.kind:
+        summary: "Determines what conversation context is passed to the connected agent (typically `ConversationHistory` to forward prior turns)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/add-agent-copilot-studio-agent"
 
   InvokeComputerUseAction:
     category: action
