@@ -3323,7 +3323,7 @@ def _settings_explained_accordion(item: dict) -> rx.Component:
     rows collapse cleanly.
     """
     return rx.cond(
-        item["settings_rows"].length() > 0,  # type: ignore[union-attr]
+        item["has_settings"] != "",
         rx.accordion.root(
             rx.accordion.item(
                 header=rx.hstack(

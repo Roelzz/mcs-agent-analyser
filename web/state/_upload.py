@@ -1279,8 +1279,27 @@ class UploadMixin(rx.State, mixin=True):
             )
         self.mcs_topics_summary = summary_rows  # type: ignore[attr-defined]
 
-        # User topics detail (now carries a pre-rendered explainer markdown
-        # block per topic; the UI renders it inside a per-row accordion).
+        # Cache the explainer rows per component so we compute once per topic.
+        # Each row dict includes a `has_settings` flag (string-typed for Reflex
+        # rx.cond compatibility) so the UI can branch without calling .length()
+        # on an untyped Var.
+        explainer_cache: dict[str, list[dict]] = {}
+
+        def _cached_settings_rows(comp) -> list[dict]:
+            key = comp.schema_name or id(comp)
+            if key not in explainer_cache:
+                explainer_cache[key] = _settings_rows(comp)
+            return explainer_cache[key]
+
+        def _settings_fields(comp) -> dict:
+            rows = _cached_settings_rows(comp)
+            return {
+                "settings_rows": rows,
+                "has_settings": "true" if rows else "",
+            }
+
+        # User topics detail (UI renders the structured settings panel inside
+        # a per-row accordion).
         self.mcs_topics_user_rows = [  # type: ignore[attr-defined]
             {
                 "name": c.display_name,
@@ -1290,7 +1309,7 @@ class UploadMixin(rx.State, mixin=True):
                 if c.trigger_queries
                 else "—",
                 "description": (c.description or "—")[:150],
-                "settings_rows": _settings_rows(c),
+                **_settings_fields(c),
             }
             for c in user_topics
         ]
@@ -1303,7 +1322,7 @@ class UploadMixin(rx.State, mixin=True):
                 "tool_type": c.tool_type or c.action_kind or "—",
                 "connector": c.connector_display_name or "—",
                 "mode": c.connection_mode or "—",
-                "settings_rows": _settings_rows(c),
+                **_settings_fields(c),
             }
             for c in orch_topics
         ]
@@ -1315,7 +1334,7 @@ class UploadMixin(rx.State, mixin=True):
                 "schema": c.schema_name,
                 "state": c.state,
                 "trigger": c.trigger_kind or "—",
-                "settings_rows": _settings_rows(c),
+                **_settings_fields(c),
             }
             for c in system_topics
         ]
