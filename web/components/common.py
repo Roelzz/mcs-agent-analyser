@@ -146,7 +146,6 @@ def navbar() -> rx.Component:
             _nav_link("layout-dashboard", "Dashboard", "/dashboard"),
             _nav_link("upload", "Upload", "/upload"),
             _nav_link("database", "Dataverse", "/import"),
-            _nav_link("wrench", "Solution Tools", "/tools"),
             _nav_link("shield-check", "Rules", "/rules"),
             _nav_link("bar-chart-3", "Batch", "/batch"),
             rx.cond(
@@ -279,12 +278,6 @@ def dashboard_cards() -> rx.Component:
                 "Dataverse Import",
                 "Connect to Dataverse and fetch transcripts live from your environment",
                 "/import",
-            ),
-            _dashboard_card(
-                "wrench",
-                "Solution Tools",
-                "Check, validate, rename, and inspect solution exports",
-                "/tools",
             ),
             _dashboard_card(
                 "bar-chart-3",

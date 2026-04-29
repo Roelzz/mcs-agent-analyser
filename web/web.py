@@ -8,7 +8,6 @@ from web.components import (
     navbar,
     report_viewer,
     rules_editor,
-    solution_tools_form,
     upload_form,
 )
 from web.components.dynamic_analysis import dynamic_analysis_viewer
@@ -161,18 +160,6 @@ def document_analysis_page() -> rx.Component:
     )
 
 
-def tools_page() -> rx.Component:
-    return rx.vstack(
-        navbar(),
-        mermaid_script(),
-        _counter_styles(),
-        solution_tools_form(),
-        width="100%",
-        min_height="100vh",
-        spacing="0",
-    )
-
-
 def rules_page() -> rx.Component:
     return rx.vstack(
         navbar(),
@@ -203,6 +190,5 @@ app.add_page(upload_page, route="/upload", on_load=State.check_auth)
 app.add_page(import_page, route="/import", on_load=State.init_import_page)
 app.add_page(dynamic_analysis_page, route="/analysis/dynamic", on_load=State.check_analysis_page)
 app.add_page(document_analysis_page, route="/analysis/document", on_load=State.check_analysis_page)
-app.add_page(tools_page, route="/tools", on_load=State.check_auth)
 app.add_page(rules_page, route="/rules", on_load=State.on_load_rules_page)
 app.add_page(batch_page, route="/batch", on_load=State.check_auth)

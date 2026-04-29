@@ -3,7 +3,6 @@ from web.components.common import dashboard_cards, login_form, navbar
 from web.components.dataverse import import_form
 from web.components.report import report_viewer
 from web.components.rules import rules_editor
-from web.components.solution_tools import solution_tools_form
 from web.components.upload import upload_form
 from web.components.dynamic_analysis import dynamic_analysis_viewer
 
@@ -16,6 +15,5 @@ __all__ = [
     "navbar",
     "report_viewer",
     "rules_editor",
-    "solution_tools_form",
     "upload_form",
 ]

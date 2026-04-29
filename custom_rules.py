@@ -38,7 +38,7 @@ def load_rules_yaml(yaml_text: str) -> list[CustomRule]:
 
 
 def evaluate_rules(rules: list[CustomRule], profile: BaseModel) -> list[dict]:
-    """Evaluate custom rules against a profile and return solution_checker-format results."""
+    """Evaluate custom rules against a profile and return rule-result dicts."""
     results: list[dict] = []
     for rule in rules:
         values = _resolve_field(profile, rule.condition.field)

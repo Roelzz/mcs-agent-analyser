@@ -1,6 +1,5 @@
 from enum import Enum
 
-from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -448,76 +447,3 @@ class BatchAnalyticsSummary(BaseModel):
     avg_credits_per_conversation: float = 0.0
 
 
-# --- Renamer models ---
-
-
-class RenameConfig(BaseModel):
-    """Configuration for a solution rename operation."""
-
-    source_path: Path
-    new_agent_name: str
-    new_solution_name: str
-    new_bot_schema_name: str | None = None
-    output_path: Path
-    new_solution_display_name: str | None = None
-    old_agent_name_override: str | None = None
-    old_solution_name_override: str | None = None
-
-    @field_validator("new_agent_name", "new_solution_name")
-    @classmethod
-    def must_not_be_blank(cls, v: str) -> str:
-        if not v or not v.strip():
-            raise ValueError("must not be empty")
-        return v.strip()
-
-    @field_validator("new_solution_name")
-    @classmethod
-    def solution_name_valid(cls, v: str) -> str:
-        """Solution unique names must be alphanumeric (no spaces, hyphens only)."""
-        import re
-
-        if not re.match(r"^[A-Za-z][A-Za-z0-9_]{0,99}$", v):
-            raise ValueError(
-                "Solution unique name must start with a letter and contain only "
-                "letters, digits, and underscores (max 100 characters)."
-            )
-        return v
-
-    @field_validator("new_bot_schema_name")
-    @classmethod
-    def schema_name_valid(cls, v: str | None) -> str | None:
-        import re
-
-        if v is None:
-            return v
-        if not re.match(r"^[a-z][a-z0-9_]{0,99}$", v):
-            raise ValueError(
-                "Bot schema name must be lowercase, start with a letter, and contain "
-                "only lowercase letters, digits, and underscores (max 100 characters)."
-            )
-        return v
-
-
-class SolutionInfo(BaseModel):
-    """Metadata detected from an existing solution export."""
-
-    bot_schema_name: str
-    bot_display_name: str
-    solution_unique_name: str
-    solution_display_name: str
-    botcomponent_folders: list[str] = []
-
-
-class RenameResult(BaseModel):
-    """Result of a completed rename operation."""
-
-    old_bot_schema: str
-    new_bot_schema: str
-    old_solution_name: str
-    new_solution_name: str
-    old_agent_name: str
-    new_agent_name: str
-    files_modified: int
-    folders_renamed: int
-    output_path: Path
-    warnings: list[str] = []

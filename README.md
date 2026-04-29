@@ -38,8 +38,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 | **Latency bottlenecks** | Per-turn time breakdown showing where time is spent (thinking, tools, knowledge, delivery) with bottleneck flagging |
 | **Plan evolution diffs** | Structured diffs between consecutive orchestrator plans within a turn — detects thrashing, scope creep, and re-planning patterns |
 | **Batch analytics** | Aggregate multiple transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
-| **Custom rules** | 18 default best-practice rules + user-defined YAML rules, evaluated during analysis and solution checks |
-| **Solution tools** | Check, validate, analyse dependencies, or rename Power Platform solution ZIP exports |
+| **Custom rules** | 18 default best-practice rules + user-defined YAML rules, evaluated during analysis |
 | **Tool call analysis** | Runtime tool call tracing — per-tool statistics, async chain detection, orchestrator reasoning, Mermaid flow diagrams. Supports MCP servers, connectors, child/connected agents, A2A, flows, CUA |
 | **Instruction lint** | AI-powered audit of bot instructions and architecture (supports OpenAI and Anthropic models) |
 | **Dark / Light mode** | Respects your OS preference, green accent theme throughout |
@@ -130,7 +129,7 @@ Custom rules (see below) are evaluated after these built-in checks and appended 
 
 ## Custom Rules
 
-Rules are YAML-based conditions evaluated against the `BotProfile` model. They run during bot analysis (appended to Quick Wins in reports) and during solution checks.
+Rules are YAML-based conditions evaluated against the `BotProfile` model. They run during bot analysis and surface in the Quick Wins section of the report.
 
 ### Default Rules
 
@@ -189,7 +188,6 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 ### Where Rules Appear
 
 - **Analysis reports** — Quick Wins section with emoji severity indicators (🔴 fail, 🟡 warning, 🔵 info) and styled badges
-- **Solution checker** — custom rules run alongside built-in check categories
 - **Rules page** (`/rules`) — view, edit, and manage rules in the web UI
 
 ## Dynamic Analysis Tabs
@@ -322,27 +320,6 @@ Aggregate multiple conversation transcripts to get a bird's-eye view of bot perf
 2. Select the transcripts you want to analyse
 3. Click **Run Batch Analysis** — results render on the `/batch` page
 
-## Solution Tools
-
-Four tools for working with Power Platform solution ZIP exports, available on the `/tools` page:
-
-| Tab | What it does |
-| --- | --- |
-| **Check** | Runs built-in checks (SOL, AGT, TOP, KNO, SEC, ORCH categories) + custom rules against the solution |
-| **Validate** | AI-powered instruction validation against model best practices |
-| **Dependencies** | Analyses component dependencies within the solution |
-| **Rename** | Renames solution components (publisher prefix, display names) |
-
-Built-in check categories:
-- **SOL** — solution-level checks (structure, metadata)
-- **AGT** — agent/bot configuration checks
-- **TOP** — topic structure and trigger checks
-- **KNO** — knowledge source checks
-- **SEC** — security configuration checks
-- **ORCH** — orchestrator bot checks
-
-Custom rules (from your YAML file) also run during solution checks alongside these built-in categories.
-
 ## Dataverse Connection
 
 Agent Analyser connects to Dataverse to fetch bot configuration, components, and conversation transcripts. Authentication uses OAuth 2.0 device code flow against the Dataverse Web API.
@@ -470,7 +447,7 @@ For admins reviewing network access or firewall rules:
 | `OPENAI_API_KEY` | _(none)_ | OpenAI API key for Instruction Lint (required for OpenAI-model bots) |
 | `ANTHROPIC_API_KEY` | _(none)_ | Anthropic API key for Instruction Lint (required for Anthropic-model bots) |
 | `PYTHONUTF8` | `1` | Forces UTF-8 encoding for all Python I/O (prevents charmap errors on Windows and in Docker) |
-| `CUSTOM_RULES_FILE` | `data/default_rules.yaml` | Path to YAML file with custom rules for analysis and solution checks |
+| `CUSTOM_RULES_FILE` | `data/default_rules.yaml` | Path to YAML file with custom rules for analysis |
 
 ## Deployment
 
@@ -526,9 +503,6 @@ batch_analytics.py       Batch transcript aggregation (success rates, topics, er
 custom_rules.py          YAML rule loader and evaluator
 instruction_store.py     Instruction storage utilities
 linter.py                Instruction lint logic (OpenAI + Anthropic, model resolution, audit prompt)
-validator.py             Instruction validator (AI-powered, model best practices)
-deps_analyzer.py         Solution dependency analyser
-renamer.py               Solution rename logic
 utils.py                 Shared utilities
 rxconfig.py              Reflex app config
 
@@ -541,16 +515,6 @@ renderer/                Markdown + Mermaid rendering
   sections.py            Routing tab builders (lifecycles, decision timeline, trigger analysis, plan evolution, routing scores)
   timeline_render.py     Timeline / conversation trace rendering
   tools.py               Tool call analysis rendering
-
-solution_checker/        Solution health checker
-  _helpers.py            Shared checker helpers
-  checker.py             Main checker orchestration
-  agent_config.py        Agent/bot configuration checks (AGT)
-  topics.py              Topic structure checks (TOP)
-  knowledge.py           Knowledge source checks (KNO)
-  security.py            Security configuration checks (SEC)
-  orchestrator.py        Orchestrator bot checks (ORCH)
-  solution_xml.py        Solution XML parsing checks (SOL)
 
 web/
   web.py                 Page definitions and Reflex app setup
@@ -565,7 +529,6 @@ web/
     _lint.py             Instruction lint state
     _report.py           Report generation state
     _rules.py            Custom rules state
-    _solution.py         Solution tools state
     _dynamic.py          Dynamic analysis state (7 tabs: profile, topics, tools, knowledge, routing, conversation, quality)
     _upload.py           File upload state + conversation analysis population
 
@@ -575,7 +538,6 @@ web/
     dataverse.py         Dataverse import form
     report.py            Report viewer
     rules.py             Rules editor
-    solution_tools.py    Solution tools form
     dynamic_analysis.py  Dynamic analysis panels (profile, topics, tools, knowledge, routing, conversation, quality)
     upload.py            Upload form
 

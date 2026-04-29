@@ -3202,18 +3202,6 @@ def test_topic_graph_system_topic_not_orphaned():
     assert "graph TD" in result
 
 
-# --- Step 6: Orchestrator Health Checks (1.4) ---
-
-
-def test_solution_checker_categories_include_orchestrator():
-    """CATEGORIES and _CAT_ICONS should include Orchestrator."""
-    from solution_checker import CATEGORIES, _CAT_ICONS
-
-    assert "Orchestrator" in CATEGORIES
-    assert "Orchestrator" in _CAT_ICONS
-    assert _CAT_ICONS["Orchestrator"] == "network"
-
-
 # --- Integration: render_report includes new sections ---
 
 
