@@ -148,7 +148,6 @@ def navbar() -> rx.Component:
             _nav_link("database", "Dataverse", "/import"),
             _nav_link("wrench", "Solution Tools", "/tools"),
             _nav_link("shield-check", "Rules", "/rules"),
-            _nav_link("git-compare", "Compare", "/compare"),
             _nav_link("bar-chart-3", "Batch", "/batch"),
             rx.cond(
                 State.has_report,
@@ -286,12 +285,6 @@ def dashboard_cards() -> rx.Component:
                 "Solution Tools",
                 "Check, validate, rename, and inspect solution exports",
                 "/tools",
-            ),
-            _dashboard_card(
-                "git-compare",
-                "Bot Comparison",
-                "Compare two bot exports to see what changed",
-                "/compare",
             ),
             _dashboard_card(
                 "bar-chart-3",

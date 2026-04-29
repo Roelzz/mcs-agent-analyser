@@ -38,7 +38,6 @@ Everything you need to build with confidence and debug without guessing. If you'
 | **Latency bottlenecks** | Per-turn time breakdown showing where time is spent (thinking, tools, knowledge, delivery) with bottleneck flagging |
 | **Plan evolution diffs** | Structured diffs between consecutive orchestrator plans within a turn — detects thrashing, scope creep, and re-planning patterns |
 | **Batch analytics** | Aggregate multiple transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
-| **Bot comparison** | Compare two bot profiles — components added/removed/changed, instructions diff, topic connections, settings |
 | **Custom rules** | 18 default best-practice rules + user-defined YAML rules, evaluated during analysis and solution checks |
 | **Solution tools** | Check, validate, analyse dependencies, or rename Power Platform solution ZIP exports |
 | **Tool call analysis** | Runtime tool call tracing — per-tool statistics, async chain detection, orchestrator reasoning, Mermaid flow diagrams. Supports MCP servers, connectors, child/connected agents, A2A, flows, CUA |
@@ -323,21 +322,6 @@ Aggregate multiple conversation transcripts to get a bird's-eye view of bot perf
 2. Select the transcripts you want to analyse
 3. Click **Run Batch Analysis** — results render on the `/batch` page
 
-## Bot Comparison
-
-Compare two bot exports side by side to understand what changed between versions or environments.
-
-**What it compares:**
-- Components added, removed, and changed
-- Instructions diff (line-by-line)
-- Topic connection changes
-- Settings differences
-
-**How to use:**
-1. Navigate to `/compare`
-2. Upload two bot exports (`.zip` or `botContent.yml` + `dialog.json`)
-3. View the diff report with additions, removals, and changes highlighted
-
 ## Solution Tools
 
 Four tools for working with Power Platform solution ZIP exports, available on the `/tools` page:
@@ -540,7 +524,6 @@ conversation_analysis.py Turn efficiency, dead code, plan diffs, knowledge effec
 dataverse_client.py      Dataverse Web API client (bot config, components, transcripts)
 batch_analytics.py       Batch transcript aggregation (success rates, topics, errors, credits)
 custom_rules.py          YAML rule loader and evaluator
-diff.py                  Bot comparison / diff logic
 instruction_store.py     Instruction storage utilities
 linter.py                Instruction lint logic (OpenAI + Anthropic, model resolution, audit prompt)
 validator.py             Instruction validator (AI-powered, model best practices)
@@ -577,7 +560,6 @@ web/
     _auth.py             Authentication state
     _base.py             Base / shared state
     _batch.py            Batch analytics state
-    _compare.py          Bot comparison state
     _counter.py          Analysis counter state
     _dataverse.py        Dataverse connection state
     _lint.py             Instruction lint state
@@ -590,7 +572,6 @@ web/
   components/            UI components
     batch.py             Batch analytics form
     common.py            Shared components (navbar, dashboard cards, login)
-    compare.py           Bot comparison form
     dataverse.py         Dataverse import form
     report.py            Report viewer
     rules.py             Rules editor

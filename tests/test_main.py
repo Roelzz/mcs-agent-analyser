@@ -3,14 +3,11 @@ from pathlib import Path
 import pytest
 
 from custom_rules import _apply_operator, _resolve_field, evaluate_rules, load_rules_yaml
-from diff import compare_bots, render_diff_report
 from models import (
     AISettings,
     AppInsightsConfig,
     BatchAnalyticsSummary,
-    BotDiffResult,
     BotProfile,
-    ComponentChange,
     ComponentSummary,
     ConversationTimeline,
     CreditEstimate,
@@ -1773,7 +1770,7 @@ def test_knowledge_search_timeline_tracks_user_message():
 
 def test_knowledge_table_merged_status():
     """Knowledge table should show 'Source ✓' in a single Status column."""
-    from models import AISettings, ComponentSummary
+    from models import ComponentSummary
 
     profile = BotProfile(
         display_name="TestBot",
@@ -3167,7 +3164,6 @@ def test_render_knowledge_coverage_inactive_flagged():
 
 def test_topic_graph_annotations_orphaned():
     """Topic graph should annotate orphaned nodes."""
-    from models import TopicConnection
 
     profile = BotProfile(
         topic_connections=[
@@ -3187,7 +3183,6 @@ def test_topic_graph_annotations_orphaned():
 
 def test_topic_graph_system_topic_not_orphaned():
     """System topics with no inbound edges should NOT be marked orphaned."""
-    from models import TopicConnection
 
     profile = BotProfile(
         topic_connections=[
@@ -3566,131 +3561,6 @@ def test_render_report_no_custom_rules_param():
 
     sig = inspect.signature(render_report)
     assert "custom_rules" not in sig.parameters
-
-
-# --- Bot Comparison / Diff tests ---
-
-
-def _make_bot(name: str = "TestBot", components: list[ComponentSummary] | None = None, **kwargs) -> BotProfile:
-    return BotProfile(display_name=name, components=components or [], **kwargs)
-
-
-def test_compare_identical_bots():
-    """Identical bots produce empty diff."""
-    comp = ComponentSummary(kind="Topic", display_name="Greeting", schema_name="cr_greeting")
-    a = _make_bot("Bot", components=[comp])
-    b = _make_bot("Bot", components=[comp])
-    diff = compare_bots(a, b)
-    assert diff.added_components == []
-    assert diff.removed_components == []
-    assert diff.changed_components == []
-    assert diff.instruction_diff == ""
-    assert diff.connection_changes == []
-    assert diff.settings_changes == []
-
-
-def test_compare_added_component():
-    """Bot B has extra component -> in added_components."""
-    a = _make_bot("A")
-    b = _make_bot("B", components=[ComponentSummary(kind="Topic", display_name="New", schema_name="cr_new")])
-    diff = compare_bots(a, b)
-    assert "cr_new" in diff.added_components
-    assert diff.removed_components == []
-
-
-def test_compare_removed_component():
-    """Bot A has component not in B -> in removed_components."""
-    a = _make_bot("A", components=[ComponentSummary(kind="Topic", display_name="Old", schema_name="cr_old")])
-    b = _make_bot("B")
-    diff = compare_bots(a, b)
-    assert "cr_old" in diff.removed_components
-    assert diff.added_components == []
-
-
-def test_compare_changed_component():
-    """Same schema_name, different field -> in changed_components."""
-    ca = ComponentSummary(kind="Topic", display_name="Greet", schema_name="cr_greet", state="Active")
-    cb = ComponentSummary(kind="Topic", display_name="Greet", schema_name="cr_greet", state="Disabled")
-    diff = compare_bots(_make_bot("A", components=[ca]), _make_bot("B", components=[cb]))
-    assert len(diff.changed_components) == 1
-    assert diff.changed_components[0].field == "state"
-    assert diff.changed_components[0].value_a == "Active"
-    assert diff.changed_components[0].value_b == "Disabled"
-
-
-def test_compare_instruction_diff():
-    """Different instructions -> instruction_diff not empty."""
-    a = _make_bot("A", gpt_info=GptInfo(instructions="You are helpful."))
-    b = _make_bot("B", gpt_info=GptInfo(instructions="You are concise."))
-    diff = compare_bots(a, b)
-    assert diff.instruction_diff != ""
-    assert "helpful" in diff.instruction_diff
-    assert "concise" in diff.instruction_diff
-
-
-def test_compare_connection_added():
-    """Connection in B not in A -> in connection_changes."""
-    conn = TopicConnection(source_schema="src", source_display="Src", target_schema="tgt", target_display="Tgt")
-    a = _make_bot("A")
-    b = _make_bot("B", topic_connections=[conn])
-    diff = compare_bots(a, b)
-    assert any("+ src -> tgt" in c for c in diff.connection_changes)
-
-
-def test_compare_settings_changed():
-    """Different ai_settings -> in settings_changes."""
-    a = _make_bot("A", ai_settings=AISettings(use_model_knowledge=False))
-    b = _make_bot("B", ai_settings=AISettings(use_model_knowledge=True))
-    diff = compare_bots(a, b)
-    assert any("use_model_knowledge" in s for s in diff.settings_changes)
-
-
-def test_render_diff_report():
-    """render_diff_report produces valid markdown with expected sections."""
-    diff = BotDiffResult(
-        bot_a_name="A",
-        bot_b_name="B",
-        added_components=["cr_new"],
-        removed_components=["cr_old"],
-        changed_components=[
-            ComponentChange(schema_name="cr_x", display_name="X", field="state", value_a="Active", value_b="Disabled")
-        ],
-        instruction_diff="--- a\n+++ b\n-old\n+new",
-        connection_changes=["+ src -> tgt"],
-        settings_changes=["is_orchestrator: False -> True"],
-        summary_markdown="## Comparison: A vs B\n\n| Metric | Count |\n| --- | --- |",
-    )
-    md = render_diff_report(diff)
-    assert "## Comparison" in md
-    assert "Component Changes" in md
-    assert "Instruction Diff" in md
-    assert "Connection Changes" in md
-    assert "Settings Changes" in md
-    assert "cr_new" in md
-    assert "cr_old" in md
-
-
-def test_compare_empty_components():
-    """One bot with no components, other with some -> all shown as added/removed."""
-    comps = [
-        ComponentSummary(kind="Topic", display_name="A", schema_name="cr_a"),
-        ComponentSummary(kind="Topic", display_name="B", schema_name="cr_b"),
-    ]
-    diff = compare_bots(_make_bot("Empty"), _make_bot("Full", components=comps))
-    assert sorted(diff.added_components) == ["cr_a", "cr_b"]
-    assert diff.removed_components == []
-
-    diff2 = compare_bots(_make_bot("Full", components=comps), _make_bot("Empty"))
-    assert diff2.added_components == []
-    assert sorted(diff2.removed_components) == ["cr_a", "cr_b"]
-
-
-def test_compare_no_gpt_info():
-    """Both bots with no gpt_info -> instruction_diff empty."""
-    a = _make_bot("A", gpt_info=None)
-    b = _make_bot("B", gpt_info=None)
-    diff = compare_bots(a, b)
-    assert diff.instruction_diff == ""
 
 
 # --- Instruction versioning tests ---
@@ -4318,27 +4188,35 @@ def test_build_trigger_match_items_orchestrator_ask():
 
 def test_quick_wins_weak_description_missing():
     """Quick wins should say 'missing' when description is None."""
-    profile = BotProfile(components=[
-        ComponentSummary(kind="DialogComponent", display_name="Test", schema_name="cr_test", description=None),
-    ])
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="Test", schema_name="cr_test", description=None),
+        ]
+    )
     md = render_quick_wins(profile)
     assert 'Weak description: "Test" — missing' in md
 
 
 def test_quick_wins_weak_description_too_short():
     """Quick wins should show the actual short description."""
-    profile = BotProfile(components=[
-        ComponentSummary(kind="DialogComponent", display_name="Test", schema_name="cr_test", description="Hi"),
-    ])
+    profile = BotProfile(
+        components=[
+            ComponentSummary(kind="DialogComponent", display_name="Test", schema_name="cr_test", description="Hi"),
+        ]
+    )
     md = render_quick_wins(profile)
     assert 'too short: "Hi"' in md
 
 
 def test_quick_wins_weak_description_matches_name():
     """Quick wins should say 'matches display name' when desc == name."""
-    profile = BotProfile(components=[
-        ComponentSummary(kind="DialogComponent", display_name="PasswordReset", schema_name="cr_pw", description="PasswordReset"),
-    ])
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent", display_name="PasswordReset", schema_name="cr_pw", description="PasswordReset"
+            ),
+        ]
+    )
     md = render_quick_wins(profile)
     assert "matches display name" in md
 
@@ -4349,10 +4227,32 @@ def test_quick_wins_weak_description_matches_name():
 def test_lifecycle_includes_http_child_events():
     """Topic lifecycles should include HTTP and BeginDialog child events."""
     events = [
-        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="Main", position=1, timestamp="2024-01-01T10:00:00Z"),
-        TimelineEvent(event_type=EventType.ACTION_HTTP_REQUEST, summary="GET /api/data", position=2, timestamp="2024-01-01T10:00:01Z"),
-        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Begin SubTopic", position=3, timestamp="2024-01-01T10:00:02Z"),
-        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", position=4, timestamp="2024-01-01T10:00:03Z"),
+        TimelineEvent(
+            event_type=EventType.STEP_TRIGGERED,
+            step_id="s1",
+            topic_name="Main",
+            position=1,
+            timestamp="2024-01-01T10:00:00Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.ACTION_HTTP_REQUEST,
+            summary="GET /api/data",
+            position=2,
+            timestamp="2024-01-01T10:00:01Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.ACTION_BEGIN_DIALOG,
+            summary="Begin SubTopic",
+            position=3,
+            timestamp="2024-01-01T10:00:02Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.STEP_FINISHED,
+            step_id="s1",
+            state="completed",
+            position=4,
+            timestamp="2024-01-01T10:00:03Z",
+        ),
     ]
     tl = ConversationTimeline(events=events)
     lifecycles = build_topic_lifecycles(tl)
@@ -4370,9 +4270,22 @@ def test_lifecycle_includes_http_child_events():
 def test_decision_timeline_action_items():
     """Decision timeline should emit action items for HTTP and BeginDialog."""
     events = [
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hello", position=1, timestamp="2024-01-01T10:00:00Z"),
-        TimelineEvent(event_type=EventType.ACTION_HTTP_REQUEST, summary="GET /api/data", topic_name="Main", position=2, timestamp="2024-01-01T10:00:01Z"),
-        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Begin SubTopic", position=3, timestamp="2024-01-01T10:00:02Z"),
+        TimelineEvent(
+            event_type=EventType.USER_MESSAGE, summary="User: hello", position=1, timestamp="2024-01-01T10:00:00Z"
+        ),
+        TimelineEvent(
+            event_type=EventType.ACTION_HTTP_REQUEST,
+            summary="GET /api/data",
+            topic_name="Main",
+            position=2,
+            timestamp="2024-01-01T10:00:01Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.ACTION_BEGIN_DIALOG,
+            summary="Begin SubTopic",
+            position=3,
+            timestamp="2024-01-01T10:00:02Z",
+        ),
     ]
     tl = ConversationTimeline(events=events)
     items = build_orchestrator_decision_timeline(tl)
@@ -4426,9 +4339,20 @@ def test_decision_timeline_step_type_and_error():
 def test_conversation_flow_items_uniform_keys():
     """All flow items (messages + events) should have the same dict keys."""
     events = [
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hello", position=1, timestamp="2024-01-01T10:00:00Z"),
-        TimelineEvent(event_type=EventType.PLAN_RECEIVED, summary="Plan received", plan_steps=["StepA"], is_final_plan=True, position=2, timestamp="2024-01-01T10:00:01Z"),
-        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hi", position=3, timestamp="2024-01-01T10:00:02Z"),
+        TimelineEvent(
+            event_type=EventType.USER_MESSAGE, summary="User: hello", position=1, timestamp="2024-01-01T10:00:00Z"
+        ),
+        TimelineEvent(
+            event_type=EventType.PLAN_RECEIVED,
+            summary="Plan received",
+            plan_steps=["StepA"],
+            is_final_plan=True,
+            position=2,
+            timestamp="2024-01-01T10:00:01Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.BOT_MESSAGE, summary="Bot: hi", position=3, timestamp="2024-01-01T10:00:02Z"
+        ),
     ]
     tl = ConversationTimeline(events=events)
     items = build_conversation_flow_items(tl)
@@ -4449,10 +4373,25 @@ def test_render_topic_lifecycles_md():
     """render_topic_lifecycles_md returns a table with lifecycles."""
     from renderer.sections import render_topic_lifecycles_md
 
-    tl = ConversationTimeline(events=[
-        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="TopicA", thought="think", timestamp="2024-01-01T00:00:01Z", position=1),
-        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", timestamp="2024-01-01T00:00:02Z", position=2),
-    ])
+    tl = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                step_id="s1",
+                topic_name="TopicA",
+                thought="think",
+                timestamp="2024-01-01T00:00:01Z",
+                position=1,
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                step_id="s1",
+                state="completed",
+                timestamp="2024-01-01T00:00:02Z",
+                position=2,
+            ),
+        ]
+    )
     md = render_topic_lifecycles_md(tl)
     assert "## Topic Lifecycles" in md
     assert "TopicA" in md
@@ -4471,11 +4410,28 @@ def test_render_decision_timeline_md():
     """render_decision_timeline_md returns grouped markdown."""
     from renderer.sections import render_decision_timeline_md
 
-    tl = ConversationTimeline(events=[
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hello", timestamp="2024-01-01T00:00:01Z", position=1),
-        TimelineEvent(event_type=EventType.PLAN_RECEIVED, plan_steps=["StepA"], is_final_plan=True, timestamp="2024-01-01T00:00:02Z", position=2),
-        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="TopicA", thought="reason", timestamp="2024-01-01T00:00:03Z", position=3),
-    ])
+    tl = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE, summary="User: hello", timestamp="2024-01-01T00:00:01Z", position=1
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                plan_steps=["StepA"],
+                is_final_plan=True,
+                timestamp="2024-01-01T00:00:02Z",
+                position=2,
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                step_id="s1",
+                topic_name="TopicA",
+                thought="reason",
+                timestamp="2024-01-01T00:00:03Z",
+                position=3,
+            ),
+        ]
+    )
     md = render_decision_timeline_md(tl)
     assert "## Orchestrator Decision Timeline" in md
     assert "hello" in md
@@ -4489,10 +4445,22 @@ def test_extract_action_details():
     actions = [
         {"kind": "InvokeConnectorAction", "connectionReference": "ref_o365", "operationId": "SendEmail"},
         {"kind": "SendActivity"},
-        {"kind": "HttpRequestAction", "displayName": "Graph Access Token API", "method": "Post", "url": "https://login.microsoftonline.com/token"},
-        {"kind": "ConditionGroup", "conditions": [
-            {"actions": [{"kind": "InvokeFlowAction", "connectionReference": "ref_flow", "operationId": "RunFlow"}]},
-        ]},
+        {
+            "kind": "HttpRequestAction",
+            "displayName": "Graph Access Token API",
+            "method": "Post",
+            "url": "https://login.microsoftonline.com/token",
+        },
+        {
+            "kind": "ConditionGroup",
+            "conditions": [
+                {
+                    "actions": [
+                        {"kind": "InvokeFlowAction", "connectionReference": "ref_flow", "operationId": "RunFlow"}
+                    ]
+                },
+            ],
+        },
     ]
     details = _extract_action_details(actions)
     assert len(details) == 3
@@ -4518,9 +4486,21 @@ def test_external_calls_deduplication():
                 has_external_calls=True,
                 action_summary={"HttpRequestAction": 3},
                 action_details=[
-                    {"kind": "HttpRequestAction", "connector_display_name": "HTTP", "operation_id": "Create Service Request API"},
-                    {"kind": "HttpRequestAction", "connector_display_name": "HTTP", "operation_id": "Create Service Request API"},
-                    {"kind": "HttpRequestAction", "connector_display_name": "HTTP", "operation_id": "Graph Access Token API"},
+                    {
+                        "kind": "HttpRequestAction",
+                        "connector_display_name": "HTTP",
+                        "operation_id": "Create Service Request API",
+                    },
+                    {
+                        "kind": "HttpRequestAction",
+                        "connector_display_name": "HTTP",
+                        "operation_id": "Create Service Request API",
+                    },
+                    {
+                        "kind": "HttpRequestAction",
+                        "connector_display_name": "HTTP",
+                        "operation_id": "Graph Access Token API",
+                    },
                 ],
             ),
         ],
@@ -4543,15 +4523,32 @@ def test_action_details_connector_resolution():
                 schema_name="test.topic",
                 has_external_calls=True,
                 action_details=[
-                    {"kind": "InvokeConnectorAction", "connection_reference": "ref_o365", "operation_id": "SendEmail", "connector_display_name": ""},
+                    {
+                        "kind": "InvokeConnectorAction",
+                        "connection_reference": "ref_o365",
+                        "operation_id": "SendEmail",
+                        "connector_display_name": "",
+                    },
                 ],
             ),
         ],
         connection_references=[
-            {"connectionReferenceLogicalName": "ref_o365", "connectorId": "/providers/Microsoft.PowerApps/apis/shared_office365", "displayName": "O365 Ref", "connectionId": ""},
+            {
+                "connectionReferenceLogicalName": "ref_o365",
+                "connectorId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                "displayName": "O365 Ref",
+                "connectionId": "",
+            },
         ],
         connector_definitions=[
-            {"connectorId": "/providers/Microsoft.PowerApps/apis/shared_office365", "displayName": "Office 365 Outlook", "isCustom": False, "connectorType": "", "operationCount": 5, "hasMCP": False},
+            {
+                "connectorId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                "displayName": "Office 365 Outlook",
+                "isCustom": False,
+                "connectorType": "",
+                "operationCount": 5,
+                "hasMCP": False,
+            },
         ],
     )
     # Simulate the enrichment that _parse_connection_infrastructure does
@@ -4561,7 +4558,12 @@ def test_action_details_connector_resolution():
         {
             "connectionReferences": profile.connection_references,
             "connectorDefinitions": [
-                {"connectorId": "/providers/Microsoft.PowerApps/apis/shared_office365", "displayName": "Office 365 Outlook", "isCustom": False, "operations": []},
+                {
+                    "connectorId": "/providers/Microsoft.PowerApps/apis/shared_office365",
+                    "displayName": "Office 365 Outlook",
+                    "isCustom": False,
+                    "operations": [],
+                },
             ],
         },
         profile.components,
@@ -4576,7 +4578,13 @@ def test_profile_kpi_includes_orchestrator():
 
     comps = [
         ComponentSummary(kind="DialogComponent", display_name="User Topic", schema_name="ut", trigger_kind="OnIntent"),
-        ComponentSummary(kind="DialogComponent", display_name="Task Tool", schema_name="tt", dialog_kind="TaskDialog", action_kind="InvokeConnectorTaskAction"),
+        ComponentSummary(
+            kind="DialogComponent",
+            display_name="Task Tool",
+            schema_name="tt",
+            dialog_kind="TaskDialog",
+            action_kind="InvokeConnectorTaskAction",
+        ),
         ComponentSummary(kind="GlobalVariableComponent", display_name="Var1", schema_name="v1"),
     ]
     by_cat: dict[str, list] = {}
@@ -4592,17 +4600,57 @@ def test_profile_kpi_includes_orchestrator():
 
 def test_render_report_has_routing_sections():
     """render_report output contains new routing/conversation sections when timeline has data."""
-    tl = ConversationTimeline(events=[
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hello", timestamp="2024-01-01T00:00:01Z", position=1),
-        TimelineEvent(event_type=EventType.PLAN_RECEIVED, plan_steps=["StepA"], is_final_plan=True, timestamp="2024-01-01T00:00:02Z", position=2),
-        TimelineEvent(event_type=EventType.PLAN_RECEIVED, plan_steps=["StepA", "StepB"], is_final_plan=False, timestamp="2024-01-01T00:00:03Z", position=3),
-        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="TopicA", thought="reason", timestamp="2024-01-01T00:00:04Z", position=4),
-        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", timestamp="2024-01-01T00:00:05Z", position=5),
-        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hi", timestamp="2024-01-01T00:00:06Z", position=6),
-    ])
-    profile = BotProfile(display_name="TestBot", components=[
-        ComponentSummary(kind="DialogComponent", display_name="TopicA", schema_name="t.a", trigger_kind="OnIntent", trigger_queries=["hello"]),
-    ])
+    tl = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE, summary="User: hello", timestamp="2024-01-01T00:00:01Z", position=1
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                plan_steps=["StepA"],
+                is_final_plan=True,
+                timestamp="2024-01-01T00:00:02Z",
+                position=2,
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                plan_steps=["StepA", "StepB"],
+                is_final_plan=False,
+                timestamp="2024-01-01T00:00:03Z",
+                position=3,
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                step_id="s1",
+                topic_name="TopicA",
+                thought="reason",
+                timestamp="2024-01-01T00:00:04Z",
+                position=4,
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                step_id="s1",
+                state="completed",
+                timestamp="2024-01-01T00:00:05Z",
+                position=5,
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE, summary="Bot: hi", timestamp="2024-01-01T00:00:06Z", position=6
+            ),
+        ]
+    )
+    profile = BotProfile(
+        display_name="TestBot",
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="TopicA",
+                schema_name="t.a",
+                trigger_kind="OnIntent",
+                trigger_queries=["hello"],
+            ),
+        ],
+    )
     report = render_report(profile, tl)
     assert "## Topic Lifecycles" in report
     assert "## Orchestrator Decision Timeline" in report
@@ -4617,10 +4665,32 @@ def test_render_report_has_routing_sections():
 def test_build_topic_lifecycles_redirect_entries():
     """ACTION_BEGIN_DIALOG events create redirect lifecycle entries."""
     events = [
-        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="P:UniversalSearchTool", position=1, timestamp="2024-01-01T10:00:00Z"),
-        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Call to Fallback", position=2, timestamp="2024-01-01T10:00:01Z"),
-        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Call to GenAIAnsGeneration", position=3, timestamp="2024-01-01T10:00:02Z"),
-        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", position=4, timestamp="2024-01-01T10:00:03Z"),
+        TimelineEvent(
+            event_type=EventType.STEP_TRIGGERED,
+            step_id="s1",
+            topic_name="P:UniversalSearchTool",
+            position=1,
+            timestamp="2024-01-01T10:00:00Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.ACTION_BEGIN_DIALOG,
+            summary="Call to Fallback",
+            position=2,
+            timestamp="2024-01-01T10:00:01Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.ACTION_BEGIN_DIALOG,
+            summary="Call to GenAIAnsGeneration",
+            position=3,
+            timestamp="2024-01-01T10:00:02Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.STEP_FINISHED,
+            step_id="s1",
+            state="completed",
+            position=4,
+            timestamp="2024-01-01T10:00:03Z",
+        ),
     ]
     tl = ConversationTimeline(events=events)
     lifecycles = build_topic_lifecycles(tl)
@@ -4636,9 +4706,26 @@ def test_build_topic_lifecycles_redirect_entries():
 def test_build_topic_lifecycles_no_duplicate_redirect():
     """If a topic already has a STEP_TRIGGERED lifecycle, no redirect duplicate is created."""
     events = [
-        TimelineEvent(event_type=EventType.STEP_TRIGGERED, step_id="s1", topic_name="Fallback", position=1, timestamp="2024-01-01T10:00:00Z"),
-        TimelineEvent(event_type=EventType.ACTION_BEGIN_DIALOG, summary="Call to Fallback", position=2, timestamp="2024-01-01T10:00:01Z"),
-        TimelineEvent(event_type=EventType.STEP_FINISHED, step_id="s1", state="completed", position=3, timestamp="2024-01-01T10:00:02Z"),
+        TimelineEvent(
+            event_type=EventType.STEP_TRIGGERED,
+            step_id="s1",
+            topic_name="Fallback",
+            position=1,
+            timestamp="2024-01-01T10:00:00Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.ACTION_BEGIN_DIALOG,
+            summary="Call to Fallback",
+            position=2,
+            timestamp="2024-01-01T10:00:01Z",
+        ),
+        TimelineEvent(
+            event_type=EventType.STEP_FINISHED,
+            step_id="s1",
+            state="completed",
+            position=3,
+            timestamp="2024-01-01T10:00:02Z",
+        ),
     ]
     tl = ConversationTimeline(events=events)
     lifecycles = build_topic_lifecycles(tl)
@@ -4653,13 +4740,32 @@ def test_build_topic_lifecycles_no_duplicate_redirect():
 def test_build_trigger_match_items_system_tool_fallback():
     """When only system tools triggered, show the system tool name with (system) suffix."""
     events = [
-        TimelineEvent(timestamp="2025-01-01T10:00:00Z", position=1, event_type=EventType.USER_MESSAGE, summary='User: "reset my password"'),
-        TimelineEvent(timestamp="2025-01-01T10:00:01Z", position=2, event_type=EventType.STEP_TRIGGERED, topic_name="P:UniversalSearchTool", summary="Step start: P:UniversalSearchTool", step_id="step-1"),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:00Z",
+            position=1,
+            event_type=EventType.USER_MESSAGE,
+            summary='User: "reset my password"',
+        ),
+        TimelineEvent(
+            timestamp="2025-01-01T10:00:01Z",
+            position=2,
+            event_type=EventType.STEP_TRIGGERED,
+            topic_name="P:UniversalSearchTool",
+            summary="Step start: P:UniversalSearchTool",
+            step_id="step-1",
+        ),
     ]
     tl = ConversationTimeline(events=events)
-    profile = BotProfile(components=[
-        ComponentSummary(kind="DialogComponent", display_name="PasswordReset", schema_name="cr_pw", trigger_queries=["reset password"]),
-    ])
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="PasswordReset",
+                schema_name="cr_pw",
+                trigger_queries=["reset password"],
+            ),
+        ]
+    )
     items = build_trigger_match_items(tl, profile)
     assert len(items) == 1
     assert items[0]["selected_topic"] == "P:UniversalSearchTool (system)"
@@ -4670,12 +4776,16 @@ def test_build_trigger_match_items_system_tool_fallback():
 
 def test_visual_summary_action_send_counts_as_bot_response():
     """ACTION_SEND_ACTIVITY should be counted in 'Bot Responses' KPI."""
-    timeline = ConversationTimeline(events=[
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
-        TimelineEvent(event_type=EventType.ACTION_SEND_ACTIVITY, summary="Bot: hello", timestamp="2024-01-01T00:00:01Z"),
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: bye", timestamp="2024-01-01T00:00:02Z"),
-        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: goodbye", timestamp="2024-01-01T00:00:03Z"),
-    ])
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(
+                event_type=EventType.ACTION_SEND_ACTIVITY, summary="Bot: hello", timestamp="2024-01-01T00:00:01Z"
+            ),
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: bye", timestamp="2024-01-01T00:00:02Z"),
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: goodbye", timestamp="2024-01-01T00:00:03Z"),
+        ]
+    )
     result = build_conversation_visual_summary(timeline)
     bot_kpi = next(k for k in result["kpis"] if k["label"] == "Bot Responses")
     assert bot_kpi["value"] == "2"
@@ -4683,10 +4793,14 @@ def test_visual_summary_action_send_counts_as_bot_response():
 
 def test_visual_summary_latency_with_action_send():
     """USER_MESSAGE -> ACTION_SEND_ACTIVITY should produce correct turn latency."""
-    timeline = ConversationTimeline(events=[
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
-        TimelineEvent(event_type=EventType.ACTION_SEND_ACTIVITY, summary="Bot: hello", timestamp="2024-01-01T00:00:02Z"),
-    ])
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(
+                event_type=EventType.ACTION_SEND_ACTIVITY, summary="Bot: hello", timestamp="2024-01-01T00:00:02Z"
+            ),
+        ]
+    )
     result = build_conversation_visual_summary(timeline)
     avg_kpi = next(k for k in result["kpis"] if k["label"] == "Avg Turn Latency")
     assert avg_kpi["value"] == "2000 ms"
@@ -4694,12 +4808,16 @@ def test_visual_summary_latency_with_action_send():
 
 def test_visual_summary_latency_bands_populated():
     """Latency bands should have non-zero counts when turns exist."""
-    timeline = ConversationTimeline(events=[
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
-        TimelineEvent(event_type=EventType.ACTION_SEND_ACTIVITY, summary="Bot: hello", timestamp="2024-01-01T00:00:01.500Z"),
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: bye", timestamp="2024-01-01T00:00:03Z"),
-        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: goodbye", timestamp="2024-01-01T00:00:06Z"),
-    ])
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(
+                event_type=EventType.ACTION_SEND_ACTIVITY, summary="Bot: hello", timestamp="2024-01-01T00:00:01.500Z"
+            ),
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: bye", timestamp="2024-01-01T00:00:03Z"),
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: goodbye", timestamp="2024-01-01T00:00:06Z"),
+        ]
+    )
     result = build_conversation_visual_summary(timeline)
     total_band_count = sum(int(b["count"]) for b in result["latency_bands"])
     assert total_band_count == 2
@@ -4764,12 +4882,14 @@ def test_event_mix_includes_search_durations():
 
 def test_event_mix_includes_message_latency():
     """2 user-bot pairs -> Messages row has correct stats."""
-    timeline = ConversationTimeline(events=[
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
-        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hello", timestamp="2024-01-01T00:00:02Z"),
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: bye", timestamp="2024-01-01T00:00:03Z"),
-        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: goodbye", timestamp="2024-01-01T00:00:06Z"),
-    ])
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hello", timestamp="2024-01-01T00:00:02Z"),
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: bye", timestamp="2024-01-01T00:00:03Z"),
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: goodbye", timestamp="2024-01-01T00:00:06Z"),
+        ]
+    )
     result = build_conversation_visual_summary(timeline)
     msg_row = next(r for r in result["event_mix"] if r["label"] == "Messages")
     assert msg_row["min_fmt"] == "2.0s"
@@ -4779,9 +4899,11 @@ def test_event_mix_includes_message_latency():
 
 def test_event_mix_errors_no_duration():
     """Errors row has empty format strings and neutral gray bar."""
-    timeline = ConversationTimeline(events=[
-        TimelineEvent(event_type=EventType.ERROR, summary="Error!", timestamp="2024-01-01T00:00:00Z"),
-    ])
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.ERROR, summary="Error!", timestamp="2024-01-01T00:00:00Z"),
+        ]
+    )
     result = build_conversation_visual_summary(timeline)
     err_row = next(r for r in result["event_mix"] if r["label"] == "Errors")
     assert err_row["min_fmt"] == ""
@@ -4816,10 +4938,12 @@ def test_event_mix_search_includes_custom_search_steps():
 
 def test_visual_summary_missing_timestamps():
     """Events with timestamp=None should show '—' for latency KPIs, not '0 ms'."""
-    timeline = ConversationTimeline(events=[
-        TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp=None),
-        TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hello", timestamp=None),
-    ])
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp=None),
+            TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="Bot: hello", timestamp=None),
+        ]
+    )
     result = build_conversation_visual_summary(timeline)
     avg_kpi = next(k for k in result["kpis"] if k["label"] == "Avg Turn Latency")
     p95_kpi = next(k for k in result["kpis"] if k["label"] == "P95 Turn Latency")
@@ -5029,12 +5153,30 @@ def test_orchestrator_thinking_in_event_mix():
     timeline = ConversationTimeline(
         events=[
             TimelineEvent(event_type=EventType.USER_MESSAGE, summary="User: hi", timestamp="2024-01-01T00:00:00Z"),
-            TimelineEvent(event_type=EventType.ORCHESTRATOR_THINKING, summary="Orchestrator: Planning response (5000ms)", timestamp="2024-01-01T00:00:00Z"),
-            TimelineEvent(event_type=EventType.STEP_TRIGGERED, summary="Step start: A", timestamp="2024-01-01T00:00:05Z"),
+            TimelineEvent(
+                event_type=EventType.ORCHESTRATOR_THINKING,
+                summary="Orchestrator: Planning response (5000ms)",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED, summary="Step start: A", timestamp="2024-01-01T00:00:05Z"
+            ),
         ],
         phases=[
-            ExecutionPhase(label="Planning response", phase_type="OrchestratorThinking", start="2024-01-01T00:00:00Z", end="2024-01-01T00:00:05Z", duration_ms=5000.0),
-            ExecutionPhase(label="A", phase_type="CustomTopic", start="2024-01-01T00:00:05Z", end="2024-01-01T00:00:06Z", duration_ms=1000.0),
+            ExecutionPhase(
+                label="Planning response",
+                phase_type="OrchestratorThinking",
+                start="2024-01-01T00:00:00Z",
+                end="2024-01-01T00:00:05Z",
+                duration_ms=5000.0,
+            ),
+            ExecutionPhase(
+                label="A",
+                phase_type="CustomTopic",
+                start="2024-01-01T00:00:05Z",
+                end="2024-01-01T00:00:06Z",
+                duration_ms=1000.0,
+            ),
         ],
     )
     result = build_conversation_visual_summary(timeline)
@@ -5090,9 +5232,20 @@ def test_gantt_shows_orchestrator_thinking_bars():
 
     timeline = ConversationTimeline(
         events=[
-            TimelineEvent(event_type=EventType.STEP_FINISHED, summary="Done: Search", topic_name="Search", timestamp="2024-01-01T00:00:01Z"),
-            TimelineEvent(event_type=EventType.ORCHESTRATOR_THINKING, summary="Orchestrator: Processing: Search (10000ms)", timestamp="2024-01-01T00:00:01Z"),
-            TimelineEvent(event_type=EventType.PLAN_RECEIVED, summary="Plan: [NextStep]", timestamp="2024-01-01T00:00:11Z"),
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                summary="Done: Search",
+                topic_name="Search",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ORCHESTRATOR_THINKING,
+                summary="Orchestrator: Processing: Search (10000ms)",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED, summary="Plan: [NextStep]", timestamp="2024-01-01T00:00:11Z"
+            ),
         ],
         phases=[],
         bot_name="TestBot",
@@ -5187,7 +5340,9 @@ def test_conversation_flow_includes_trigger_score():
     profile = _make_profile_with_triggers()
     timeline = _make_timeline_with_steps()
     items = build_conversation_flow_items(timeline, profile=profile)
-    step_events = [i for i in items if i.get("kind") == "event" and i.get("event_type") in ("StepTriggered", "StepFinished")]
+    step_events = [
+        i for i in items if i.get("kind") == "event" and i.get("event_type") in ("StepTriggered", "StepFinished")
+    ]
     assert len(step_events) >= 1
     for ev in step_events:
         assert "trigger_score" in ev
