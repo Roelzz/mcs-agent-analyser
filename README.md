@@ -56,8 +56,8 @@ Everything you need to build with confidence and debug without guessing. If you'
 ### macOS / Linux (Terminal)
 
 ```bash
-git clone https://github.com/Roelzz/Agent_analyser.git
-cd Agent_analyser
+git clone https://github.com/Roelzz/mcs-agent-analyser.git
+cd mcs-agent-analyser
 cp .env.example .env       # default login: inspector / underthehood
 uv sync
 uv run reflex run
@@ -66,8 +66,8 @@ uv run reflex run
 ### Windows (PowerShell)
 
 ```powershell
-git clone https://github.com/Roelzz/Agent_analyser.git
-cd Agent_analyser
+git clone https://github.com/Roelzz/mcs-agent-analyser.git
+cd mcs-agent-analyser
 Copy-Item .env.example .env   # default login: inspector / underthehood
 uv sync
 uv run reflex run
@@ -76,8 +76,8 @@ uv run reflex run
 ### Windows (CMD)
 
 ```cmd
-git clone https://github.com/Roelzz/Agent_analyser.git
-cd Agent_analyser
+git clone https://github.com/Roelzz/mcs-agent-analyser.git
+cd mcs-agent-analyser
 copy .env.example .env        REM default login: inspector / underthehood
 uv sync
 uv run reflex run
