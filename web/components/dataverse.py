@@ -1,6 +1,7 @@
 import reflex as rx
 
 from web.components.common import _MONO
+from web.mermaid import render_segment
 from web.state import State
 
 
@@ -660,6 +661,44 @@ def import_transcript_list() -> rx.Component:
                 ),
                 width="100%",
                 padding="24px",
+            ),
+        ),
+        # Batch analytics report (renders inline once analysis finishes — replaces
+        # the previous redirect to the deleted /batch page).
+        rx.cond(
+            State.dv_report_md != "",
+            rx.vstack(
+                rx.hstack(
+                    rx.text(
+                        f"Analytics for {State.dv_report_count} transcripts",
+                        size="2",
+                        font_weight="500",
+                        color="var(--gray-11)",
+                    ),
+                    rx.spacer(),
+                    rx.button(
+                        rx.hstack(
+                            rx.icon("trash-2", size=14),
+                            rx.text("Clear"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        on_click=State.clear_dv_report,
+                        variant="outline",
+                        color_scheme="gray",
+                        size="2",
+                        cursor="pointer",
+                    ),
+                    width="100%",
+                    align="center",
+                ),
+                rx.box(
+                    rx.foreach(State.dv_report_segments, render_segment),
+                    width="100%",
+                ),
+                spacing="3",
+                width="100%",
+                padding="12px 0",
             ),
         ),
         # Transcript list

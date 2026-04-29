@@ -1,7 +1,6 @@
 import reflex as rx
 
 from web.components import (
-    batch_form,
     dashboard_cards,
     import_form,
     login_form,
@@ -172,18 +171,6 @@ def rules_page() -> rx.Component:
     )
 
 
-def batch_page() -> rx.Component:
-    return rx.vstack(
-        navbar(),
-        mermaid_script(),
-        _counter_styles(),
-        batch_form(),
-        width="100%",
-        min_height="100vh",
-        spacing="0",
-    )
-
-
 app.add_page(login_page, route="/", on_load=State.check_already_authed)
 app.add_page(dashboard_page, route="/dashboard", on_load=State.check_auth)
 app.add_page(upload_page, route="/upload", on_load=State.check_auth)
@@ -191,4 +178,3 @@ app.add_page(import_page, route="/import", on_load=State.init_import_page)
 app.add_page(dynamic_analysis_page, route="/analysis/dynamic", on_load=State.check_analysis_page)
 app.add_page(document_analysis_page, route="/analysis/document", on_load=State.check_analysis_page)
 app.add_page(rules_page, route="/rules", on_load=State.on_load_rules_page)
-app.add_page(batch_page, route="/batch", on_load=State.check_auth)

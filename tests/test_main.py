@@ -22,7 +22,7 @@ from models import (
     TimelineEvent,
     TopicConnection,
 )
-from batch_analytics import aggregate_timelines, render_batch_report
+from analytics import aggregate_timelines, render_batch_report
 from parser import (
     _count_action_kinds,
     detect_trigger_overlaps,

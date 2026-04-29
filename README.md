@@ -37,7 +37,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 | **Multi-agent delegation** | Traces orchestrator-to-agent delegation chains — detects dead agents, always-failing agents, and shows orchestrator reasoning per delegation |
 | **Latency bottlenecks** | Per-turn time breakdown showing where time is spent (thinking, tools, knowledge, delivery) with bottleneck flagging |
 | **Plan evolution diffs** | Structured diffs between consecutive orchestrator plans within a turn — detects thrashing, scope creep, and re-planning patterns |
-| **Batch analytics** | Aggregate multiple transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
+| **Batch analytics** | Aggregate multiple Dataverse transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
 | **Custom rules** | 18 default best-practice rules + user-defined YAML rules, evaluated during analysis |
 | **Tool call analysis** | Runtime tool call tracing — per-tool statistics, async chain detection, orchestrator reasoning, Mermaid flow diagrams. Supports MCP servers, connectors, child/connected agents, A2A, flows, CUA |
 | **Instruction lint** | AI-powered audit of bot instructions and architecture (supports OpenAI and Anthropic models) |
@@ -305,21 +305,6 @@ When a conversation includes orchestrator-driven tool invocations (MCP servers, 
 
 Tool call data is captured from `DynamicPlanStepTriggered`, `DynamicPlanStepBindUpdate`, and `DynamicPlanStepFinished` events in the conversation trace. Works with both full bot exports (ZIP) and transcript-only uploads.
 
-## Batch Analytics
-
-Aggregate multiple conversation transcripts to get a bird's-eye view of bot performance.
-
-**What it aggregates:**
-- Total conversations, success/failure/escalation rates
-- Topic usage frequency
-- Error patterns and common failure reasons
-- MCS credit estimates across conversations
-
-**How to use:**
-1. Connect to Dataverse and fetch transcripts
-2. Select the transcripts you want to analyse
-3. Click **Run Batch Analysis** — results render on the `/batch` page
-
 ## Dataverse Connection
 
 Agent Analyser connects to Dataverse to fetch bot configuration, components, and conversation transcripts. Authentication uses OAuth 2.0 device code flow against the Dataverse Web API.
@@ -499,7 +484,7 @@ timeline.py              Dialog activity → timeline event conversion
 transcript.py            Transcript JSON parsing and normalization
 conversation_analysis.py Turn efficiency, dead code, plan diffs, knowledge effectiveness, response quality, delegation, latency, instruction alignment
 dataverse_client.py      Dataverse Web API client (bot config, components, transcripts)
-batch_analytics.py       Batch transcript aggregation (success rates, topics, errors, credits)
+analytics.py             Multi-transcript aggregation used by the Dataverse batch analytics view
 custom_rules.py          YAML rule loader and evaluator
 instruction_store.py     Instruction storage utilities
 linter.py                Instruction lint logic (OpenAI + Anthropic, model resolution, audit prompt)
@@ -523,7 +508,6 @@ web/
   state/                 Reflex state management
     _auth.py             Authentication state
     _base.py             Base / shared state
-    _batch.py            Batch analytics state
     _counter.py          Analysis counter state
     _dataverse.py        Dataverse connection state
     _lint.py             Instruction lint state
@@ -533,7 +517,6 @@ web/
     _upload.py           File upload state + conversation analysis population
 
   components/            UI components
-    batch.py             Batch analytics form
     common.py            Shared components (navbar, dashboard cards, login)
     dataverse.py         Dataverse import form
     report.py            Report viewer

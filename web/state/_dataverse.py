@@ -11,7 +11,7 @@ from loguru import logger
 from instruction_store import save_snapshot  # noqa: E402
 from models import BotProfile  # noqa: E402
 from parser import build_bot_dict, parse_bot_data  # noqa: E402
-from batch_analytics import aggregate_timelines, render_batch_report  # noqa: E402
+from analytics import aggregate_timelines, render_batch_report  # noqa: E402
 from renderer import render_instruction_drift, render_report, render_transcript_report  # noqa: E402
 from timeline import build_timeline  # noqa: E402
 from transcript import parse_transcript_json  # noqa: E402
@@ -61,6 +61,24 @@ class DataverseMixin(rx.State, mixin=True):
     # Dataverse Import — batch analysis
     dv_batch_processing: bool = False
     dv_batch_error: str = ""
+    dv_report_md: str = ""
+    dv_report_count: int = 0
+
+    @rx.var
+    def dv_report_segments(self) -> list[dict]:
+        """Markdown + mermaid segments for the batch analytics report."""
+        if not self.dv_report_md:
+            return []
+        from web.mermaid import split_markdown_mermaid
+
+        return split_markdown_mermaid(self.dv_report_md)
+
+    @rx.event
+    def clear_dv_report(self):
+        """Reset the analytics report panel."""
+        self.dv_report_md = ""
+        self.dv_report_count = 0
+        self.dv_batch_error = ""
 
     # Setters
     @rx.event
@@ -663,8 +681,8 @@ class DataverseMixin(rx.State, mixin=True):
                 return
 
             summary = aggregate_timelines(timelines, metadata_list)
-            self.batch_report_md = render_batch_report(summary)  # type: ignore[attr-defined]
-            self.batch_count = len(timelines)  # type: ignore[attr-defined]
+            self.dv_report_md = render_batch_report(summary)
+            self.dv_report_count = len(timelines)
             logger.info(f"Dataverse batch analysis complete: {len(timelines)} transcripts")
 
         except Exception as e:
@@ -673,8 +691,6 @@ class DataverseMixin(rx.State, mixin=True):
         finally:
             self.dv_batch_processing = False
             yield
-            if self.batch_report_md:  # type: ignore[attr-defined]
-                yield rx.redirect("/batch")
 
     @rx.event
     def dv_disconnect(self):

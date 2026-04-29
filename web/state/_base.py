@@ -100,7 +100,6 @@ from web.state._lint import LintMixin  # noqa: E402
 from web.state._counter import CounterMixin  # noqa: E402
 from web.state._dataverse import DataverseMixin  # noqa: E402
 from web.state._rules import RulesMixin  # noqa: E402
-from web.state._batch import BatchMixin  # noqa: E402
 from web.state._dynamic import DynamicMixin  # noqa: E402
 
 
@@ -112,7 +111,6 @@ class State(
     CounterMixin,
     DataverseMixin,
     RulesMixin,
-    BatchMixin,
     DynamicMixin,
     rx.State,
 ):
