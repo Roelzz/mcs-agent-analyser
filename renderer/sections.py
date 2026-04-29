@@ -380,6 +380,7 @@ def build_conversation_flow_items(
             EventType.STEP_TRIGGERED,
             EventType.STEP_FINISHED,
             EventType.KNOWLEDGE_SEARCH,
+            EventType.GENERATIVE_ANSWER,
             EventType.DIALOG_TRACING,
             EventType.DIALOG_REDIRECT,
             EventType.ACTION_TRIGGER_EVAL,
@@ -392,6 +393,7 @@ def build_conversation_flow_items(
                 EventType.STEP_TRIGGERED: "Action Started",
                 EventType.STEP_FINISHED: "Action Finished",
                 EventType.KNOWLEDGE_SEARCH: "Knowledge Search",
+                EventType.GENERATIVE_ANSWER: "Generative Answer",
                 EventType.DIALOG_TRACING: "Topic Trace",
                 EventType.DIALOG_REDIRECT: "Topic Redirect",
                 EventType.ACTION_TRIGGER_EVAL: "Condition Eval",
@@ -400,6 +402,8 @@ def build_conversation_flow_items(
             }
             if ev.event_type == EventType.ERROR:
                 tone = "error"
+            elif ev.event_type == EventType.GENERATIVE_ANSWER:
+                tone = "error" if ev.state == "failed" else "info"
             elif ev.event_type in (EventType.ACTION_TRIGGER_EVAL, EventType.ORCHESTRATOR_THINKING):
                 tone = "trace"
             else:

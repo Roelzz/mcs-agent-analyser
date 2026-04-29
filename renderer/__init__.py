@@ -14,6 +14,7 @@ from ._helpers import (
 from .knowledge import (
     _grounding_score,
     _source_efficiency,
+    render_generative_answer_traces,
     render_knowledge_search_section,
 )
 from .profile import (
@@ -82,6 +83,7 @@ __all__ = [
     "render_integration_map",
     "render_knowledge_coverage",
     "render_knowledge_inventory",
+    "render_generative_answer_traces",
     "render_knowledge_search_section",
     "render_knowledge_source_details",
     "render_mermaid_sequence",

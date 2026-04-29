@@ -564,7 +564,9 @@ def analyze_response_quality(timeline: ConversationTimeline) -> ResponseQualityR
             continue
 
         # Check what preceded the bot message
-        has_knowledge = any(e.event_type == EventType.KNOWLEDGE_SEARCH for e in events)
+        has_knowledge = any(
+            e.event_type in (EventType.KNOWLEDGE_SEARCH, EventType.GENERATIVE_ANSWER) for e in events
+        )
         has_tool = any(e.event_type == EventType.STEP_TRIGGERED for e in events)
         failed_tools = [e for e in events if e.event_type == EventType.STEP_FINISHED and e.state == "failed"]
         zero_result_search = False
@@ -573,6 +575,14 @@ def analyze_response_quality(timeline: ConversationTimeline) -> ResponseQualityR
             if events[0].timestamp and events[-1].timestamp and ks.timestamp:
                 if events[0].timestamp <= ks.timestamp <= events[-1].timestamp:
                     if not ks.search_results:
+                        zero_result_search = True
+        # Topic-level generative answers in this turn — flag fallbacks and empty hits
+        turn_traces: list = []
+        for trace in getattr(timeline, "generative_answer_traces", []) or []:
+            if events[0].timestamp and events[-1].timestamp and trace.timestamp:
+                if events[0].timestamp <= trace.timestamp <= events[-1].timestamp:
+                    turn_traces.append(trace)
+                    if not trace.search_results:
                         zero_result_search = True
 
         for bot_ev in bot_messages:
@@ -603,6 +613,16 @@ def analyze_response_quality(timeline: ConversationTimeline) -> ResponseQualityR
                 flags.append(f"Tool error silently swallowed ({len(failed_tools)} failed)")
                 if hallucination_risk == "low":
                     hallucination_risk = "medium"
+
+            for trace in turn_traces:
+                if trace.triggered_fallback:
+                    flags.append("Generative answer fell back to GPT default response")
+                    hallucination_risk = "high"
+                    is_grounded = False
+                elif trace.gpt_answer_state and trace.gpt_answer_state.lower() != "answered":
+                    flags.append(f"Generative answer state: {trace.gpt_answer_state}")
+                    if hallucination_risk == "low":
+                        hallucination_risk = "medium"
 
             if is_grounded:
                 grounded += 1

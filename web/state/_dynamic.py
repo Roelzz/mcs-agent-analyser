@@ -99,6 +99,10 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_knowledge_searches: list[dict] = []
     mcs_knowledge_custom_steps: list[dict] = []
     mcs_knowledge_general_enabled: bool = False
+    # Topic-level Search & Summarize diagnostic traces (one row per call,
+    # plus expandable child rows for results and citations).
+    mcs_generative_traces: list[dict] = []
+    mcs_generative_topics: list[str] = []  # topic names that emitted at least one trace
 
     # ── Topics tab ───────────────────────────────────────────────────────────
     mcs_topics_kpis: list[dict] = []

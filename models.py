@@ -124,6 +124,7 @@ class EventType(str, Enum):
     ACTION_SEND_ACTIVITY = "ActionSendActivity"
     ORCHESTRATOR_THINKING = "OrchestratorThinking"
     INTENT_RECOGNITION = "IntentRecognition"
+    GENERATIVE_ANSWER = "GenerativeAnswer"
     ERROR = "Error"
     OTHER = "Other"
 
@@ -163,6 +164,8 @@ class SearchResult(BaseModel):
     text: str | None = None  # snippet
     file_type: str | None = None
     result_type: str | None = None  # e.g. "SharepointSiteSearch"
+    rank_score: float | None = None
+    verified_rank_score: float | None = None
 
 
 class KnowledgeSearchInfo(BaseModel):
@@ -177,6 +180,70 @@ class KnowledgeSearchInfo(BaseModel):
     output_knowledge_sources: list[str] = Field(default_factory=list)
     search_errors: list[str] = Field(default_factory=list)
     triggering_user_message: str | None = None
+
+
+class GenerativeAnswerCitation(BaseModel):
+    url: str | None = None
+    snippet: str | None = None
+    title: str | None = None
+
+
+class GenerativeAnswerTrace(BaseModel):
+    """Diagnostic data from a topic-level SearchAndSummarizeContent node.
+
+    Captured from the `GenerativeAnswersSupportData` event emitted when a
+    topic invokes SearchAndSummarizeContent directly (not via the
+    orchestrator's UniversalSearchTool).
+    """
+
+    position: int = 0
+    timestamp: str | None = None
+    topic_name: str | None = None
+    triggering_user_message: str | None = None
+    activity_id: str | None = None
+    # retry chain — attempt 1 = original, attempt 2+ = orchestrator retry on the same user turn
+    attempt_index: int = 1
+    is_retry: bool = False
+    previous_attempt_state: str | None = None
+    # query transformation chain
+    original_message: str | None = None
+    screened_message: str | None = None
+    rewritten_message: str | None = None
+    rewritten_keywords: str | None = None
+    hypothetical_snippet_query: str | None = None
+    # LLM resource usage
+    rewrite_prompt_tokens: int | None = None
+    rewrite_completion_tokens: int | None = None
+    rewrite_total_tokens: int | None = None
+    rewrite_cached_tokens: int | None = None
+    rewrite_model: str | None = None
+    rewrite_system_prompt: str | None = None
+    rewrite_raw_response: str | None = None
+    summarize_prompt_tokens: int | None = None
+    summarize_completion_tokens: int | None = None
+    summarize_total_tokens: int | None = None
+    summarize_cached_tokens: int | None = None
+    summarize_model: str | None = None
+    summarize_system_prompt: str | None = None
+    text_summary: str | None = None
+    raw_summary: str | None = None
+    # search execution
+    endpoints: list[str] = Field(default_factory=list)
+    search_results: list[SearchResult] = Field(default_factory=list)
+    shadow_search_results: list[SearchResult] = Field(default_factory=list)
+    search_errors: list[str] = Field(default_factory=list)
+    search_type: str | None = None
+    # generated answer
+    summary_text: str | None = None
+    citations: list[GenerativeAnswerCitation] = Field(default_factory=list)
+    # safety / state
+    performed_content_moderation: bool = False
+    performed_content_provenance: bool = False
+    contains_confidential: bool = False
+    filtered_summary: str | None = None
+    gpt_answer_state: str | None = None
+    completion_state: str | None = None
+    triggered_fallback: bool = False
 
 
 class CustomSearchStep(BaseModel):
@@ -260,6 +327,7 @@ class ConversationTimeline(BaseModel):
     knowledge_searches: list[KnowledgeSearchInfo] = Field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)
     tool_calls: list[ToolCall] = Field(default_factory=list)
+    generative_answer_traces: list[GenerativeAnswerTrace] = Field(default_factory=list)
 
 
 # --- Credit estimation models ---

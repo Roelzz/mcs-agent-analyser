@@ -10,6 +10,8 @@ from models import (
     CustomSearchStep,
     EventType,
     ExecutionPhase,
+    GenerativeAnswerCitation,
+    GenerativeAnswerTrace,
     KnowledgeSearchInfo,
     SearchResult,
     TimelineEvent,
@@ -45,6 +47,11 @@ class _TimelineState:
     pending_custom_searches: dict[str, CustomSearchStep] = field(default_factory=dict)
     pending_tool_args: dict[str, dict[str, str]] = field(default_factory=dict)  # step_id -> arguments
     tool_calls: list[ToolCall] = field(default_factory=list)
+    generative_answer_traces: list[GenerativeAnswerTrace] = field(default_factory=list)
+    last_step_topic: str | None = None  # most recent in-progress topic, for trace attribution
+    # attempts within the current user turn — reset to 0 on each USER_MESSAGE
+    turn_attempt_count: int = 0
+    last_attempt_state: str | None = None  # gptAnswerState of the most recent attempt, used as retry reason
 
 
 def _parse_timestamp(ts: str | None) -> datetime | None:
@@ -167,6 +174,133 @@ def _build_phase(
     )
 
 
+def _build_generative_answer_trace(
+    value: dict,
+    position: int,
+    timestamp: str | None,
+    triggering_user_message: str | None,
+    topic_name: str | None,
+) -> GenerativeAnswerTrace:
+    """Extract a GenerativeAnswerTrace from a `GenerativeAnswersSupportData` event value.
+
+    All nested `.get()` calls are defensive — `summarizationOpenAIResponse` and
+    `queryRewrittingOpenAIResponse` may be null when the LLM call was skipped or
+    failed, and shadow/verified blocks may be absent on older runtimes.
+    """
+    rewrite_resp = value.get("queryRewrittingOpenAIResponse") or {}
+    rewrite_usage = rewrite_resp.get("CapiResourceUsage") or {}
+    summarize_resp = value.get("summarizationOpenAIResponse") or {}
+    summarize_usage = summarize_resp.get("CapiResourceUsage") or {}
+    summarize_result = (summarize_resp.get("Result") or {}) if isinstance(summarize_resp, dict) else {}
+
+    raw_results = value.get("searchResults") or []
+    raw_verified = value.get("verifiedSearchResults") or []
+    raw_shadow = value.get("ShadowSearchResults") or value.get("shadowSearchResults") or []
+
+    # Index verified results by URL so we can attach the verified score back
+    # onto the matching base result without losing the original ordering.
+    verified_by_url: dict[str, float] = {}
+    for r in raw_verified:
+        url = r.get("url") or r.get("Url")
+        score = r.get("rankScore")
+        if url and isinstance(score, (int, float)):
+            verified_by_url[url] = float(score)
+
+    def _to_search_result(r: dict, attach_verified: bool = False) -> SearchResult:
+        url = r.get("url") or r.get("Url")
+        score = r.get("rankScore")
+        return SearchResult(
+            name=r.get("name") or r.get("Name") or (url.rsplit("/", 1)[-1] if url else None),
+            url=url,
+            text=r.get("snippet") or r.get("Snippet") or r.get("text") or r.get("Text"),
+            file_type=r.get("fileType") or r.get("FileType"),
+            result_type=r.get("searchType") or r.get("Type"),
+            rank_score=float(score) if isinstance(score, (int, float)) else None,
+            verified_rank_score=verified_by_url.get(url) if attach_verified and url else None,
+        )
+
+    search_results = [_to_search_result(r, attach_verified=True) for r in raw_results[:25]]
+    shadow_results = [_to_search_result(r) for r in raw_shadow[:25]]
+
+    # Citations
+    raw_citations = (summarize_result.get("TextCitations") or []) if isinstance(summarize_result, dict) else []
+    citations = [
+        GenerativeAnswerCitation(
+            url=c.get("Url") or c.get("url"),
+            snippet=c.get("Text") or c.get("text") or c.get("Snippet"),
+            title=c.get("Title") or c.get("title"),
+        )
+        for c in raw_citations
+    ]
+
+    # Determine search backend type from first result if not explicit on the event
+    search_type = None
+    if search_results:
+        search_type = search_results[0].result_type
+
+    def _opt_int(v: object) -> int | None:
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, (int, float)):
+            return int(v)
+        return None
+
+    # `HypotheticalSnippetQuery` lives nested under .Response.HypotheticalSnippetQuery
+    # in newer payloads — fall back to the legacy top-level location for compatibility.
+    rewrite_response_inner = rewrite_resp.get("Response") or {}
+    if isinstance(rewrite_response_inner, dict):
+        hypo_query = (
+            rewrite_response_inner.get("HypotheticalSnippetQuery")
+            or rewrite_resp.get("HypotheticalSnippetQuery")
+        )
+    else:
+        hypo_query = rewrite_resp.get("HypotheticalSnippetQuery")
+
+    return GenerativeAnswerTrace(
+        position=position,
+        timestamp=timestamp,
+        topic_name=topic_name,
+        triggering_user_message=triggering_user_message,
+        activity_id=value.get("activityId"),
+        original_message=value.get("message"),
+        screened_message=value.get("screenedMessage"),
+        rewritten_message=value.get("rewrittenMessage"),
+        rewritten_keywords=value.get("rewrittenMessageKeywords"),
+        hypothetical_snippet_query=hypo_query,
+        rewrite_prompt_tokens=_opt_int(rewrite_usage.get("PromptTokens")),
+        rewrite_completion_tokens=_opt_int(rewrite_usage.get("CompletionTokens")),
+        rewrite_total_tokens=_opt_int(rewrite_usage.get("TotalTokens")),
+        rewrite_cached_tokens=_opt_int(rewrite_usage.get("CachedTokens")),
+        rewrite_model=rewrite_usage.get("ModelName"),
+        rewrite_system_prompt=rewrite_resp.get("Prompt") if isinstance(rewrite_resp, dict) else None,
+        rewrite_raw_response=rewrite_resp.get("responseString") if isinstance(rewrite_resp, dict) else None,
+        summarize_prompt_tokens=_opt_int(summarize_usage.get("PromptTokens")),
+        summarize_completion_tokens=_opt_int(summarize_usage.get("CompletionTokens")),
+        summarize_total_tokens=_opt_int(summarize_usage.get("TotalTokens")),
+        summarize_cached_tokens=_opt_int(summarize_usage.get("CachedTokens")),
+        summarize_model=summarize_usage.get("ModelName"),
+        summarize_system_prompt=summarize_resp.get("Prompt") if isinstance(summarize_resp, dict) else None,
+        endpoints=list(value.get("endpoints") or []),
+        search_results=search_results,
+        shadow_search_results=shadow_results,
+        search_errors=list(value.get("searchErrors") or []),
+        search_type=search_type,
+        summary_text=summarize_result.get("Summary") if isinstance(summarize_result, dict) else None,
+        text_summary=summarize_result.get("TextSummary") if isinstance(summarize_result, dict) else None,
+        raw_summary=summarize_resp.get("RawSummary") if isinstance(summarize_resp, dict) else None,
+        citations=citations,
+        performed_content_moderation=bool(value.get("performedContentModerationCheck")),
+        performed_content_provenance=bool(value.get("performedContentProvenanceCheck")),
+        contains_confidential=bool(
+            summarize_result.get("ContainsConfidentialData") if isinstance(summarize_result, dict) else False
+        ),
+        filtered_summary=value.get("filteredOpenAISummary"),
+        gpt_answer_state=value.get("gptAnswerState"),
+        completion_state=value.get("completionState"),
+        triggered_fallback=bool(value.get("triggeredGptFallback")),
+    )
+
+
 def _process_trace_event(
     activity: dict,
     state: _TimelineState,
@@ -178,6 +312,49 @@ def _process_trace_event(
     act_type = activity.get("type", "")
     value_type = activity.get("valueType", "") or activity.get("name", "")
     value = activity.get("value", {}) or {}
+
+    # `GenerativeAnswersSupportData` arrives both as type="event" (orchestrator)
+    # and as type="message" (when the runtime stamps a textual hint such as
+    # "Answer not Found in Search Results" alongside the diagnostic blob).
+    # Handle both shapes through the same branch.
+    if value_type == "GenerativeAnswersSupportData" and act_type in ("event", "message"):
+        trace = _build_generative_answer_trace(
+            value,
+            position=position,
+            timestamp=timestamp,
+            triggering_user_message=state.latest_user_text,
+            topic_name=state.last_step_topic,
+        )
+        state.turn_attempt_count += 1
+        trace.attempt_index = state.turn_attempt_count
+        trace.is_retry = state.turn_attempt_count > 1
+        trace.previous_attempt_state = state.last_attempt_state if trace.is_retry else None
+        state.last_attempt_state = trace.gpt_answer_state
+        state.generative_answer_traces.append(trace)
+        answer_state = trace.gpt_answer_state or "unknown"
+        citations_n = len(trace.citations)
+        results_n = len(trace.search_results)
+        attempt_label = f"#{trace.attempt_index}" + (" (retry)" if trace.is_retry else "")
+        summary_bits = [f"Generative answer {attempt_label}: {answer_state}"]
+        if results_n:
+            summary_bits.append(f"{results_n} hits")
+        if citations_n:
+            summary_bits.append(f"{citations_n} citations")
+        if trace.triggered_fallback:
+            summary_bits.append("FALLBACK")
+        answered = (trace.gpt_answer_state or "").lower() == "answered"
+        event_state = None if (answered and not trace.triggered_fallback) else "failed"
+        state.events.append(
+            TimelineEvent(
+                timestamp=timestamp,
+                position=position,
+                event_type=EventType.GENERATIVE_ANSWER,
+                topic_name=trace.topic_name,
+                summary=" • ".join(summary_bits),
+                state=event_state,
+            )
+        )
+        return
 
     if act_type == "event":
         if value_type == "DynamicPlanReceived":
@@ -246,6 +423,7 @@ def _process_trace_event(
                     has_recommendations=value.get("hasRecommendations"),
                 )
             )
+            state.last_step_topic = topic
 
             if task_dialog_id == "P:UniversalSearchTool":
                 state.pending_ks_thought = value.get("thought")
@@ -709,8 +887,18 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         if act_type == "typing":
             continue
 
+        # `GenerativeAnswersSupportData` can arrive as type="message" (when the runtime
+        # stamps a textual hint like "Answer not Found in Search Results") OR as
+        # type="event". Both shapes carry the full diagnostic value blob — route them
+        # through the trace processor before the normal message branches.
+        if activity.get("name") == "GenerativeAnswersSupportData" and act_type in ("event", "message"):
+            _process_trace_event(activity, state, schema_lookup, timestamp, position)
+            continue
+
         # User message
         if act_type == "message" and role == "user":
+            state.turn_attempt_count = 0
+            state.last_attempt_state = None
             text = activity.get("text", "")
             if text:
                 state.latest_user_text = text
@@ -764,6 +952,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         knowledge_searches=state.knowledge_searches,
         custom_search_steps=state.custom_search_steps,
         tool_calls=state.tool_calls,
+        generative_answer_traces=state.generative_answer_traces,
     )
 
 

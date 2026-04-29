@@ -1714,6 +1714,442 @@ def _mcs_ks_custom_step(item: dict) -> rx.Component:
     )
 
 
+def _gen_trace_result_row(r: dict) -> rx.Component:
+    return rx.box(
+        rx.hstack(
+            rx.text(r["index"], font_size="11px", color="var(--gray-a8)", width="20px", font_family=_MONO),
+            rx.cond(
+                r["url"] != "",
+                rx.link(r["title"], href=r["url"], font_size="12px", color=PRIMARY, flex="1", is_external=True),
+                rx.text(r["title"], font_size="12px", color="var(--gray-12)", flex="1"),
+            ),
+            rx.text(r["rank"], font_size="11px", color="var(--gray-a9)", font_family=_MONO, width="80px"),
+            rx.text(r["delta"], font_size="11px", color="var(--gray-a8)", font_family=_MONO, width="70px"),
+            rx.text(
+                rx.cond(r["snippet_len"] != "0", f"{r['snippet_len']} chars", "no content"),
+                font_size="10px", color="var(--gray-a7)", font_family=_MONO, width="80px",
+            ),
+            spacing="2",
+            align="center",
+            width="100%",
+            padding_y="2px",
+        ),
+        rx.cond(
+            r["snippet"] != "",
+            rx.box(
+                rx.text(
+                    r["snippet"],
+                    font_size="10.5px",
+                    color="var(--gray-a10)",
+                    white_space="pre-wrap",
+                    word_break="break-word",
+                    line_height="1.5",
+                    font_family=_MONO,
+                ),
+                padding="6px 10px",
+                margin_left="20px",
+                margin_top="2px",
+                margin_bottom="6px",
+                background="var(--gray-a2)",
+                border_left="2px solid var(--gray-a5)",
+                border_radius="4px",
+                max_height="180px",
+                overflow_y="auto",
+            ),
+        ),
+        width="100%",
+    )
+
+
+def _gen_trace_citation_row(c: dict) -> rx.Component:
+    return rx.box(
+        rx.hstack(
+            rx.badge(c["index"], color_scheme="green", variant="soft", size="1"),
+            rx.cond(
+                c["url"] != "",
+                rx.link(c["title"], href=c["url"], font_size="12px", color=PRIMARY, is_external=True),
+                rx.text(c["title"], font_size="12px", color="var(--gray-12)", font_weight="500"),
+            ),
+            spacing="2",
+            align="center",
+        ),
+        rx.cond(
+            c["snippet"] != "",
+            rx.box(
+                rx.text(
+                    c["snippet"],
+                    font_size="11px",
+                    color="var(--gray-a10)",
+                    font_style="italic",
+                    white_space="pre-wrap",
+                    word_break="break-word",
+                    line_height="1.5",
+                ),
+                padding_left="8px",
+                border_left="2px solid var(--green-a5)",
+                margin_top="3px",
+                margin_left="8px",
+                max_height="240px",
+                overflow_y="auto",
+            ),
+        ),
+        padding_y="4px",
+        width="100%",
+    )
+
+
+def _gen_trace_safety_chip(c: dict) -> rx.Component:
+    return rx.hstack(
+        rx.text(c["icon"], font_size="13px"),
+        rx.text(c["label"], font_size="11px", color="var(--gray-a10)"),
+        spacing="1",
+        align="center",
+        padding_x="8px",
+        padding_y="3px",
+        border_radius="6px",
+        background=rx.match(
+            c["tone"],
+            ("good", "var(--green-a3)"),
+            ("bad", "var(--red-a3)"),
+            "var(--gray-a3)",
+        ),
+    )
+
+
+def _gen_trace_endpoint_row(ep: rx.Var) -> rx.Component:
+    return rx.text(
+        ep,
+        font_size="11px",
+        color="var(--gray-a9)",
+        font_family=_MONO,
+        word_break="break-all",
+    )
+
+
+def _gen_trace_prompt_block(text) -> rx.Component:
+    """Render a long prompt body in a scrollable monospace box."""
+    return rx.box(
+        rx.text(
+            text,
+            font_size="10.5px",
+            color="var(--gray-11)",
+            font_family=_MONO,
+            white_space="pre-wrap",
+            word_break="break-word",
+            line_height="1.55",
+        ),
+        padding="10px 12px",
+        background="var(--gray-a2)",
+        border=f"1px solid {SURFACE_BORDER}",
+        border_radius="6px",
+        max_height="380px",
+        overflow_y="auto",
+    )
+
+
+def _mcs_generative_trace_card(trace: dict) -> rx.Component:
+    """Card surfacing one topic-level SearchAndSummarizeContent diagnostic record."""
+    return card(
+        rx.vstack(
+            # Header row
+            rx.hstack(
+                rx.badge(
+                    trace["attempt_label"],
+                    color_scheme=rx.cond(trace["is_retry"] != "", "amber", "green"),
+                    variant="soft",
+                    size="1",
+                ),
+                rx.icon("brain-circuit", size=14, color=PRIMARY),
+                rx.text(trace["topic"], font_size="13px", font_weight="600", color="var(--gray-12)", flex="1"),
+                _status_badge(trace["status_label"], trace["status_tone"]),
+                width="100%",
+                align="center",
+                spacing="2",
+            ),
+            # Retry reason caption — shown only on attempts after the first
+            rx.cond(
+                trace["retry_reason"] != "",
+                rx.hstack(
+                    rx.icon("rotate-ccw", size=12, color="var(--amber-9)"),
+                    rx.text(
+                        "Retried because previous attempt was:",
+                        font_size="11px",
+                        color="var(--amber-11)",
+                        font_style="italic",
+                    ),
+                    rx.code(trace["retry_reason"], font_size="11px"),
+                    spacing="2",
+                    align="center",
+                    width="100%",
+                ),
+            ),
+            # Query transformation chain
+            rx.box(
+                rx.text("Query transformation", font_size="11px", color="var(--gray-a8)", font_weight="700"),
+                rx.hstack(
+                    rx.text("🗣", font_size="12px"),
+                    rx.text(trace["user_msg"], font_size="12px", color="var(--gray-12)"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.cond(
+                    (trace["screened"] != "") & (trace["screened"] != trace["user_msg"]),
+                    rx.hstack(
+                        rx.text("🛡", font_size="12px"),
+                        rx.text(trace["screened"], font_size="12px", color="var(--gray-11)"),
+                        spacing="2", align="center",
+                    ),
+                ),
+                rx.cond(
+                    (trace["rewritten"] != "") & (trace["rewritten"] != trace["user_msg"]) & (trace["rewritten"] != trace["screened"]),
+                    rx.hstack(
+                        rx.text("✏️", font_size="12px"),
+                        rx.text(trace["rewritten"], font_size="12px", color="var(--gray-11)"),
+                        spacing="2", align="center",
+                    ),
+                ),
+                rx.cond(
+                    trace["keywords"] != "",
+                    rx.hstack(
+                        rx.text("🔑", font_size="12px"),
+                        rx.code(trace["keywords"], font_size="11px"),
+                        spacing="2", align="center",
+                    ),
+                ),
+                width="100%",
+                padding="8px",
+                background="var(--gray-a2)",
+                border_radius="6px",
+            ),
+            # Cost / models / backend
+            rx.hstack(
+                rx.vstack(
+                    rx.text("Rewrite", font_size="10px", color="var(--gray-a8)", font_weight="700"),
+                    rx.text(trace["rewrite_tokens"], font_size="12px", color="var(--gray-12)", font_family=_MONO),
+                    rx.cond(
+                        trace["rewrite_total_tokens"] != "",
+                        rx.text(f"total {trace['rewrite_total_tokens']}", font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                    ),
+                    rx.cond(
+                        trace["rewrite_cached_tokens"] != "",
+                        rx.text(f"cached {trace['rewrite_cached_tokens']}", font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                    ),
+                    rx.code(trace["rewrite_model"], font_size="10px"),
+                    spacing="0", align="start",
+                ),
+                rx.vstack(
+                    rx.text("Summarize", font_size="10px", color="var(--gray-a8)", font_weight="700"),
+                    rx.text(trace["summarize_tokens"], font_size="12px", color="var(--gray-12)", font_family=_MONO),
+                    rx.cond(
+                        trace["summarize_total_tokens"] != "",
+                        rx.text(f"total {trace['summarize_total_tokens']}", font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                    ),
+                    rx.cond(
+                        trace["summarize_cached_tokens"] != "",
+                        rx.text(f"cached {trace['summarize_cached_tokens']}", font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                    ),
+                    rx.code(trace["summarize_model"], font_size="10px"),
+                    spacing="0", align="start",
+                ),
+                rx.vstack(
+                    rx.text("Backend", font_size="10px", color="var(--gray-a8)", font_weight="700"),
+                    rx.text(trace["search_type"], font_size="12px", color="var(--gray-12)"),
+                    rx.text(f"{trace['result_count']} hits · {trace['citation_count']} citations",
+                           font_size="11px", color="var(--gray-a9)"),
+                    rx.cond(
+                        trace["shadow_label"] != "",
+                        rx.text(trace["shadow_label"], font_size="10px", color="var(--gray-a9)"),
+                    ),
+                    spacing="0", align="start",
+                ),
+                spacing="6",
+                width="100%",
+                wrap="wrap",
+            ),
+            # Anomaly callouts: zero-rank ranker, shadow lane mismatch, hypothetical-query insight
+            rx.cond(
+                trace["all_zero_rank"] != "",
+                rx.box(
+                    rx.hstack(
+                        rx.icon("triangle-alert", size=12, color="var(--amber-9)"),
+                        rx.text(
+                            "All search ranks are 0 — search ranker likely disabled or misconfigured against the backend.",
+                            font_size="11px", color="var(--amber-11)", font_weight="600",
+                        ),
+                        spacing="2", align="center",
+                    ),
+                    background="var(--amber-a3)",
+                    border="1px solid var(--amber-a5)",
+                    border_radius="6px",
+                    padding="6px 10px",
+                    width="100%",
+                ),
+            ),
+            rx.cond(
+                trace["shadow_anomaly"] != "",
+                rx.box(
+                    rx.hstack(
+                        rx.icon("triangle-alert", size=12, color="var(--amber-9)"),
+                        rx.text(
+                            "Parallel shadow search lane retrieved more results than the live lane — possible backend mismatch.",
+                            font_size="11px", color="var(--amber-11)", font_weight="600",
+                        ),
+                        spacing="2", align="center",
+                    ),
+                    background="var(--amber-a3)",
+                    border="1px solid var(--amber-a5)",
+                    border_radius="6px",
+                    padding="6px 10px",
+                    width="100%",
+                ),
+            ),
+            rx.cond(
+                trace["hypothetical_snippet"] != "",
+                rx.box(
+                    rx.text("LLM's hypothetical answer (what the rewriter expected to find)",
+                           font_size="11px", color="var(--gray-a8)", font_weight="700", margin_bottom="4px"),
+                    rx.text(
+                        trace["hypothetical_snippet"],
+                        font_size="11px", color="var(--gray-a10)", font_style="italic",
+                        white_space="pre-wrap", word_break="break-word",
+                    ),
+                    padding="6px 10px",
+                    background="var(--violet-a2)",
+                    border_left="2px solid var(--violet-a5)",
+                    border_radius="4px",
+                    width="100%",
+                ),
+            ),
+            # Safety chips
+            rx.hstack(
+                rx.foreach(trace["safety_chips"].to(list[dict]), _gen_trace_safety_chip),
+                spacing="2",
+                wrap="wrap",
+                width="100%",
+            ),
+            # Endpoints
+            rx.cond(
+                trace["endpoint_count"] != "0",
+                rx.box(
+                    rx.text("Knowledge endpoints queried", font_size="11px", color="var(--gray-a8)", font_weight="700", margin_bottom="4px"),
+                    rx.foreach(trace["endpoints"].to(list[str]), _gen_trace_endpoint_row),
+                    width="100%",
+                ),
+            ),
+            # Results table
+            rx.cond(
+                trace["result_count"] != "0",
+                rx.box(
+                    rx.text("Search results", font_size="11px", color="var(--gray-a8)", font_weight="700", margin_bottom="4px"),
+                    rx.foreach(trace["results"].to(list[dict]), _gen_trace_result_row),
+                    width="100%",
+                    padding="6px 0",
+                ),
+            ),
+            # Citations
+            rx.cond(
+                trace["citation_count"] != "0",
+                rx.box(
+                    rx.text("Citations cited in answer", font_size="11px", color="var(--gray-a8)", font_weight="700", margin_bottom="4px"),
+                    rx.foreach(trace["citations"].to(list[dict]), _gen_trace_citation_row),
+                    width="100%",
+                ),
+            ),
+            # Generated answer text (the actual LLM summary)
+            rx.cond(
+                trace["summary_text"] != "",
+                rx.accordion.root(
+                    rx.accordion.item(
+                        header=rx.hstack(
+                            rx.icon("sparkles", size=12, color=PRIMARY),
+                            rx.text(
+                                "Generated answer",
+                                font_size="11px",
+                                color="var(--gray-a8)",
+                                font_weight="700",
+                            ),
+                            spacing="2",
+                            align="center",
+                        ),
+                        content=rx.box(
+                            rx.markdown(trace["summary_text"]),
+                            font_size="12px",
+                            color="var(--gray-12)",
+                            line_height="1.55",
+                            padding="10px 12px",
+                            background="var(--green-a2)",
+                            border="1px solid var(--green-a4)",
+                            border_radius="6px",
+                            max_height="420px",
+                            overflow_y="auto",
+                        ),
+                        value="answer",
+                    ),
+                    type="single",
+                    collapsible=True,
+                    width="100%",
+                    variant="ghost",
+                ),
+            ),
+            # Search errors
+            rx.cond(
+                trace["search_errors"] != "",
+                rx.box(
+                    rx.hstack(
+                        rx.icon("triangle-alert", size=12, color="var(--red-9)"),
+                        rx.text(trace["search_errors"], font_size="12px", color="var(--red-11)"),
+                        spacing="2", align="center",
+                    ),
+                    background="var(--red-a2)",
+                    border="1px solid var(--red-a4)",
+                    border_radius="6px",
+                    padding="4px 8px",
+                ),
+            ),
+            # Deepest debug signal: full system prompts the LLM saw.
+            # Each prompt gets its own accordion so we can conditionally hide it
+            # without violating Accordion's children constraint.
+            rx.cond(
+                trace["rewrite_system_prompt"] != "",
+                rx.accordion.root(
+                    rx.accordion.item(
+                        header=rx.text("Query-rewrite system prompt", font_size="11px", color="var(--gray-a9)", font_weight="700"),
+                        content=_gen_trace_prompt_block(trace["rewrite_system_prompt"]),
+                        value="rewrite_prompt",
+                    ),
+                    type="single", collapsible=True, width="100%", variant="ghost",
+                ),
+            ),
+            rx.cond(
+                trace["summarize_system_prompt"] != "",
+                rx.accordion.root(
+                    rx.accordion.item(
+                        header=rx.text("Summarization system prompt + retrieved context", font_size="11px", color="var(--gray-a9)", font_weight="700"),
+                        content=_gen_trace_prompt_block(trace["summarize_system_prompt"]),
+                        value="summarize_prompt",
+                    ),
+                    type="single", collapsible=True, width="100%", variant="ghost",
+                ),
+            ),
+            rx.cond(
+                trace["rewrite_raw_response"] != "",
+                rx.accordion.root(
+                    rx.accordion.item(
+                        header=rx.text("Raw rewrite LLM response", font_size="11px", color="var(--gray-a9)", font_weight="700"),
+                        content=_gen_trace_prompt_block(trace["rewrite_raw_response"]),
+                        value="rewrite_raw",
+                    ),
+                    type="single", collapsible=True, width="100%", variant="ghost",
+                ),
+            ),
+            spacing="3",
+            width="100%",
+        ),
+        width="100%",
+        padding="14px",
+    )
+
+
 def _mcs_knowledge_panel() -> rx.Component:
     return rx.vstack(
         # KPI grid
@@ -1801,6 +2237,32 @@ def _mcs_knowledge_panel() -> rx.Component:
                     spacing="1",
                     width="100%",
                 ),
+                width="100%",
+            ),
+        ),
+        # Topic-level generative answer traces
+        rx.cond(
+            State.mcs_generative_traces.length() > 0,  # type: ignore[union-attr]
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("brain-circuit", size=16, color=PRIMARY),
+                    section_heading("Topic-Level Generative Answers"),
+                    rx.badge(
+                        State.mcs_generative_traces.length(),  # type: ignore[union-attr]
+                        color_scheme="green", variant="soft", size="1",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "SearchAndSummarizeContent invoked directly inside a topic — "
+                    "captures the full query rewriting chain, token usage, ranked results, citations, and safety pipeline.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                ),
+                rx.foreach(State.mcs_generative_traces, _mcs_generative_trace_card),
+                spacing="3",
                 width="100%",
             ),
         ),

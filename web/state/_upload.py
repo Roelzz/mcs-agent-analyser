@@ -903,6 +903,151 @@ class UploadMixin(rx.State, mixin=True):
             profile.ai_settings and profile.ai_settings.use_model_knowledge
         )
 
+        # Topic-level Search & Summarize diagnostic traces
+        traces = getattr(timeline, "generative_answer_traces", []) if timeline is not None else []
+        gen_rows: list[dict] = []
+        gen_topics: set[str] = set()
+        for idx, trace in enumerate(traces, 1):
+            if trace.topic_name:
+                gen_topics.add(trace.topic_name)
+            # Status badge
+            state_str = trace.gpt_answer_state or "Unknown"
+            if trace.triggered_fallback:
+                status_label = f"🔴 {state_str} (fallback)"
+                status_tone = "bad"
+            elif state_str.lower() == "answered":
+                status_label = f"🟢 {state_str}"
+                status_tone = "good"
+            elif state_str.lower() in {"noanswer", "notanswered", "noresult"}:
+                status_label = f"🟠 {state_str}"
+                status_tone = "warn"
+            else:
+                status_label = f"🟡 {state_str}"
+                status_tone = "info"
+
+            # Token totals
+            total_prompt = (trace.rewrite_prompt_tokens or 0) + (trace.summarize_prompt_tokens or 0)
+            total_completion = (trace.rewrite_completion_tokens or 0) + (trace.summarize_completion_tokens or 0)
+            tokens_label = f"{total_prompt} / {total_completion}" if (total_prompt or total_completion) else "—"
+
+            # Result rows — now include the full snippet so users can audit grounding
+            result_rows: list[dict] = []
+            for j, r in enumerate(trace.search_results, 1):
+                rank = r.rank_score
+                if rank is None:
+                    rank_label = "—"
+                elif rank >= 0.75:
+                    rank_label = f"🟢 {rank:.2f}"
+                elif rank >= 0.5:
+                    rank_label = f"🟡 {rank:.2f}"
+                else:
+                    rank_label = f"🟠 {rank:.2f}"
+                if r.verified_rank_score is not None and r.rank_score is not None:
+                    delta = r.verified_rank_score - r.rank_score
+                    delta_label = f"{'+' if delta >= 0 else ''}{delta:.3f}"
+                else:
+                    delta_label = "—"
+                snippet = (r.text or "").replace("\r", "")
+                result_rows.append({
+                    "index": str(j),
+                    "title": r.name or r.url or f"Result {j}",
+                    "url": r.url or "",
+                    "rank": rank_label,
+                    "delta": delta_label,
+                    "snippet": snippet,
+                    "snippet_len": str(len(snippet)),
+                })
+
+            # Detect "all zero rank" anomaly — strong signal that the search ranker
+            # is disabled or misconfigured against this tenant's backend.
+            ranks = [r.rank_score for r in trace.search_results if r.rank_score is not None]
+            all_zero_rank = bool(ranks) and all(s == 0 for s in ranks)
+            shadow_count = len(trace.shadow_search_results)
+            live_count = len(trace.search_results)
+            shadow_anomaly = shadow_count > live_count
+            shadow_label = (
+                f"🟠 live={live_count} · shadow={shadow_count} (parallel backend retrieved more)"
+                if shadow_anomaly
+                else f"🟢 live={live_count} · shadow={shadow_count}" if shadow_count else ""
+            )
+
+            # Citation rows — keep the full snippet; the UI wraps + scrolls
+            citation_rows: list[dict] = []
+            for j, c in enumerate(trace.citations, 1):
+                snippet = (c.snippet or "").replace("\r", "")
+                citation_rows.append({
+                    "index": str(j),
+                    "title": c.title or c.url or f"Citation {j}",
+                    "url": c.url or "",
+                    "snippet": snippet,
+                })
+
+            # Safety chips
+            safety_chips = [
+                {"label": "Moderation", "icon": "🟢" if trace.performed_content_moderation else "⚫",
+                 "tone": "good" if trace.performed_content_moderation else "neutral"},
+                {"label": "Provenance", "icon": "🟢" if trace.performed_content_provenance else "⚫",
+                 "tone": "good" if trace.performed_content_provenance else "neutral"},
+                {"label": "Confidential data", "icon": "🔴" if trace.contains_confidential else "🟢",
+                 "tone": "bad" if trace.contains_confidential else "good"},
+                {"label": "Fallback", "icon": "🔴" if trace.triggered_fallback else "🟢",
+                 "tone": "bad" if trace.triggered_fallback else "good"},
+            ]
+
+            attempt_label = (
+                f"↻ Retry #{trace.attempt_index}"
+                if trace.is_retry
+                else f"#{trace.attempt_index}"
+            )
+            gen_rows.append({
+                "index": str(idx),
+                "attempt_label": attempt_label,
+                "is_retry": "true" if trace.is_retry else "",
+                "retry_reason": trace.previous_attempt_state or "",
+                "topic": trace.topic_name or "—",
+                "status_label": status_label,
+                "status_tone": status_tone,
+                "user_msg": trace.original_message or trace.triggering_user_message or "—",
+                "screened": trace.screened_message or "",
+                "rewritten": trace.rewritten_message or "",
+                "keywords": trace.rewritten_keywords or "",
+                "rewrite_model": trace.rewrite_model or "—",
+                "summarize_model": trace.summarize_model or "—",
+                "tokens_label": tokens_label,
+                "rewrite_tokens": (
+                    f"{trace.rewrite_prompt_tokens or 0} / {trace.rewrite_completion_tokens or 0}"
+                    if trace.rewrite_prompt_tokens or trace.rewrite_completion_tokens else "—"
+                ),
+                "summarize_tokens": (
+                    f"{trace.summarize_prompt_tokens or 0} / {trace.summarize_completion_tokens or 0}"
+                    if trace.summarize_prompt_tokens or trace.summarize_completion_tokens else "—"
+                ),
+                "search_type": trace.search_type or "—",
+                "result_count": str(len(trace.search_results)),
+                "citation_count": str(len(trace.citations)),
+                "endpoint_count": str(len(trace.endpoints)),
+                "endpoints": trace.endpoints,
+                "results": result_rows,
+                "citations": citation_rows,
+                "safety_chips": safety_chips,
+                "summary_text": trace.summary_text or "",
+                "search_errors": "; ".join(trace.search_errors) if trace.search_errors else "",
+                "rewrite_total_tokens": str(trace.rewrite_total_tokens) if trace.rewrite_total_tokens else "",
+                "summarize_total_tokens": str(trace.summarize_total_tokens) if trace.summarize_total_tokens else "",
+                "rewrite_cached_tokens": str(trace.rewrite_cached_tokens) if trace.rewrite_cached_tokens else "",
+                "summarize_cached_tokens": str(trace.summarize_cached_tokens) if trace.summarize_cached_tokens else "",
+                "all_zero_rank": "true" if all_zero_rank else "",
+                "shadow_label": shadow_label,
+                "shadow_anomaly": "true" if shadow_anomaly else "",
+                "rewrite_system_prompt": trace.rewrite_system_prompt or "",
+                "summarize_system_prompt": trace.summarize_system_prompt or "",
+                "rewrite_raw_response": trace.rewrite_raw_response or "",
+                "hypothetical_snippet": trace.hypothetical_snippet_query or "",
+            })
+
+        self.mcs_generative_traces = gen_rows  # type: ignore[attr-defined]
+        self.mcs_generative_topics = sorted(gen_topics)  # type: ignore[attr-defined]
+
     # ── Topics tab data extraction ───────────────────────────────────────────
 
     def _populate_topics_data(self, profile, timeline) -> None:
@@ -1503,6 +1648,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_knowledge_searches = []  # type: ignore[attr-defined]
         self.mcs_knowledge_custom_steps = []  # type: ignore[attr-defined]
         self.mcs_knowledge_general_enabled = False  # type: ignore[attr-defined]
+        self.mcs_generative_traces = []  # type: ignore[attr-defined]
+        self.mcs_generative_topics = []  # type: ignore[attr-defined]
         self.mcs_topics_kpis = []  # type: ignore[attr-defined]
         self.mcs_topics_summary = []  # type: ignore[attr-defined]
         self.mcs_topics_user_rows = []  # type: ignore[attr-defined]
