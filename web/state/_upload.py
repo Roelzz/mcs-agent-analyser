@@ -73,9 +73,7 @@ class UploadMixin(rx.State, mixin=True):
             if len(files) == 1 and exts[0] == ".zip":
                 if paste_text:
                     # Zip already contains a dialog.json — paste is ignored.
-                    self.upload_error = (
-                        "Note: pasted JSON ignored — using the dialog.json inside the zip instead."
-                    )
+                    self.upload_error = "Note: pasted JSON ignored — using the dialog.json inside the zip instead."
                 self.upload_stage = "Extracting and parsing bot export..."
                 yield
                 await self._process_bot_zip(files)
@@ -85,9 +83,7 @@ class UploadMixin(rx.State, mixin=True):
                 if has_yaml and has_json:
                     if paste_text:
                         # Two-file upload already has its own json — paste ignored.
-                        self.upload_error = (
-                            "Note: pasted JSON ignored — using the uploaded dialog.json instead."
-                        )
+                        self.upload_error = "Note: pasted JSON ignored — using the uploaded dialog.json instead."
                     self.upload_stage = "Parsing bot configuration..."
                     yield
                     await self._process_bot_files(files)
@@ -161,12 +157,8 @@ class UploadMixin(rx.State, mixin=True):
         yield
 
         # If a single yml file is also uploaded, run the combined pipeline.
-        yml_files = [
-            f for f in (files or []) if (f.filename or "").lower().endswith((".yml", ".yaml"))
-        ]
-        non_yml_files = [
-            f for f in (files or []) if not (f.filename or "").lower().endswith((".yml", ".yaml"))
-        ]
+        yml_files = [f for f in (files or []) if (f.filename or "").lower().endswith((".yml", ".yaml"))]
+        non_yml_files = [f for f in (files or []) if not (f.filename or "").lower().endswith((".yml", ".yaml"))]
 
         try:
             if len(yml_files) == 1 and not non_yml_files:
@@ -829,6 +821,8 @@ class UploadMixin(rx.State, mixin=True):
                 "state": t.state,
                 "description": (t.description or t.model_description or "—")[:200],
                 "type_color": _type_colors.get(t.tool_type or "", "gray"),
+                "link_id": t.display_name,
+                "row_id": f"row-{t.display_name}",
                 "settings_rows": rows,
                 "has_settings": "true" if rows else "",
             }
@@ -1389,6 +1383,10 @@ class UploadMixin(rx.State, mixin=True):
 
         # User topics detail (UI renders the structured settings panel inside
         # a per-row accordion).
+        # `link_id` is the identity used by Conversation Flow → Topics deep
+        # links (matches `link_target_id` in flow rows). `row_id` is the
+        # DOM id used by the scroll-into-view JS — kept derived so the JS
+        # only needs to know the link_id with the `row-` prefix.
         self.mcs_topics_user_rows = [  # type: ignore[attr-defined]
             {
                 "name": c.display_name,
@@ -1398,6 +1396,8 @@ class UploadMixin(rx.State, mixin=True):
                 if c.trigger_queries
                 else "—",
                 "description": (c.description or "—")[:150],
+                "link_id": c.schema_name,
+                "row_id": f"row-{c.schema_name}",
                 **_settings_fields(c),
             }
             for c in user_topics
@@ -1411,6 +1411,8 @@ class UploadMixin(rx.State, mixin=True):
                 "tool_type": c.tool_type or c.action_kind or "—",
                 "connector": c.connector_display_name or "—",
                 "mode": c.connection_mode or "—",
+                "link_id": c.display_name,
+                "row_id": f"row-{c.display_name}",
                 **_settings_fields(c),
             }
             for c in orch_topics
@@ -1423,6 +1425,8 @@ class UploadMixin(rx.State, mixin=True):
                 "schema": c.schema_name,
                 "state": c.state,
                 "trigger": c.trigger_kind or "—",
+                "link_id": c.schema_name,
+                "row_id": f"row-{c.schema_name}",
                 **_settings_fields(c),
             }
             for c in system_topics
@@ -1565,7 +1569,8 @@ class UploadMixin(rx.State, mixin=True):
         """Extract structured data for the Conversation detail panel."""
         from models import EventType
 
-        # Metadata
+        # Metadata + page-header surface
+        self.mcs_conversation_id = timeline.conversation_id or ""  # type: ignore[attr-defined]
         self.mcs_conv_metadata = [  # type: ignore[attr-defined]
             {"property": "Bot Name", "value": timeline.bot_name or "—"},
             {"property": "Conversation ID", "value": timeline.conversation_id or "—"},
@@ -2044,6 +2049,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_model_recommendation = ""  # type: ignore[attr-defined]
         self.mcs_model_catalogue = []  # type: ignore[attr-defined]
         self.mcs_conv_metadata = []  # type: ignore[attr-defined]
+        self.mcs_conversation_id = ""  # type: ignore[attr-defined]
+        self.mcs_highlight_target_id = ""  # type: ignore[attr-defined]
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
@@ -2106,6 +2113,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_credit_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_custom_findings = []  # type: ignore[attr-defined]
         self.mcs_conv_metadata = []  # type: ignore[attr-defined]
+        self.mcs_conversation_id = ""  # type: ignore[attr-defined]
+        self.mcs_highlight_target_id = ""  # type: ignore[attr-defined]
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]

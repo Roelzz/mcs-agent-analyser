@@ -5543,3 +5543,131 @@ def test_build_timeline_classifies_int_role_dialog_json():
     assert len(user_events) == 1
     assert "teach a course" in user_events[0].summary
     assert len(bot_events) == 2
+
+
+# --- Conversation Flow → tab deep-link metadata ---
+
+
+def test_flow_topic_step_resolves_to_topics_tab():
+    """STEP_TRIGGERED on an AdaptiveDialog topic should carry a deep-link
+    target pointing at the Topics tab, keyed by schema_name."""
+    profile = _make_profile_with_triggers()
+    timeline = _make_timeline_with_steps()
+    items = build_conversation_flow_items(timeline, profile=profile)
+    triggered = next(i for i in items if i.get("event_type") == "StepTriggered")
+    assert triggered["link_target_tab"] == "topics"
+    assert triggered["link_target_id"] == "cr123_billing"  # schema_name
+
+
+def test_flow_tool_step_resolves_to_tools_tab():
+    """STEP_TRIGGERED on a TaskDialog tool should carry a deep-link target
+    pointing at the Tools tab, keyed by display_name (which is what
+    `mcs_tools_rows[].name` uses)."""
+    profile = BotProfile(
+        display_name="ToolBot",
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Equippy",
+                schema_name="rrs.tool.Equippy",
+                dialog_kind="TaskDialog",
+                tool_type="ConnectedAgent",
+            ),
+        ],
+    )
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "ask Equippy"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="Equippy",
+                summary="Step start: Equippy",
+                state="inProgress",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline, profile=profile)
+    triggered = next(i for i in items if i.get("event_type") == "StepTriggered")
+    assert triggered["link_target_tab"] == "tools"
+    assert triggered["link_target_id"] == "Equippy"
+
+
+def test_flow_knowledge_search_resolves_to_knowledge_tab():
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.KNOWLEDGE_SEARCH,
+                summary='Knowledge search: ["ks_a"]',
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    ks = next(i for i in items if i.get("event_type") == "KnowledgeSearch")
+    assert ks["link_target_tab"] == "knowledge"
+
+
+def test_flow_generative_answer_resolves_to_knowledge_with_topic_id():
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.GENERATIVE_ANSWER,
+                topic_name="CT 7500",
+                summary="Generative answer for CT 7500",
+                state="completed",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    gen = next(i for i in items if i.get("event_type") == "GenerativeAnswer")
+    assert gen["link_target_tab"] == "knowledge"
+    assert gen["link_target_id"] == "gen:CT 7500"
+
+
+def test_flow_messages_have_no_link_target():
+    """User/Bot message rows are passive — no detail surface to deep-link to."""
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "hi"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: hello",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    for item in items:
+        assert item["link_target_tab"] == ""
+        assert item["link_target_id"] == ""
+
+
+def test_flow_unknown_topic_falls_back_to_no_link():
+    """When `topic_name` doesn't resolve to a profile component, no link
+    target is emitted (rather than a broken target)."""
+    profile = _make_profile_with_triggers()
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                topic_name="GhostTopic",  # not in profile
+                summary="Step start: GhostTopic",
+                state="inProgress",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline, profile=profile)
+    triggered = next(i for i in items if i.get("event_type") == "StepTriggered")
+    assert triggered["link_target_tab"] == ""
+    assert triggered["link_target_id"] == ""

@@ -41,6 +41,50 @@ def _build_component_name_map(profile: BotProfile) -> dict[str, str]:
     return name_map
 
 
+def _build_dialog_link_resolver(profile: "BotProfile | None"):
+    """Returns a function `topic_name -> (link_target_tab, link_target_id)`.
+
+    Used by Conversation Flow rows to deep-link to the Topics or Tools tab.
+    Resolution rules:
+      - `dialog_kind == "TaskDialog"` or `"AgentDialog"` → Tools tab, keyed
+        by display_name (matches `mcs_tools_rows[].name`).
+      - any other DialogComponent → Topics tab, keyed by schema_name
+        (matches `mcs_topics_*_rows[].schema`).
+      - non-dialog or unmatched → empty target.
+
+    Returns `("", "")` when profile is None or the name can't be resolved.
+    """
+    if profile is None:
+        return lambda _name: ("", "")
+
+    by_key: dict = {}
+    for c in profile.components:
+        if c.kind != "DialogComponent":
+            continue
+        dn_lower = (c.display_name or "").lower().strip()
+        if dn_lower:
+            by_key.setdefault(dn_lower, c)
+        if c.schema_name:
+            sl = c.schema_name.lower()
+            by_key.setdefault(sl, c)
+            suffix = c.schema_name.rsplit(".", 1)[-1].lower()
+            by_key.setdefault(suffix, c)
+
+    def resolve(topic_name: str) -> tuple[str, str]:
+        if not topic_name:
+            return ("", "")
+        comp = by_key.get(topic_name.lower().strip())
+        if comp is None:
+            return ("", "")
+        if comp.dialog_kind in ("TaskDialog", "AgentDialog"):
+            # Tools tab keys by display_name (see _populate_tools_data).
+            return ("tools", comp.display_name or "")
+        # Topics tab keys by schema_name (see _populate_topics_data).
+        return ("topics", comp.schema_name or comp.display_name or "")
+
+    return resolve
+
+
 def _resolve_score_for_topic(
     topic_name: str,
     scores: dict[str, float],
@@ -149,6 +193,7 @@ def _best_trigger_phrase(user_text: str, topic_name: str, components: list) -> s
         if m["display_name"] == topic_name:
             return m.get("best_phrase", "")
     return ""
+
 
 from .knowledge import render_knowledge_search_section
 from .profile import (
@@ -312,6 +357,7 @@ def build_conversation_flow_items(
     if profile is not None:
         score_lookup = _build_trigger_score_lookup(timeline, profile)
         name_map = _build_component_name_map(profile)
+    dialog_link = _build_dialog_link_resolver(profile)
 
     # Extra detail keys required by rx.foreach (must be uniform across all dicts)
     _detail_defaults = {
@@ -325,6 +371,11 @@ def build_conversation_flow_items(
         "trigger_score": "",
         "trigger_phrase": "",
         "trigger_score_color": "gray",
+        # Deep-link target — empty when the row has no actionable destination.
+        # Populated for events that name a topic / tool / knowledge action so
+        # the Conversation Flow row can hyperlink into the relevant tab.
+        "link_target_tab": "",
+        "link_target_id": "",
     }
 
     latest_user_idx: int | None = None
@@ -417,7 +468,11 @@ def build_conversation_flow_items(
             trigger_score_str = ""
             trigger_phrase_str = ""
             trigger_color = "gray"
-            if ev.event_type in {EventType.STEP_TRIGGERED, EventType.STEP_FINISHED} and latest_user_idx is not None and score_lookup:
+            if (
+                ev.event_type in {EventType.STEP_TRIGGERED, EventType.STEP_FINISHED}
+                and latest_user_idx is not None
+                and score_lookup
+            ):
                 topic = ev.topic_name or ""
                 scores = score_lookup.get(latest_user_idx, {})
                 score = _resolve_score_for_topic(topic, scores, name_map)
@@ -425,10 +480,33 @@ def build_conversation_flow_items(
                     trigger_score_str = _format_trigger_score(score)
                     trigger_color = _trigger_score_color(score)
                     if profile is not None:
-                        user_text = (timeline.events[latest_user_idx].summary or "").replace("User: ", "", 1).strip().strip('"')
+                        user_text = (
+                            (timeline.events[latest_user_idx].summary or "").replace("User: ", "", 1).strip().strip('"')
+                        )
                         if user_text:
                             resolved_name = name_map.get(topic.lower().strip(), topic)
                             trigger_phrase_str = _best_trigger_phrase(user_text, resolved_name, profile.components)
+
+            # Deep-link target for events that point at a concrete artifact:
+            # - dialog-name-bearing events (step trigger/finish, topic
+            #   trace/redirect, condition eval) resolve to topics or tools.
+            # - knowledge searches and generative answers route to the
+            #   Knowledge tab. Generative answers carry the topic_name as a
+            #   hint so the destination can scroll to the right card.
+            link_tab, link_id = "", ""
+            if ev.event_type in (
+                EventType.STEP_TRIGGERED,
+                EventType.STEP_FINISHED,
+                EventType.DIALOG_TRACING,
+                EventType.DIALOG_REDIRECT,
+                EventType.ACTION_TRIGGER_EVAL,
+            ):
+                link_tab, link_id = dialog_link(ev.topic_name or "")
+            elif ev.event_type == EventType.KNOWLEDGE_SEARCH:
+                link_tab = "knowledge"
+            elif ev.event_type == EventType.GENERATIVE_ANSWER:
+                link_tab = "knowledge"
+                link_id = f"gen:{(ev.topic_name or '').strip()}" if ev.topic_name else ""
 
             items.append(
                 {
@@ -454,6 +532,8 @@ def build_conversation_flow_items(
                     "trigger_score": trigger_score_str,
                     "trigger_phrase": trigger_phrase_str,
                     "trigger_score_color": trigger_color,
+                    "link_target_tab": link_tab,
+                    "link_target_id": link_id,
                 }
             )
 
@@ -537,12 +617,13 @@ def _pair_message_turns(timeline: ConversationTimeline) -> list[dict]:
 def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[str, list[dict]]:
     """Compute KPIs, event mix, latency bands, and highlights from a timeline."""
     user_msgs = sum(1 for e in timeline.events if e.event_type == EventType.USER_MESSAGE)
-    bot_msgs = sum(1 for e in timeline.events if e.event_type in (EventType.BOT_MESSAGE, EventType.ACTION_SEND_ACTIVITY))
+    bot_msgs = sum(
+        1 for e in timeline.events if e.event_type in (EventType.BOT_MESSAGE, EventType.ACTION_SEND_ACTIVITY)
+    )
     errors = sum(1 for e in timeline.events if e.event_type == EventType.ERROR)
     orchestrator_count = sum(1 for e in timeline.events if e.event_type == EventType.ORCHESTRATOR_THINKING)
-    searches = (
-        sum(1 for e in timeline.events if e.event_type == EventType.KNOWLEDGE_SEARCH)
-        + len(timeline.custom_search_steps)
+    searches = sum(1 for e in timeline.events if e.event_type == EventType.KNOWLEDGE_SEARCH) + len(
+        timeline.custom_search_steps
     )
 
     started_steps = [e for e in timeline.events if e.event_type == EventType.STEP_TRIGGERED]
@@ -564,20 +645,19 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
 
     idle_gaps = _compute_idle_gaps(timeline.events)
     search_durations = [
-        d for d in (
-            _active_duration(p, idle_gaps)
-            for p in timeline.phases if p.duration_ms > 0 and _is_search_phase(p)
-        ) if d > 0
+        d
+        for d in (_active_duration(p, idle_gaps) for p in timeline.phases if p.duration_ms > 0 and _is_search_phase(p))
+        if d > 0
     ]
-    orchestrator_durations = [
-        p.duration_ms for p in timeline.phases if p.duration_ms > 0 and _is_orchestrator_phase(p)
-    ]
+    orchestrator_durations = [p.duration_ms for p in timeline.phases if p.duration_ms > 0 and _is_orchestrator_phase(p)]
     step_durations = [
-        d for d in (
+        d
+        for d in (
             _active_duration(p, idle_gaps)
             for p in timeline.phases
             if p.duration_ms > 0 and not _is_search_phase(p) and not _is_orchestrator_phase(p)
-        ) if d > 0
+        )
+        if d > 0
     ]
 
     # KPI values
@@ -615,16 +695,18 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
     for label, count, color, durations in mix_raw:
         stats = _duration_stats(durations)
         bar_color = _severity_color(stats["avg_ms"]) if stats else "var(--gray-a5)"
-        event_mix.append({
-            "label": label,
-            "count": str(count),
-            "color": color,
-            "bar_color": bar_color,
-            "pct": f"{(count / mix_total) * 100:.1f}%",
-            "min_fmt": stats["min_fmt"] if stats else "",
-            "max_fmt": stats["max_fmt"] if stats else "",
-            "avg_fmt": stats["avg_fmt"] if stats else "",
-        })
+        event_mix.append(
+            {
+                "label": label,
+                "count": str(count),
+                "color": color,
+                "bar_color": bar_color,
+                "pct": f"{(count / mix_total) * 100:.1f}%",
+                "min_fmt": stats["min_fmt"] if stats else "",
+                "max_fmt": stats["max_fmt"] if stats else "",
+                "avg_fmt": stats["avg_fmt"] if stats else "",
+            }
+        )
 
     # Latency bands — green→yellow→amber→red severity scale
     bands = [
@@ -728,9 +810,7 @@ def build_topic_lifecycles(timeline: ConversationTimeline) -> list[dict]:
                 )
 
         duration_ms = _ms_between_iso(trig["start"], fin.get("end"))
-        child_summary = " → ".join(
-            f"{ce['type']}: {ce['summary']}" for ce in child_events
-        ) if child_events else ""
+        child_summary = " → ".join(f"{ce['type']}: {ce['summary']}" for ce in child_events) if child_events else ""
 
         # Merge has_recommendations from trigger or finish
         has_recs = trig.get("has_recommendations") or fin.get("has_recommendations")
@@ -762,11 +842,11 @@ def build_topic_lifecycles(timeline: ConversationTimeline) -> list[dict]:
     for ev in timeline.events:
         if ev.event_type != EventType.ACTION_BEGIN_DIALOG:
             continue
-        raw = (ev.summary or "")
+        raw = ev.summary or ""
         # Strip common prefixes
         for prefix in ("Call to ", "Begin "):
             if raw.startswith(prefix):
-                raw = raw[len(prefix):]
+                raw = raw[len(prefix) :]
                 break
         target = raw.strip()
         if not target or target in existing_names:
@@ -900,16 +980,12 @@ def build_trigger_match_items(
         for m in capped:
             pct = f"{m['score']:.0%}"
             norm_match = _normalize_topic_name(m["display_name"])
-            is_selected = (
-                norm_selected == norm_match
-                or norm_selected in norm_match
-                or norm_match in norm_selected
-            )
+            is_selected = norm_selected == norm_match or norm_selected in norm_match or norm_match in norm_selected
             if is_selected and not selected_line_added:
-                lines.insert(0, f"✓ {m['display_name']} ({pct}) — \"{m['best_phrase']}\"")
+                lines.insert(0, f'✓ {m["display_name"]} ({pct}) — "{m["best_phrase"]}"')
                 selected_line_added = True
             else:
-                lines.append(f"· {m['display_name']} ({pct}) — \"{m['best_phrase']}\"")
+                lines.append(f'· {m["display_name"]} ({pct}) — "{m["best_phrase"]}"')
 
         # Insert blank separator after selected line
         if selected_line_added and len(lines) > 1:
@@ -965,32 +1041,38 @@ def build_orchestrator_decision_timeline(
         if ev.event_type == EventType.USER_MESSAGE:
             latest_user_text = (ev.summary or "").replace("User: ", "", 1).strip()
             latest_user_idx = idx
-            items.append({
-                "kind": "user_message",
-                "text": latest_user_text,
-                "timestamp": _format_clock(ev.timestamp),
-            })
+            items.append(
+                {
+                    "kind": "user_message",
+                    "text": latest_user_text,
+                    "timestamp": _format_clock(ev.timestamp),
+                }
+            )
             continue
 
         if ev.event_type == EventType.PLAN_RECEIVED_DEBUG:
             ask = ev.orchestrator_ask or ""
             if ask and ask != latest_user_text:
-                items.append({
-                    "kind": "interpreted",
-                    "ask": ask,
-                    "timestamp": _format_clock(ev.timestamp),
-                })
+                items.append(
+                    {
+                        "kind": "interpreted",
+                        "ask": ask,
+                        "timestamp": _format_clock(ev.timestamp),
+                    }
+                )
             continue
 
         if ev.event_type == EventType.PLAN_RECEIVED:
             steps_str = ", ".join(ev.plan_steps) if ev.plan_steps else (ev.summary or "")
-            items.append({
-                "kind": "plan",
-                "steps": steps_str,
-                "is_final": str(ev.is_final_plan) if ev.is_final_plan is not None else "",
-                "plan_identifier": ev.plan_identifier or "",
-                "timestamp": _format_clock(ev.timestamp),
-            })
+            items.append(
+                {
+                    "kind": "plan",
+                    "steps": steps_str,
+                    "is_final": str(ev.is_final_plan) if ev.is_final_plan is not None else "",
+                    "plan_identifier": ev.plan_identifier or "",
+                    "timestamp": _format_clock(ev.timestamp),
+                }
+            )
             continue
 
         if ev.event_type in {EventType.STEP_TRIGGERED, EventType.STEP_FINISHED}:
@@ -1026,39 +1108,47 @@ def build_orchestrator_decision_timeline(
                         resolved_name = name_map.get(topic.lower().strip(), topic)
                         trigger_phrase_str = _best_trigger_phrase(latest_user_text, resolved_name, profile.components)
 
-            items.append({
-                "kind": "step",
-                "event_subtype": "triggered" if ev.event_type == EventType.STEP_TRIGGERED else "finished",
-                "topic_name": ev.topic_name or "",
-                "thought": ev.thought or "",
-                "has_recommendations": has_recs,
-                "used_outputs": used_outputs,
-                "status": status,
-                "duration": duration,
-                "timestamp": _format_clock(ev.timestamp),
-                "plan_identifier": ev.plan_identifier or "",
-                "step_type": step_type,
-                "error": error,
-                "trigger_score": trigger_score_str,
-                "trigger_phrase": trigger_phrase_str,
-                "trigger_score_color": trigger_color,
-            })
+            items.append(
+                {
+                    "kind": "step",
+                    "event_subtype": "triggered" if ev.event_type == EventType.STEP_TRIGGERED else "finished",
+                    "topic_name": ev.topic_name or "",
+                    "thought": ev.thought or "",
+                    "has_recommendations": has_recs,
+                    "used_outputs": used_outputs,
+                    "status": status,
+                    "duration": duration,
+                    "timestamp": _format_clock(ev.timestamp),
+                    "plan_identifier": ev.plan_identifier or "",
+                    "step_type": step_type,
+                    "error": error,
+                    "trigger_score": trigger_score_str,
+                    "trigger_phrase": trigger_phrase_str,
+                    "trigger_score_color": trigger_color,
+                }
+            )
             continue
 
-        if ev.event_type in {EventType.ACTION_HTTP_REQUEST, EventType.ACTION_BEGIN_DIALOG, EventType.ACTION_TRIGGER_EVAL}:
+        if ev.event_type in {
+            EventType.ACTION_HTTP_REQUEST,
+            EventType.ACTION_BEGIN_DIALOG,
+            EventType.ACTION_TRIGGER_EVAL,
+        }:
             action_type_map = {
                 EventType.ACTION_HTTP_REQUEST: "HTTP Request",
                 EventType.ACTION_BEGIN_DIALOG: "Begin Dialog",
                 EventType.ACTION_TRIGGER_EVAL: "Condition Eval",
             }
-            items.append({
-                "kind": "action",
-                "action_type": action_type_map[ev.event_type],
-                "topic_name": ev.topic_name or "",
-                "summary": (ev.summary or "")[:120],
-                "error": ev.error or "",
-                "timestamp": _format_clock(ev.timestamp),
-            })
+            items.append(
+                {
+                    "kind": "action",
+                    "action_type": action_type_map[ev.event_type],
+                    "topic_name": ev.topic_name or "",
+                    "summary": (ev.summary or "")[:120],
+                    "error": ev.error or "",
+                    "timestamp": _format_clock(ev.timestamp),
+                }
+            )
             continue
 
         if ev.event_type == EventType.ORCHESTRATOR_THINKING:
@@ -1066,21 +1156,25 @@ def build_orchestrator_decision_timeline(
 
             dur_match = _re_orch.search(r"\((\d+)ms\)", ev.summary or "")
             duration = f"{dur_match.group(1)}ms" if dur_match else ""
-            items.append({
-                "kind": "orchestrator_thinking",
-                "summary": (ev.summary or "").replace("Orchestrator: ", "", 1)[:120],
-                "duration": duration,
-                "timestamp": _format_clock(ev.timestamp),
-            })
+            items.append(
+                {
+                    "kind": "orchestrator_thinking",
+                    "summary": (ev.summary or "").replace("Orchestrator: ", "", 1)[:120],
+                    "duration": duration,
+                    "timestamp": _format_clock(ev.timestamp),
+                }
+            )
             continue
 
         if ev.event_type == EventType.PLAN_FINISHED:
             is_cancelled = "true" if "cancelled=True" in (ev.summary or "") else "false"
-            items.append({
-                "kind": "plan_finished",
-                "is_cancelled": is_cancelled,
-                "timestamp": _format_clock(ev.timestamp),
-            })
+            items.append(
+                {
+                    "kind": "plan_finished",
+                    "is_cancelled": is_cancelled,
+                    "timestamp": _format_clock(ev.timestamp),
+                }
+            )
 
     return items
 
@@ -1098,9 +1192,7 @@ def build_plan_evolution(
 
     Only returns data when >1 plan exists in the conversation.
     """
-    plan_events = [
-        ev for ev in timeline.events if ev.event_type == EventType.PLAN_RECEIVED
-    ]
+    plan_events = [ev for ev in timeline.events if ev.event_type == EventType.PLAN_RECEIVED]
     if len(plan_events) <= 1:
         return []
 
@@ -1151,17 +1243,19 @@ def build_plan_evolution(
                 if scored_parts:
                     step_scores_str = ", ".join(scored_parts)
 
-        results.append({
-            "plan_index": str(idx + 1),
-            "plan_identifier": ev.plan_identifier or "",
-            "is_final": str(ev.is_final_plan) if ev.is_final_plan is not None else "",
-            "steps": ", ".join(ev.plan_steps) if ev.plan_steps else "",
-            "added_steps": added,
-            "removed_steps": removed,
-            "change_summary": change_summary,
-            "timestamp": _format_clock(ev.timestamp),
-            "step_scores": step_scores_str,
-        })
+        results.append(
+            {
+                "plan_index": str(idx + 1),
+                "plan_identifier": ev.plan_identifier or "",
+                "is_final": str(ev.is_final_plan) if ev.is_final_plan is not None else "",
+                "steps": ", ".join(ev.plan_steps) if ev.plan_steps else "",
+                "added_steps": added,
+                "removed_steps": removed,
+                "change_summary": change_summary,
+                "timestamp": _format_clock(ev.timestamp),
+                "step_scores": step_scores_str,
+            }
+        )
 
     return results
 
@@ -1270,7 +1364,7 @@ def render_trigger_analysis_md(
     for item in items:
         user_msg = item.get("user_message", "")
         selected = item.get("selected_topic", "—")
-        lines.append(f"### \"{user_msg}\"\n")
+        lines.append(f'### "{user_msg}"\n')
         lines.append(f"**Selected topic:** {selected}\n")
         ask = item.get("orchestrator_ask", "")
         if ask:

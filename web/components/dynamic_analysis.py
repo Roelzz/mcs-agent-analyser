@@ -443,6 +443,7 @@ def _has_flow_details(item: dict) -> rx.Var:
 def _mcs_flow_event(item: dict) -> rx.Component:
     is_error = item["tone"] == "error"
     is_trace = item["tone"] == "trace"
+    is_linked = item["link_target_tab"] != ""
 
     return rx.cond(
         is_trace,
@@ -451,6 +452,10 @@ def _mcs_flow_event(item: dict) -> rx.Component:
             rx.hstack(
                 rx.icon("git-branch", size=12, color="var(--gray-a8)"),
                 rx.text(item["summary"], font_size="11px", color="var(--gray-a8)"),
+                rx.cond(
+                    is_linked,
+                    rx.icon("arrow-up-right", size=10, color="var(--green-a9)"),
+                ),
                 rx.cond(
                     item["timestamp"] != "",
                     rx.text(item["timestamp"], font_size="10px", color="var(--gray-a6)"),
@@ -462,6 +467,8 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 border=f"1px solid {SURFACE_BORDER}",
                 border_radius="20px",
                 padding="4px 10px",
+                cursor=rx.cond(is_linked, "pointer", "default"),
+                on_click=State.set_dynamic_link_target(item["link_target_tab"], item["link_target_id"]),
             ),
             width="100%",
         ),
@@ -494,6 +501,10 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                             ),
                             _trigger_score_badge(item["trigger_score"], item["trigger_score_color"]),
                             rx.cond(
+                                is_linked,
+                                rx.icon("arrow-up-right", size=12, color="var(--green-a10)"),
+                            ),
+                            rx.cond(
                                 item["timestamp"] != "",
                                 rx.text(item["timestamp"], font_size="11px", color="var(--gray-a8)"),
                                 rx.box(),
@@ -521,6 +532,14 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 border=rx.cond(is_error, "1px solid var(--red-a5)", "1px solid var(--green-a4)"),
                 border_radius="12px",
                 padding="10px 12px",
+                cursor=rx.cond(is_linked, "pointer", "default"),
+                on_click=State.set_dynamic_link_target(item["link_target_tab"], item["link_target_id"]),
+                _hover=rx.cond(
+                    is_linked,
+                    {"border_color": "var(--green-a8)", "background": "var(--green-a3)"},
+                    {},
+                ),
+                transition="border-color 0.15s ease, background 0.15s ease",
             ),
             width="100%",
         ),
@@ -1206,6 +1225,7 @@ def _mcs_profile_panel() -> rx.Component:
 
 
 def _mcs_tool_row(item: dict) -> rx.Component:
+    is_target = State.mcs_highlight_target_id == item["link_id"]
     return rx.vstack(
         rx.grid(
             rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
@@ -1250,6 +1270,10 @@ def _mcs_tool_row(item: dict) -> rx.Component:
         _settings_explained_accordion(item),
         spacing="0",
         width="100%",
+        id=item["row_id"],
+        border_left=rx.cond(is_target, "3px solid var(--green-9)", "3px solid transparent"),
+        background=rx.cond(is_target, "var(--green-a2)", "transparent"),
+        transition="border-color 0.2s ease, background 0.2s ease",
     )
 
 
@@ -3374,6 +3398,20 @@ def _settings_explained_accordion(item: dict) -> rx.Component:
     )
 
 
+def _highlight_row_style(item: dict) -> dict:
+    """Return highlight style props when this row is the current deep-link
+    target. The Conversation Flow → tab linker sets
+    `mcs_highlight_target_id` to the row's identity (matched against the
+    pre-computed `link_id` field on the row dict), and this helper paints a
+    green border + soft glow so the user can see which row was targeted."""
+    is_target = State.mcs_highlight_target_id == item["link_id"]
+    return {
+        "border_left": rx.cond(is_target, "3px solid var(--green-9)", "3px solid transparent"),
+        "background": rx.cond(is_target, "var(--green-a2)", "transparent"),
+        "transition": "border-color 0.2s ease, background 0.2s ease",
+    }
+
+
 def _mcs_topics_user_row(item: dict) -> rx.Component:
     return rx.vstack(
         _grid_row(
@@ -3408,6 +3446,8 @@ def _mcs_topics_user_row(item: dict) -> rx.Component:
         _settings_explained_accordion(item),
         spacing="0",
         width="100%",
+        id=item["row_id"],
+        **_highlight_row_style(item),
     )
 
 
@@ -3431,6 +3471,8 @@ def _mcs_topics_orch_row(item: dict) -> rx.Component:
         _settings_explained_accordion(item),
         spacing="0",
         width="100%",
+        id=item["row_id"],
+        **_highlight_row_style(item),
     )
 
 
@@ -3453,6 +3495,8 @@ def _mcs_topics_system_row(item: dict) -> rx.Component:
         _settings_explained_accordion(item),
         spacing="0",
         width="100%",
+        id=item["row_id"],
+        **_highlight_row_style(item),
     )
 
 
@@ -4642,13 +4686,36 @@ def dynamic_analysis_viewer() -> rx.Component:
                     letter_spacing="0.08em",
                     text_transform="uppercase",
                 ),
-                rx.heading(
-                    State.report_title,
-                    size="5",
-                    font_family=_MONO,
-                    font_weight="600",
-                    color="var(--gray-12)",
-                    letter_spacing="-0.3px",
+                rx.hstack(
+                    rx.heading(
+                        State.report_title,
+                        size="5",
+                        font_family=_MONO,
+                        font_weight="600",
+                        color="var(--gray-12)",
+                        letter_spacing="-0.3px",
+                    ),
+                    rx.cond(
+                        State.mcs_conversation_id != "",
+                        rx.hstack(
+                            rx.text(
+                                "—",
+                                size="3",
+                                color="var(--gray-a7)",
+                                font_family=_MONO,
+                            ),
+                            rx.code(
+                                State.mcs_conversation_id,
+                                font_size="12px",
+                                color="var(--gray-a10)",
+                                font_family=_MONO,
+                            ),
+                            spacing="2",
+                            align="center",
+                        ),
+                    ),
+                    spacing="3",
+                    align="center",
                 ),
                 spacing="1",
                 align="start",
