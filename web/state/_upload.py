@@ -68,8 +68,14 @@ class UploadMixin(rx.State, mixin=True):
         try:
             names = [f.filename for f in files]
             exts = [Path(n).suffix.lower() for n in names]
+            paste_text = self.paste_json.strip()
 
             if len(files) == 1 and exts[0] == ".zip":
+                if paste_text:
+                    # Zip already contains a dialog.json — paste is ignored.
+                    self.upload_error = (
+                        "Note: pasted JSON ignored — using the dialog.json inside the zip instead."
+                    )
                 self.upload_stage = "Extracting and parsing bot export..."
                 yield
                 await self._process_bot_zip(files)
@@ -77,6 +83,11 @@ class UploadMixin(rx.State, mixin=True):
                 has_yaml = any(e in (".yml", ".yaml") for e in exts)
                 has_json = any(e == ".json" for e in exts)
                 if has_yaml and has_json:
+                    if paste_text:
+                        # Two-file upload already has its own json — paste ignored.
+                        self.upload_error = (
+                            "Note: pasted JSON ignored — using the uploaded dialog.json instead."
+                        )
                     self.upload_stage = "Parsing bot configuration..."
                     yield
                     await self._process_bot_files(files)
@@ -84,15 +95,36 @@ class UploadMixin(rx.State, mixin=True):
                     self.upload_error = (
                         f"Two files uploaded but expected botContent.yml + dialog.json. Got: {', '.join(names)}"
                     )
+            elif len(files) == 1 and exts[0] in (".yml", ".yaml") and paste_text:
+                # The combined case — uploaded yml + pasted dialog json.
+                # Validate the paste before running the pipeline so a bad
+                # paste produces a useful error rather than a parser crash.
+                try:
+                    json.loads(paste_text)
+                except json.JSONDecodeError as e:
+                    self.upload_error = f"Invalid pasted JSON: {e}"
+                    return
+                self.upload_stage = "Parsing bot configuration + pasted transcript..."
+                yield
+                await self._process_yml_plus_paste(files[0], paste_text)
+                self.paste_json = ""
             elif len(files) == 1 and exts[0] == ".json":
                 self.upload_stage = "Parsing transcript..."
                 yield
                 await self._process_transcript(files)
+            elif len(files) == 1 and exts[0] in (".yml", ".yaml"):
+                # Single yml without a paired dialog — surface the same error
+                # as before but point at the paste path so the user sees the
+                # combine option.
+                self.upload_error = (
+                    "botContent.yml uploaded but no dialog.json — pair it with "
+                    "a pasted transcript JSON below, or upload both files together."
+                )
             else:
                 self.upload_error = (
                     "Could not detect upload type. Accepted formats:\n"
                     "- 1 .zip file (bot export)\n"
-                    "- botContent.yml + dialog.json (2 files)\n"
+                    "- botContent.yml + dialog.json (2 files, OR one yml + a pasted transcript)\n"
                     "- 1 .json file (transcript)"
                 )
         except Exception as e:
@@ -107,7 +139,12 @@ class UploadMixin(rx.State, mixin=True):
                 yield rx.redirect("/analysis/dynamic")
 
     @rx.event
-    async def handle_paste_submit(self):
+    async def handle_paste_submit(self, files: list[rx.UploadFile]):
+        """Triggered by the "Paste & Analyse" button. Receives any files
+        currently held in the upload drop zone alongside `self.paste_json`,
+        so a user who dropped a `botContent.yml` and pasted `dialog.json`
+        can click EITHER button to get the full analysis.
+        """
         text = self.paste_json.strip()
         if not text:
             self.upload_error = "Paste field is empty."
@@ -121,27 +158,43 @@ class UploadMixin(rx.State, mixin=True):
 
         self.is_processing = True
         self.upload_error = ""
-        self.upload_stage = "Parsing transcript..."
         yield
 
+        # If a single yml file is also uploaded, run the combined pipeline.
+        yml_files = [
+            f for f in (files or []) if (f.filename or "").lower().endswith((".yml", ".yaml"))
+        ]
+        non_yml_files = [
+            f for f in (files or []) if not (f.filename or "").lower().endswith((".yml", ".yaml"))
+        ]
+
         try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                json_path = Path(tmpdir) / "pasted_transcript.json"
-                json_path.write_text(text, encoding="utf-8")
-
-                activities, metadata = parse_transcript_json(json_path)
-                timeline = build_timeline(activities, {})
-                title = "Pasted Transcript"
-                self.report_markdown = render_transcript_report(title, timeline, metadata)  # type: ignore[attr-defined]
-                self.report_title = title  # type: ignore[attr-defined]
-                self.report_source = "upload"  # type: ignore[attr-defined]
-                self.lint_report_markdown = ""  # type: ignore[attr-defined]
-                self.bot_profile_json = ""  # type: ignore[attr-defined]
-                self.report_custom_findings = []  # type: ignore[attr-defined]
-                _clear_bot_profile()
-
-                self._populate_dynamic_sections(None, timeline, "transcript")
+            if len(yml_files) == 1 and not non_yml_files:
+                self.upload_stage = "Parsing bot configuration + pasted transcript..."
+                yield
+                await self._process_yml_plus_paste(yml_files[0], text)
                 self.paste_json = ""
+            else:
+                # Transcript-only fallback (legacy paste behaviour).
+                self.upload_stage = "Parsing transcript..."
+                yield
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    json_path = Path(tmpdir) / "pasted_transcript.json"
+                    json_path.write_text(text, encoding="utf-8")
+
+                    activities, metadata = parse_transcript_json(json_path)
+                    timeline = build_timeline(activities, {})
+                    title = "Pasted Transcript"
+                    self.report_markdown = render_transcript_report(title, timeline, metadata)  # type: ignore[attr-defined]
+                    self.report_title = title  # type: ignore[attr-defined]
+                    self.report_source = "upload"  # type: ignore[attr-defined]
+                    self.lint_report_markdown = ""  # type: ignore[attr-defined]
+                    self.bot_profile_json = ""  # type: ignore[attr-defined]
+                    self.report_custom_findings = []  # type: ignore[attr-defined]
+                    _clear_bot_profile()
+
+                    self._populate_dynamic_sections(None, timeline, "transcript")
+                    self.paste_json = ""
         except Exception as e:
             logger.error(f"Paste processing failed: {e}")
             self.upload_error = f"Processing failed: {e}"
@@ -152,6 +205,36 @@ class UploadMixin(rx.State, mixin=True):
             await self._refresh_community_count()  # type: ignore[attr-defined]
             if self.report_markdown:  # type: ignore[attr-defined]
                 yield rx.redirect("/analysis/dynamic")
+
+    def _finalize_full_analysis(self, profile, timeline) -> None:
+        """Apply the shared post-parse bookkeeping for any "full" (profile +
+        timeline) upload path: render the report, persist the profile, run
+        custom rules, take an instruction-drift snapshot, and populate the
+        dynamic-tab sections. Used by `_process_bot_zip`,
+        `_process_bot_files`, and `_process_yml_plus_paste` so the three
+        full-analysis paths cannot drift apart.
+        """
+        self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
+        self.report_title = profile.display_name  # type: ignore[attr-defined]
+        self.report_source = "upload"  # type: ignore[attr-defined]
+        self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
+        _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
+        self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
+
+        instruction_diff = save_snapshot(profile)
+        if instruction_diff and instruction_diff.is_significant:
+            self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
+
+        self._populate_dynamic_sections(profile, timeline, "snapshot")
+
+        if instruction_diff and instruction_diff.is_significant:
+            self.mcs_profile_instruction_drift = {  # type: ignore[attr-defined]
+                "change_ratio": f"{instruction_diff.change_ratio:.0%}",
+                "unified_diff": instruction_diff.unified_diff or "",
+                "is_significant": "true",
+            }
+        else:
+            self.mcs_profile_instruction_drift = {}  # type: ignore[attr-defined]
 
     async def _process_bot_zip(self, files: list[rx.UploadFile]):
         if len(files) != 1:
@@ -186,27 +269,7 @@ class UploadMixin(rx.State, mixin=True):
             profile, schema_lookup = parse_yaml(yaml_files[0])
             activities = parse_dialog_json(json_files[0])
             timeline = build_timeline(activities, schema_lookup)
-            self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
-            self.report_title = profile.display_name  # type: ignore[attr-defined]
-            self.report_source = "upload"  # type: ignore[attr-defined]
-            self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
-            _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
-            self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
-
-            instruction_diff = save_snapshot(profile)
-            if instruction_diff and instruction_diff.is_significant:
-                self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
-
-            self._populate_dynamic_sections(profile, timeline, "snapshot")
-
-            if instruction_diff and instruction_diff.is_significant:
-                self.mcs_profile_instruction_drift = {  # type: ignore[attr-defined]
-                    "change_ratio": f"{instruction_diff.change_ratio:.0%}",
-                    "unified_diff": instruction_diff.unified_diff or "",
-                    "is_significant": "true",
-                }
-            else:
-                self.mcs_profile_instruction_drift = {}  # type: ignore[attr-defined]
+            self._finalize_full_analysis(profile, timeline)
 
     async def _process_bot_files(self, files: list[rx.UploadFile]):
         if len(files) != 2:
@@ -236,27 +299,23 @@ class UploadMixin(rx.State, mixin=True):
             profile, schema_lookup = parse_yaml(yml_path)
             activities = parse_dialog_json(json_path)
             timeline = build_timeline(activities, schema_lookup)
-            self.report_markdown = render_report(profile, timeline)  # type: ignore[attr-defined]
-            self.report_title = profile.display_name  # type: ignore[attr-defined]
-            self.report_source = "upload"  # type: ignore[attr-defined]
-            self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
-            _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
-            self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
+            self._finalize_full_analysis(profile, timeline)
 
-            instruction_diff = save_snapshot(profile)
-            if instruction_diff and instruction_diff.is_significant:
-                self.report_markdown = render_instruction_drift(instruction_diff) + "\n" + self.report_markdown  # type: ignore[attr-defined]
+    async def _process_yml_plus_paste(self, yml_file: rx.UploadFile, paste_text: str):
+        """Run the full bot+timeline pipeline using an uploaded `botContent.yml`
+        and a pasted `dialog.json` string. Mirrors `_process_bot_files` but
+        reads the JSON from text rather than a second uploaded file."""
+        yml_data = await yml_file.read()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yml_path = Path(tmpdir) / (yml_file.filename or "botContent.yml")
+            yml_path.write_bytes(yml_data)
+            json_path = Path(tmpdir) / "pasted_dialog.json"
+            json_path.write_text(paste_text, encoding="utf-8")
 
-            self._populate_dynamic_sections(profile, timeline, "snapshot")
-
-            if instruction_diff and instruction_diff.is_significant:
-                self.mcs_profile_instruction_drift = {  # type: ignore[attr-defined]
-                    "change_ratio": f"{instruction_diff.change_ratio:.0%}",
-                    "unified_diff": instruction_diff.unified_diff or "",
-                    "is_significant": "true",
-                }
-            else:
-                self.mcs_profile_instruction_drift = {}  # type: ignore[attr-defined]
+            profile, schema_lookup = parse_yaml(yml_path)
+            activities = parse_dialog_json(json_path)
+            timeline = build_timeline(activities, schema_lookup)
+            self._finalize_full_analysis(profile, timeline)
 
     async def _process_transcript(self, files: list[rx.UploadFile]):
         if len(files) != 1:
