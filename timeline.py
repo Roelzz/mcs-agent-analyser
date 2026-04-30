@@ -90,16 +90,45 @@ def _epoch_to_iso(epoch_ms: int | float | None) -> str | None:
         return None
 
 
-def _get_timestamp(activity: dict) -> str | None:
-    """Get best available timestamp from activity."""
-    ts = activity.get("timestamp")
-    if ts:
-        return ts
-    channel_data = activity.get("channelData", {}) or {}
-    received_at = channel_data.get("webchat:internal:received-at")
-    if received_at:
-        return _epoch_to_iso(received_at)
+def _coerce_timestamp(value: object) -> str | None:
+    """Normalise a timestamp field to an ISO string.
+
+    Different dialog.json shapes carry timestamps as ISO strings, Unix
+    epoch seconds, or epoch milliseconds. Some Dataverse-style transcripts
+    also pair a `timestamp` (seconds, int) with a `timestampMs` (ms, int).
+    Always emit an ISO string so `TimelineEvent.timestamp: str | None`
+    validates regardless of source format.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        return s if s else None
+    if isinstance(value, bool):  # bools are ints in Python; reject them
+        return None
+    if isinstance(value, (int, float)):
+        # Heuristic: ≥10^12 is milliseconds, otherwise seconds. Year 2001 in
+        # seconds is ≈10^9; year 33658 in seconds is ≈10^12, well past anything
+        # we'd see as a real epoch-seconds value.
+        epoch_ms = value if value >= 1e12 else value * 1000
+        return _epoch_to_iso(epoch_ms)
     return None
+
+
+def _get_timestamp(activity: dict) -> str | None:
+    """Get the best available timestamp from an activity, normalised to ISO.
+
+    Preference order:
+      1. `timestampMs` (high-precision millisecond field, when present)
+      2. `timestamp`   (ISO string OR epoch seconds/ms — coerced)
+      3. `channelData["webchat:internal:received-at"]` (ms epoch fallback)
+    """
+    for key in ("timestampMs", "timestamp"):
+        coerced = _coerce_timestamp(activity.get(key))
+        if coerced:
+            return coerced
+    channel_data = activity.get("channelData") or {}
+    return _coerce_timestamp(channel_data.get("webchat:internal:received-at"))
 
 
 def _extract_adaptive_card_text(attachments: list) -> str:
