@@ -16,6 +16,12 @@ RUN uv run reflex export --no-zip
 RUN useradd -m appuser
 USER appuser
 
-EXPOSE 2009 8000
+EXPOSE 2009
+
+# Reflex 0.9.x serves frontend + backend on a single port in prod and
+# provides a built-in `/_health` endpoint that returns 200 with JSON
+# liveness for db/redis (both are 'NA' here since neither is used).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS "http://localhost:${PORT:-2009}/_health" || exit 1
 
 CMD ["uv", "run", "reflex", "run", "--env", "prod"]

@@ -1,1 +1,1 @@
-web: reflex run --env prod --single-port
+web: reflex run --env prod

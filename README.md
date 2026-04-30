@@ -438,27 +438,46 @@ For admins reviewing network access or firewall rules:
 
 > **Recommendation:** Self-host this in your own tenant or run it locally. Bot configuration data and conversation transcripts are sensitive — keep them under your control.
 
-Single-port mode — one exposed port serves everything.
+Reflex 0.9.x serves the frontend and backend on a single port. The repo ships a `Dockerfile`, `Procfile`, and `nixpacks.toml`, so most platforms work out of the box.
 
-### Nixpacks (Coolify / Railway)
+### Coolify (recommended)
 
-Configure these env vars in your platform:
+This repo is built to deploy cleanly on [Coolify](https://coolify.io/).
 
-```bash
-REFLEX_ENV=prod
-PORT=2009
-USERS=inspector:underthehood
-OPENAI_API_KEY=sk-...        # optional, enables Lint for OpenAI-model bots
-ANTHROPIC_API_KEY=sk-ant-... # optional, enables Lint for Anthropic-model bots
-```
+1. **Create a new application** in Coolify pointing at this Git repo.
+2. **Build pack:** choose **Dockerfile** (recommended for Reflex apps — `nixpacks.toml` is also present if you prefer Nixpacks).
+3. **Port:** `2009` (matches the `PORT` env var below). Coolify maps this internal port to your public domain.
+4. **Healthcheck path:** `/_health` (Reflex's built-in liveness endpoint, returns HTTP 200). The `Dockerfile` already declares an internal `HEALTHCHECK` against the same path; Coolify can use that directly or probe via HTTP.
+5. **Environment variables** (paste into Coolify's environment editor):
 
-The `Procfile` runs `reflex run --env prod --single-port`. Set `REFLEX_ENV=prod` so `rxconfig.py` uses the single `PORT` for both frontend and backend.
+    ```bash
+    REFLEX_ENV=prod
+    PORT=2009
+    USERS=admin:choose-a-strong-password   # comma-separated user:pass list
+    LOG_LEVEL=INFO
+    OPENAI_API_KEY=sk-...                  # optional, enables Lint for OpenAI-model bots
+    ANTHROPIC_API_KEY=sk-ant-...           # optional, enables Lint for Anthropic-model bots
+    CUSTOM_RULES_FILE=data/default_rules.yaml   # optional, override path to rules YAML
+    ```
 
-### Docker
+6. **Persistent volume** (recommended): mount **`/app/data`** so that
+    - `data/bot_profile.json` (last-uploaded profile, used when reopening reports)
+    - `data/instruction_versions.json` (drift snapshots between deploys)
+
+   survive redeploys. **Gotcha:** `data/default_rules.yaml` ships in the image; if you mount over `/app/data` with an empty volume on first deploy, the default rules will disappear. Either copy `default_rules.yaml` into the volume after the first deploy, or set `CUSTOM_RULES_FILE` to a path outside `/app/data`.
+
+7. **Deploy.** First deploy can take a few minutes (Reflex compiles the frontend during `reflex export` in the Dockerfile build).
+
+### Nixpacks (Railway / Coolify Nixpacks mode)
+
+Same env vars as above. The `Procfile` runs `reflex run --env prod`. Set `REFLEX_ENV=prod` so `rxconfig.py` collapses frontend and backend onto the single `PORT`.
+
+### Docker (manual)
 
 ```bash
 docker build -t agent-analyser .
 docker run -p 2009:2009 --env-file .env agent-analyser
+curl -fsS http://localhost:2009/_health   # 200 OK with JSON liveness payload
 ```
 
 Make sure `.env` contains at least `REFLEX_ENV=prod` and `PORT=2009`.
