@@ -138,6 +138,12 @@ class DynamicMixin(rx.State, mixin=True):
 
     # ── Conversation tab (structured) ────────────────────────────────────────
     mcs_conv_metadata: list[dict] = []
+    # Conversation GUID surfaced in the page header next to the agent name.
+    mcs_conversation_id: str = ""
+    # Deep-link target id used by Conversation Flow → other tabs. Each tab
+    # row whose identity matches this opens its accordion + scrolls into
+    # view. Cleared next time another link is clicked.
+    mcs_highlight_target_id: str = ""
     mcs_conv_phases: list[dict] = []
     mcs_conv_event_log: list[dict] = []
     mcs_conv_errors: list[str] = []
@@ -226,3 +232,40 @@ class DynamicMixin(rx.State, mixin=True):
     @rx.event
     def set_mcs_analyse_tab(self, tab: str):
         self.mcs_analyse_tab = tab
+
+    @rx.event
+    def set_dynamic_link_target(self, tab: str, target_id: str):
+        """Conversation Flow → tab deep-link. Sets the active tab and the
+        highlight target id, then yields a small JS that:
+
+        1. Scrolls the destination row into view (`id="row-<target_id>"`).
+        2. Auto-opens the row's first closed Settings accordion so the user
+           lands directly on the artifact's detail.
+
+        The auto-open uses Radix's `data-state="closed"` attribute on the
+        accordion trigger button — a no-op if the accordion is already open.
+        Tab switch happens before the script runs so the destination DOM
+        exists.
+        """
+        if tab:
+            self.mcs_analyse_tab = tab
+        self.mcs_highlight_target_id = target_id or ""
+        if not target_id:
+            return
+        # Escape single quotes for safe interpolation into the JS literal.
+        safe = target_id.replace("'", "\\'")
+        return rx.call_script(
+            "setTimeout(function(){"
+            f"  var el = document.getElementById('row-{safe}');"
+            "  if (!el) { return; }"
+            "  el.scrollIntoView({block:'center', behavior:'smooth'});"
+            "  var trig = el.querySelector('[data-state=\"closed\"]');"
+            "  if (trig) { trig.click(); }"
+            "}, 120);"
+        )
+
+    @rx.event
+    def clear_dynamic_link_target(self):
+        """Clear the highlight after the user navigates away or starts a
+        fresh action."""
+        self.mcs_highlight_target_id = ""
