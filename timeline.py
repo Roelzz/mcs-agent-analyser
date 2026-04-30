@@ -131,6 +131,47 @@ def _get_timestamp(activity: dict) -> str | None:
     return _coerce_timestamp(channel_data.get("webchat:internal:received-at"))
 
 
+def _normalize_role(value: object) -> str:
+    """Normalise an activity's `from.role` to the string vocabulary the
+    timeline classifier expects: ``"bot"``, ``"user"``, or ``""``.
+
+    Different `dialog.json` shapes encode the role differently:
+
+    - **Bot-Framework-style** dialog exports (and the chat-bot test transcripts
+      Coolify users tend to paste): integer enum where ``0`` = bot and
+      ``1`` = user.
+    - **Modern transcript exports**: already a string (``"bot"``, ``"user"``,
+      ``"channel"``).
+    - **Some shapes**: stringified int (``"0"``, ``"1"``).
+
+    `parse_transcript_json` (transcript.py) already does this normalisation
+    for the transcript-only upload path, but `parse_dialog_json` (parser.py)
+    did not — meaning bot/user messages were silently dropped from the
+    timeline when the dialog.json carried int-encoded roles. Doing the
+    normalisation here, in the single consumer, fixes both parser paths
+    in one place.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        # bool is a subclass of int — guard against it
+        return ""
+    if isinstance(value, int):
+        if value == 0:
+            return "bot"
+        if value == 1:
+            return "user"
+        return ""
+    if isinstance(value, str):
+        s = value.strip()
+        if s == "0":
+            return "bot"
+        if s == "1":
+            return "user"
+        return s
+    return ""
+
+
 def _extract_adaptive_card_text(attachments: list) -> str:
     """Extract readable text from Adaptive Card attachments."""
     texts: list[str] = []
@@ -897,7 +938,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
     for activity in activities:
         act_type = activity.get("type", "")
         from_info = activity.get("from", {}) or {}
-        role = from_info.get("role", "")
+        role = _normalize_role(from_info.get("role"))
         timestamp = _get_timestamp(activity)
         channel_data = activity.get("channelData", {}) or {}
         position = channel_data.get("webchat:internal:position", 0)

@@ -72,7 +72,7 @@ from renderer.sections import (
     build_topic_lifecycles,
     build_trigger_match_items,
 )
-from timeline import _coerce_timestamp, _get_timestamp, build_timeline, estimate_credits
+from timeline import _coerce_timestamp, _get_timestamp, _normalize_role, build_timeline, estimate_credits
 from transcript import parse_transcript_json
 
 import instruction_store
@@ -5471,3 +5471,75 @@ def test_build_timeline_accepts_int_timestamp_dialog_json():
     # Timestamps on emitted events should be ISO strings, not raw ints.
     for ev in timeline.events:
         assert ev.timestamp is None or isinstance(ev.timestamp, str)
+
+
+# --- Role coercion (Bot-Framework int-enum role handling) ---
+
+
+def test_normalize_role_int_enum():
+    """Bot-Framework dialog exports encode role as an int enum: 0 = bot,
+    1 = user. Must coerce so downstream string comparisons work."""
+    assert _normalize_role(0) == "bot"
+    assert _normalize_role(1) == "user"
+
+
+def test_normalize_role_stringified_int():
+    """Some shapes encode roles as stringified ints. Be defensive."""
+    assert _normalize_role("0") == "bot"
+    assert _normalize_role("1") == "user"
+
+
+def test_normalize_role_string_passthrough():
+    assert _normalize_role("user") == "user"
+    assert _normalize_role("bot") == "bot"
+    assert _normalize_role("channel") == "channel"
+
+
+def test_normalize_role_handles_none_and_unknown():
+    assert _normalize_role(None) == ""
+    assert _normalize_role(2) == ""  # unknown int enum
+    assert _normalize_role("") == ""
+
+
+def test_normalize_role_rejects_bool():
+    """`bool` is a subclass of `int` in Python — guard against `True` being
+    treated as `1` (user) and `False` as `0` (bot)."""
+    assert _normalize_role(True) == ""
+    assert _normalize_role(False) == ""
+
+
+def test_build_timeline_classifies_int_role_dialog_json():
+    """Regression: a dialog.json with integer roles (Bot-Framework convention)
+    must classify message activities as USER_MESSAGE / BOT_MESSAGE, not
+    silently drop them. This is the bug from the user's `[EXTERNAL] Answer
+    Retract Issue/Test via CB/dialog.json` — 10 messages produced 0 user
+    and 0 bot timeline events because `role == "user"` failed against
+    integer 1."""
+    from models import EventType
+
+    activities = [
+        {
+            "type": "message",
+            "from": {"id": "bot", "role": 0},
+            "text": "Hello, how can I help?",
+            "timestamp": 1776832966,
+        },
+        {
+            "type": "message",
+            "from": {"id": "user1", "role": 1},
+            "text": "I want to teach a course outside work.",
+            "timestamp": 1776832969,
+        },
+        {
+            "type": "message",
+            "from": {"id": "bot", "role": 0},
+            "text": "Teaching outside work counts as a side activity.",
+            "timestamp": 1776832982,
+        },
+    ]
+    timeline = build_timeline(activities, schema_lookup={})
+    user_events = [ev for ev in timeline.events if ev.event_type == EventType.USER_MESSAGE]
+    bot_events = [ev for ev in timeline.events if ev.event_type == EventType.BOT_MESSAGE]
+    assert len(user_events) == 1
+    assert "teach a course" in user_events[0].summary
+    assert len(bot_events) == 2

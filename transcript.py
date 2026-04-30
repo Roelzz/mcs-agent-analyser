@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from pathlib import Path
 import json
 
@@ -31,14 +30,15 @@ def parse_transcript_json(path: Path) -> tuple[list[dict], dict]:
             from_info["role"] = "user"
         activity["from"] = from_info
 
-        # 2. Convert epoch seconds to ISO string
-        ts = activity.get("timestamp")
-        if isinstance(ts, (int, float)) and ts > 0:
-            try:
-                dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-                activity["timestamp"] = dt.isoformat()
-            except (ValueError, OSError):
-                pass
+        # 2. Coerce numeric timestamps (seconds OR milliseconds) to ISO.
+        # Reuses the canonical helper from `timeline` so seconds-vs-ms is
+        # handled correctly; the previous inline implementation assumed
+        # seconds and produced year-58000 dates for ms-encoded timestamps.
+        from timeline import _coerce_timestamp
+
+        ts_iso = _coerce_timestamp(activity.get("timestamp"))
+        if ts_iso:
+            activity["timestamp"] = ts_iso
 
         # 3. Synthetic position
         channel_data = activity.get("channelData") or {}
