@@ -147,14 +147,25 @@ def upload_form() -> rx.Component:
                         cursor="pointer",
                         font_weight="500",
                     ),
-                    # Divider
-                    rx.hstack(
-                        rx.separator(size="4", color_scheme="gray"),
-                        rx.text("or", size="2", color="var(--gray-a8)", white_space="nowrap"),
-                        rx.separator(size="4", color_scheme="gray"),
+                    # Divider — copy nudges that the two surfaces combine
+                    rx.vstack(
+                        rx.hstack(
+                            rx.separator(size="4", color_scheme="gray"),
+                            rx.text("or", size="2", color="var(--gray-a8)", white_space="nowrap"),
+                            rx.separator(size="4", color_scheme="gray"),
+                            width="100%",
+                            align="center",
+                            spacing="3",
+                        ),
+                        rx.text(
+                            "Paste a transcript JSON below. Pair it with a botContent.yml above for a full analysis.",
+                            size="1",
+                            color="var(--gray-a8)",
+                            text_align="center",
+                            font_style="italic",
+                        ),
+                        spacing="2",
                         width="100%",
-                        align="center",
-                        spacing="3",
                     ),
                     # Paste section
                     rx.text_area(
@@ -182,7 +193,7 @@ def upload_form() -> rx.Component:
                                 spacing="2",
                             ),
                         ),
-                        on_click=State.handle_paste_submit,
+                        on_click=State.handle_paste_submit(rx.upload_files(upload_id=UPLOAD_ID)),
                         width="100%",
                         size="3",
                         color_scheme="green",
