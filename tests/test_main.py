@@ -72,7 +72,7 @@ from renderer.sections import (
     build_topic_lifecycles,
     build_trigger_match_items,
 )
-from timeline import build_timeline, estimate_credits
+from timeline import _coerce_timestamp, _get_timestamp, build_timeline, estimate_credits
 from transcript import parse_transcript_json
 
 import instruction_store
@@ -5396,3 +5396,78 @@ def test_intent_recognition_event_parsed():
     assert ev.topic_name == "Billing"
     assert ev.intent_score == 0.85
     assert "85%" in ev.summary
+
+
+# --- Timestamp coercion (Dataverse-style int epoch handling) ---
+
+
+def test_coerce_timestamp_iso_string_passthrough():
+    """ISO strings are kept verbatim — no reformatting."""
+    assert _coerce_timestamp("2026-04-22T04:42:46Z") == "2026-04-22T04:42:46Z"
+
+
+def test_coerce_timestamp_epoch_seconds_int():
+    """Some Dataverse-style dialog.json shapes carry `timestamp: 1776832970`
+    as an integer Unix epoch (seconds). Must coerce to an ISO string so
+    `TimelineEvent.timestamp: str | None` validates."""
+    iso = _coerce_timestamp(1776832970)
+    assert iso is not None
+    assert iso.startswith("2026-")
+    assert iso.endswith("+00:00")
+
+
+def test_coerce_timestamp_epoch_milliseconds_int():
+    """`timestampMs: 1776833516102` (milliseconds) should produce the same
+    instant, not 1000× later."""
+    iso = _coerce_timestamp(1776833516102)
+    assert iso is not None
+    assert iso.startswith("2026-")
+
+
+def test_coerce_timestamp_handles_none_and_empty():
+    assert _coerce_timestamp(None) is None
+    assert _coerce_timestamp("") is None
+    assert _coerce_timestamp("   ") is None
+
+
+def test_coerce_timestamp_rejects_bool():
+    """`bool` is a subclass of `int` in Python — guard against it being
+    treated as an epoch value."""
+    assert _coerce_timestamp(True) is None
+    assert _coerce_timestamp(False) is None
+
+
+def test_get_timestamp_prefers_timestampms_over_int_seconds():
+    """When both `timestamp` (seconds, int) and `timestampMs` (ms, int) are
+    present (the Dataverse pattern), the millisecond-precision value wins."""
+    activity = {"timestamp": 1776833516, "timestampMs": 1776833516102}
+    iso = _get_timestamp(activity)
+    assert iso is not None
+    assert iso.startswith("2026-")
+
+
+def test_build_timeline_accepts_int_timestamp_dialog_json():
+    """Regression: a dialog.json with integer epoch timestamps (the user's
+    bug — `Input should be a valid string [type=string_type, input_value=
+    1776832970, input_type=int]`) must build a timeline without raising."""
+    activities = [
+        {
+            "timestamp": 1776832970,
+            "timestampMs": 1776832970000,
+            "type": "message",
+            "from": {"id": "user1", "role": "user"},
+            "text": "hi",
+        },
+        {
+            "timestamp": 1776832975,
+            "timestampMs": 1776832975000,
+            "type": "message",
+            "from": {"id": "bot", "role": "bot"},
+            "text": "hello back",
+        },
+    ]
+    timeline = build_timeline(activities, schema_lookup={})
+    assert timeline is not None
+    # Timestamps on emitted events should be ISO strings, not raw ints.
+    for ev in timeline.events:
+        assert ev.timestamp is None or isinstance(ev.timestamp, str)
