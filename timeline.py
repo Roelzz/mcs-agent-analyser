@@ -2,6 +2,15 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+
+# Standard UUID v4 pattern — used as a last-resort fallback to pull the
+# conversation id out of a bot text reply (e.g. "Conversation ID:
+# ed082483-aa8e-47c7-a8fd-a7225d26c37b") when the export shape doesn't
+# carry it as a structured field.
+_UUID_IN_TEXT_RE = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+
 from models import (
     BotProfile,
     ConversationTimeline,
@@ -943,13 +952,38 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         channel_data = activity.get("channelData", {}) or {}
         position = channel_data.get("webchat:internal:position", 0)
 
-        # Track bot name and conversation id
+        # Track bot name and conversation id. The conversation id can live
+        # in a few places depending on the export shape:
+        #   1. `activity.conversation.id` (Bot Framework default).
+        #   2. `activity.conversationId` (top-level alias some runtimes emit).
+        #   3. `activity.channelData.conversationId` (webchat / DirectLine).
+        #   4. Inside the value blob of certain trace events (e.g.
+        #      `GenerativeAnswersSupportData`).
+        #   5. Last-resort fallback: parsed from a bot text message that
+        #      replies to a `/debug conversationID` request — chat-bot
+        #      test transcripts (`Test via CB`) only carry the id this way.
         if not state.bot_name and from_info.get("name"):
             if role == "bot":
                 state.bot_name = from_info["name"]
-        conv = activity.get("conversation", {}) or {}
-        if not state.conversation_id and conv.get("id"):
-            state.conversation_id = conv["id"]
+        if not state.conversation_id:
+            conv = activity.get("conversation") or {}
+            if isinstance(conv, dict) and conv.get("id"):
+                state.conversation_id = conv["id"]
+            elif activity.get("conversationId"):
+                state.conversation_id = activity["conversationId"]
+            else:
+                cd = activity.get("channelData") or {}
+                if isinstance(cd, dict) and cd.get("conversationId"):
+                    state.conversation_id = cd["conversationId"]
+                else:
+                    val = activity.get("value")
+                    if isinstance(val, dict) and val.get("conversationId"):
+                        state.conversation_id = val["conversationId"]
+        if not state.conversation_id and act_type == "message" and role == "bot":
+            text = activity.get("text") or ""
+            m = _UUID_IN_TEXT_RE.search(text)
+            if m:
+                state.conversation_id = m.group(0)
 
         # Track time range
         if timestamp:
