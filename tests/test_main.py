@@ -5652,6 +5652,69 @@ def test_flow_messages_have_no_link_target():
         assert item["link_target_id"] == ""
 
 
+def test_build_timeline_extracts_conversation_id_from_dotted_field():
+    """Standard Bot Framework shape: `activity.conversation.id`."""
+    acts = [
+        {
+            "type": "message",
+            "from": {"role": "user"},
+            "text": "hi",
+            "conversation": {"id": "abc12345-1111-2222-3333-444455556666"},
+            "timestamp": "2024-01-01T00:00:00Z",
+        },
+    ]
+    tl = build_timeline(acts, schema_lookup={})
+    assert tl.conversation_id == "abc12345-1111-2222-3333-444455556666"
+
+
+def test_build_timeline_extracts_conversation_id_from_top_level_alias():
+    """Some runtimes emit `activity.conversationId` directly."""
+    acts = [
+        {
+            "type": "message",
+            "from": {"role": "bot"},
+            "text": "hello",
+            "conversationId": "abc12345-1111-2222-3333-444455556666",
+            "timestamp": "2024-01-01T00:00:00Z",
+        },
+    ]
+    tl = build_timeline(acts, schema_lookup={})
+    assert tl.conversation_id == "abc12345-1111-2222-3333-444455556666"
+
+
+def test_build_timeline_extracts_conversation_id_from_bot_debug_reply():
+    """Chat-bot test transcripts (`Test via CB`) don't carry the id as a
+    structured field — it's only echoed in a bot text reply to a
+    `/debug conversationID` request. Last-resort regex fallback."""
+    acts = [
+        {
+            "type": "message",
+            "from": {"role": "user"},
+            "text": "/debug conversationID",
+            "timestamp": "2024-01-01T00:00:00Z",
+        },
+        {
+            "type": "message",
+            "from": {"role": "bot"},
+            "text": "Conversation ID: ed082483-aa8e-47c7-a8fd-a7225d26c37b. Time (UTC): 4/22/2026",
+            "timestamp": "2024-01-01T00:00:01Z",
+        },
+    ]
+    tl = build_timeline(acts, schema_lookup={})
+    assert tl.conversation_id == "ed082483-aa8e-47c7-a8fd-a7225d26c37b"
+
+
+def test_build_timeline_no_conversation_id_when_not_present():
+    """When no shape carries the id, leave it empty rather than emitting a
+    bogus value."""
+    acts = [
+        {"type": "message", "from": {"role": "user"}, "text": "hi", "timestamp": "2024-01-01T00:00:00Z"},
+        {"type": "message", "from": {"role": "bot"}, "text": "hello", "timestamp": "2024-01-01T00:00:01Z"},
+    ]
+    tl = build_timeline(acts, schema_lookup={})
+    assert tl.conversation_id == ""
+
+
 def test_flow_unknown_topic_falls_back_to_no_link():
     """When `topic_name` doesn't resolve to a profile component, no link
     target is emitted (rather than a broken target)."""
