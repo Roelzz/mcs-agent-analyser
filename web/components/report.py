@@ -5,6 +5,217 @@ from web.mermaid import render_segment
 from web.state import State
 
 
+def _audit_mode_checkbox(item: dict) -> rx.Component:
+    """One row inside the Audit options popover. Disabled (with a
+    tooltip) when the audit's required inputs aren't available — e.g.
+    transcript audits when no `dialog.json` was uploaded."""
+    return rx.tooltip(
+        rx.box(
+            rx.hstack(
+                rx.checkbox(
+                    checked=item["selected"],
+                    disabled=~item["enabled"],
+                    on_change=State.toggle_lint_audit(item["id"]),
+                ),
+                rx.vstack(
+                    rx.text(
+                        item["name"],
+                        size="2",
+                        font_weight="600",
+                        color=rx.cond(item["enabled"], "var(--gray-12)", "var(--gray-a8)"),
+                    ),
+                    rx.text(
+                        item["description"],
+                        size="1",
+                        color="var(--gray-a9)",
+                        line_height="1.4",
+                    ),
+                    spacing="1",
+                    align="start",
+                    flex="1",
+                ),
+                spacing="2",
+                align="start",
+                width="100%",
+            ),
+            padding="6px 4px",
+            opacity=rx.cond(item["enabled"], "1", "0.55"),
+            cursor=rx.cond(item["enabled"], "pointer", "not-allowed"),
+        ),
+        content=rx.cond(item["enabled"], item["description"], item["reason"]),
+    )
+
+
+def _audit_options_popover() -> rx.Component:
+    """Disclosure popover that exposes opt-in audit modes + a custom
+    prompt. Triggers a parallel run of every selected mode plus the
+    custom prompt (when non-empty) via `State.run_lint_audits`."""
+    return rx.popover.root(
+        rx.popover.trigger(
+            rx.button(
+                rx.icon("sliders-horizontal", size=14),
+                rx.text("Audit options"),
+                rx.text(
+                    "(",
+                    State.lint_selected_count.to(str),
+                    ")",
+                    color="var(--amber-11)",
+                    font_family=_MONO,
+                    size="1",
+                ),
+                variant="soft",
+                color_scheme="amber",
+                size="2",
+                cursor="pointer",
+            ),
+        ),
+        rx.popover.content(
+            rx.vstack(
+                rx.text(
+                    "Audit modes",
+                    size="2",
+                    font_weight="700",
+                    color="var(--gray-12)",
+                ),
+                rx.text(
+                    "Each selected audit costs one LLM call. The Static "
+                    "Config audit is the default; everything else is opt-in.",
+                    size="1",
+                    color="var(--gray-a9)",
+                    line_height="1.4",
+                ),
+                rx.divider(margin_y="6px"),
+                rx.foreach(State.lint_mode_availability, _audit_mode_checkbox),
+                rx.divider(margin_y="6px"),
+                rx.text(
+                    "Custom prompt (optional)",
+                    size="2",
+                    font_weight="600",
+                    color="var(--gray-12)",
+                ),
+                rx.text_area(
+                    value=State.lint_custom_prompt,
+                    on_change=State.set_lint_custom_prompt,
+                    placeholder="e.g. Was the bot polite to the user? Cite specific messages.",
+                    size="2",
+                    rows="3",
+                    width="100%",
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Reset selection",
+                        variant="ghost",
+                        size="1",
+                        color_scheme="gray",
+                        on_click=State.reset_lint_selection,
+                    ),
+                    rx.spacer(),
+                    rx.popover.close(
+                        rx.button(
+                            rx.cond(
+                                State.is_linting,
+                                rx.hstack(
+                                    rx.spinner(size="1"),
+                                    rx.text("Running..."),
+                                    align="center",
+                                    spacing="2",
+                                ),
+                                rx.hstack(
+                                    rx.icon("play", size=12),
+                                    rx.text("Run selected"),
+                                    align="center",
+                                    spacing="2",
+                                ),
+                            ),
+                            size="2",
+                            color_scheme="amber",
+                            on_click=State.run_lint_audits,
+                            disabled=State.is_linting,
+                            cursor="pointer",
+                        ),
+                    ),
+                    spacing="2",
+                    align="center",
+                    width="100%",
+                ),
+                spacing="2",
+                align="start",
+                width="100%",
+            ),
+            width="420px",
+            max_width="92vw",
+            padding="14px",
+        ),
+    )
+
+
+def _audit_section_card(section: dict) -> rx.Component:
+    """One audit's result rendered as a collapsible card. Failures
+    surface as an inline callout instead of crashing the whole run."""
+    return rx.box(
+        rx.accordion.root(
+            rx.accordion.item(
+                header=rx.hstack(
+                    rx.icon("scan-search", size=14, color="var(--amber-9)"),
+                    rx.text(
+                        section["name"],
+                        size="3",
+                        font_weight="700",
+                        color="var(--gray-12)",
+                        font_family=_MONO,
+                    ),
+                    rx.spacer(),
+                    rx.cond(
+                        section["error"] != "",
+                        rx.badge("Failed", color_scheme="red", variant="soft", size="1"),
+                        rx.cond(
+                            section["model_used"] != "",
+                            rx.badge(
+                                section["model_used"],
+                                color_scheme="amber",
+                                variant="soft",
+                                size="1",
+                                font_family=_MONO,
+                            ),
+                        ),
+                    ),
+                    align="center",
+                    width="100%",
+                ),
+                content=rx.box(
+                    rx.cond(
+                        section["error"] != "",
+                        rx.callout(
+                            section["error"],
+                            icon="triangle_alert",
+                            color_scheme="red",
+                            size="1",
+                            margin_y="8px",
+                        ),
+                        rx.box(
+                            rx.foreach(
+                                section["segments"].to(list[dict[str, str]]),  # type: ignore[union-attr]
+                                render_segment,
+                            ),
+                            padding_top="8px",
+                        ),
+                    ),
+                ),
+                value="open",
+            ),
+            type="single",
+            collapsible=True,
+            default_value="open",
+            width="100%",
+        ),
+        border="1px solid var(--gray-a4)",
+        border_radius="10px",
+        padding="10px 14px",
+        margin_top="12px",
+        background="var(--gray-a2)",
+    )
+
+
 def _finding_row(finding: dict) -> rx.Component:
     """Render a single custom rule finding with colored badges."""
     return rx.box(
@@ -145,28 +356,33 @@ def report_viewer() -> rx.Component:
                 ),
                 rx.cond(
                     State.can_lint,
-                    rx.button(
-                        rx.cond(
-                            State.is_linting,
-                            rx.hstack(
-                                rx.spinner(size="1"),
-                                rx.text("Linting..."),
-                                align="center",
-                                spacing="2",
+                    rx.hstack(
+                        rx.button(
+                            rx.cond(
+                                State.is_linting,
+                                rx.hstack(
+                                    rx.spinner(size="1"),
+                                    rx.text("Linting..."),
+                                    align="center",
+                                    spacing="2",
+                                ),
+                                rx.hstack(
+                                    rx.icon("scan-search", size=14),
+                                    rx.text("Instruction Lint"),
+                                    align="center",
+                                    spacing="2",
+                                ),
                             ),
-                            rx.hstack(
-                                rx.icon("scan-search", size=14),
-                                rx.text("Instruction Lint"),
-                                align="center",
-                                spacing="2",
-                            ),
+                            variant="outline",
+                            color_scheme="amber",
+                            size="2",
+                            on_click=State.run_lint,
+                            disabled=State.is_linting,
+                            cursor="pointer",
                         ),
-                        variant="outline",
-                        color_scheme="amber",
-                        size="2",
-                        on_click=State.run_lint,
-                        disabled=State.is_linting,
-                        cursor="pointer",
+                        _audit_options_popover(),
+                        spacing="2",
+                        align="center",
                     ),
                 ),
                 rx.cond(
@@ -228,10 +444,16 @@ def report_viewer() -> rx.Component:
                     rx.hstack(
                         rx.icon("scan-search", size=16, color="var(--amber-9)"),
                         rx.heading(
-                            "Instruction Lint Report",
+                            "Audit Report",
                             size="4",
                             font_family=_MONO,
                             color="var(--gray-12)",
+                        ),
+                        rx.badge(
+                            State.lint_audit_results.length().to(str),  # type: ignore[union-attr]
+                            color_scheme="amber",
+                            variant="soft",
+                            size="1",
                         ),
                         align="center",
                         spacing="2",
@@ -240,7 +462,7 @@ def report_viewer() -> rx.Component:
                     rx.hstack(
                         rx.button(
                             rx.icon("download", size=14),
-                            rx.text("Download Lint"),
+                            rx.text("Download Audit"),
                             variant="outline",
                             size="2",
                             color_scheme="amber",
@@ -263,9 +485,7 @@ def report_viewer() -> rx.Component:
                     padding_top="20px",
                     padding_bottom="16px",
                 ),
-                rx.box(
-                    rx.foreach(State.lint_report_segments, render_segment),
-                ),
+                rx.foreach(State.lint_audit_results, _audit_section_card),
             ),
         ),
         id="report-content",
