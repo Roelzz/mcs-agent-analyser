@@ -484,6 +484,12 @@ def build_conversation_flow_items(
         # the Conversation Flow row can hyperlink into the relevant tab.
         "link_target_tab": "",
         "link_target_id": "",
+        # Stable per-row id (set after the loop). The banner / error summary
+        # uses `flow_id` as the deep-link target_id so clicks scroll to the
+        # exact row. `flow_row_id` is the pre-built DOM id (`row-<flow_id>`)
+        # so component code doesn't have to concat at render time.
+        "flow_id": "",
+        "flow_row_id": "",
     }
 
     latest_user_idx: int | None = None
@@ -644,6 +650,10 @@ def build_conversation_flow_items(
                     "link_target_id": link_id,
                 }
             )
+
+    for idx, item in enumerate(items):
+        item["flow_id"] = f"flow-{idx}"
+        item["flow_row_id"] = f"row-flow-{idx}"
 
     return items
 

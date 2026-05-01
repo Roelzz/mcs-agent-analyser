@@ -1853,6 +1853,22 @@ class UploadMixin(rx.State, mixin=True):
         # Errors
         self.mcs_conv_errors = list(timeline.errors)  # type: ignore[attr-defined]
 
+        # Error/exception banner — error-toned flow items with their
+        # `flow_id` deep-link target. Reads from the flow items already
+        # built in `_populate_dynamic_sections` so the banner row's
+        # target_id matches the rendered flow row's DOM id.
+        self.mcs_conv_error_banner = [  # type: ignore[attr-defined]
+            {
+                "flow_id": item.get("flow_id", ""),
+                "title": item.get("title", "") or "Error",
+                "summary": item.get("summary", ""),
+                "timestamp": item.get("timestamp", ""),
+                "topic_name": item.get("topic_name", ""),
+            }
+            for item in self.mcs_conversation_flow  # type: ignore[attr-defined]
+            if item.get("tone") == "error"
+        ]
+
         # Orchestrator reasoning — enriched with finish data
         import re as _re_reason
 
@@ -2282,6 +2298,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
+        self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
         self.mcs_conv_reasoning = []  # type: ignore[attr-defined]
         self.mcs_conv_sequence_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_conv_gantt_mermaid = ""  # type: ignore[attr-defined]
@@ -2348,6 +2365,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
+        self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
         self.mcs_conv_reasoning = []  # type: ignore[attr-defined]
         self.mcs_conv_sequence_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_conv_gantt_mermaid = ""  # type: ignore[attr-defined]

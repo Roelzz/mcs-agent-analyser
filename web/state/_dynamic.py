@@ -153,6 +153,9 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_conv_phases: list[dict] = []
     mcs_conv_event_log: list[dict] = []
     mcs_conv_errors: list[str] = []
+    # Error/exception banner — one row per ERROR-toned flow item with the
+    # `flow_id` deep-link target so the user can jump straight to the row.
+    mcs_conv_error_banner: list[dict] = []
     mcs_conv_reasoning: list[dict] = []
     mcs_conv_sequence_mermaid: str = ""
     mcs_conv_gantt_mermaid: str = ""

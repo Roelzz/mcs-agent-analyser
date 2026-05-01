@@ -6092,3 +6092,69 @@ def test_variable_tracker_excludes_universal_search_tool():
     )
     rows = build_variable_tracker_rows(timeline, profile=None)
     assert rows == []
+
+
+def test_flow_items_have_unique_flow_ids():
+    """Every flow item carries a stable `flow_id` and matching `flow_row_id`
+    (`row-<flow_id>`) — required for the error-banner deep-link plumbing."""
+    from renderer.sections import build_conversation_flow_items
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "hi"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: hello",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ERROR,
+                summary="Action failed",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    assert len(items) == 3
+    flow_ids = [it["flow_id"] for it in items]
+    assert flow_ids == ["flow-0", "flow-1", "flow-2"]
+    for it in items:
+        assert it["flow_row_id"] == f"row-{it['flow_id']}"
+
+
+def test_error_banner_rows_filter_to_error_flow_items():
+    """The Conversation tab error banner is built from flow items whose
+    `tone == 'error'`, carrying their `flow_id` for click-to-jump."""
+    from renderer.sections import build_conversation_flow_items
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "go"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ERROR,
+                summary="Action failed: connector unreachable",
+                topic_name="MyTopic",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: sorry",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    error_rows = [it for it in items if it.get("tone") == "error"]
+    assert len(error_rows) == 1
+    err = error_rows[0]
+    assert err["flow_id"] == "flow-1"
+    assert err["topic_name"] == "MyTopic"
+    assert "connector unreachable" in err["summary"]

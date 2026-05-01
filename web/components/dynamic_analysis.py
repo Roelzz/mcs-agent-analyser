@@ -330,6 +330,7 @@ def _mcs_flow_message(item: dict) -> rx.Component:
         spacing="2",
         width="100%",
         align="stretch",
+        id=item["flow_row_id"],
     )
 
 
@@ -471,6 +472,7 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 on_click=State.set_dynamic_link_target(item["link_target_tab"], item["link_target_id"]),
             ),
             width="100%",
+            id=item["flow_row_id"],
         ),
         # Standard event card (info / error)
         rx.center(
@@ -542,6 +544,7 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 transition="border-color 0.15s ease, background 0.15s ease",
             ),
             width="100%",
+            id=item["flow_row_id"],
         ),
     )
 
@@ -4500,10 +4503,110 @@ def _mcs_var_card(item: dict) -> rx.Component:
     )
 
 
+def _mcs_error_banner_row(item: dict) -> rx.Component:
+    """One row inside the error banner — clickable, jumps to the offending
+    Conversation Flow event via `set_dynamic_link_target`."""
+    return rx.hstack(
+        rx.icon("triangle-alert", size=14, color="var(--red-9)"),
+        rx.vstack(
+            rx.hstack(
+                rx.text(
+                    item["title"],
+                    font_size="12px",
+                    font_weight="700",
+                    color="var(--red-11)",
+                ),
+                rx.cond(
+                    item["topic_name"] != "",
+                    rx.badge(item["topic_name"], color_scheme="red", variant="soft", size="1"),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["timestamp"] != "",
+                    rx.text(
+                        item["timestamp"],
+                        font_size="10px",
+                        color="var(--red-a9)",
+                        font_family=_MONO,
+                    ),
+                    rx.box(),
+                ),
+                spacing="2",
+                align="center",
+                flex_wrap="wrap",
+            ),
+            rx.text(
+                item["summary"],
+                font_size="11px",
+                color="var(--red-11)",
+                line_height="1.4",
+                style={"wordBreak": "break-word"},
+            ),
+            spacing="1",
+            align="start",
+            width="100%",
+        ),
+        rx.spacer(),
+        rx.icon("arrow-up-right", size=12, color="var(--red-a10)"),
+        spacing="2",
+        align="start",
+        width="100%",
+        padding="8px 10px",
+        border_radius="6px",
+        cursor="pointer",
+        on_click=State.set_dynamic_link_target("conversation", item["flow_id"]),
+        _hover={"background": "var(--red-a3)"},
+        transition="background 0.15s ease",
+    )
+
+
+def _mcs_error_banner() -> rx.Component:
+    """Banner at the top of the Conversation tab summarising every
+    error-toned event with click-to-jump to the offending row.
+    Hidden when there are no errors."""
+    return rx.cond(
+        State.mcs_conv_error_banner.length() > 0,  # type: ignore[union-attr]
+        rx.box(
+            rx.hstack(
+                rx.icon("triangle-alert", size=18, color="var(--red-9)"),
+                rx.text(
+                    "Errors detected — click to jump to the failing step",
+                    font_size="13px",
+                    font_weight="700",
+                    color="var(--red-11)",
+                ),
+                rx.spacer(),
+                rx.badge(
+                    State.mcs_conv_error_banner.length().to(str),  # type: ignore[union-attr]
+                    color_scheme="red",
+                    variant="solid",
+                    size="1",
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            rx.vstack(
+                rx.foreach(State.mcs_conv_error_banner, _mcs_error_banner_row),
+                spacing="1",
+                width="100%",
+                padding_top="6px",
+            ),
+            background="var(--red-a2)",
+            border="1px solid var(--red-a5)",
+            border_radius="10px",
+            padding="12px 14px",
+            width="100%",
+        ),
+    )
+
+
 def _mcs_conversation_detail_panel() -> rx.Component:
     return rx.cond(
         State.has_mcs_conv_detail,
         rx.vstack(
+            # Error banner (hidden when no errors)
+            _mcs_error_banner(),
             # Metadata card
             card(
                 rx.hstack(
