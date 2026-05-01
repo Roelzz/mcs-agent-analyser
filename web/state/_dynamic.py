@@ -82,9 +82,8 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_profile_quick_wins: list[dict] = []
     mcs_profile_trigger_overlaps: list[dict] = []
 
-    # ── Tools tab ────────────────────────────────────────────────────────────
+    # ── Tools tab (consolidated — absorbs former Topics tab) ───────────────
     mcs_tools_kpis: list[dict] = []
-    mcs_tools_rows: list[dict] = []
     mcs_tools_mermaid: str = ""
     mcs_tools_external_calls: list[dict] = []
     # Runtime tool call analysis
@@ -112,12 +111,10 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_generative_traces: list[dict] = []
     mcs_generative_topics: list[str] = []  # topic names that emitted at least one trace
 
-    # ── Topics tab ───────────────────────────────────────────────────────────
+    # ── Topic analytics (rendered on the Tools tab — Topics tab removed) ───
+    # Kept under the `mcs_topics_*` namespace for now; semantics unchanged.
     mcs_topics_kpis: list[dict] = []
     mcs_topics_summary: list[dict] = []
-    mcs_topics_user_rows: list[dict] = []
-    mcs_topics_orch_rows: list[dict] = []
-    mcs_topics_system_rows: list[dict] = []
     mcs_topics_external_calls: list[dict] = []
     mcs_topics_coverage: list[dict] = []
     mcs_topics_coverage_summary: str = ""
@@ -125,13 +122,15 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_topics_mermaid: str = ""
     mcs_topics_trigger_matches: list[dict] = []
 
-    # ── Topic Definition Explorer modal ──────────────────────────────────────
-    # Single unified picker over every topic. Each entry carries
-    # display_name, schema_name, category, action_count and pre-built
-    # `settings_rows` (from `flatten_to_rows`). A computed search filter
-    # narrows the list; a selected schema_name surfaces the matching
-    # rows in the right pane.
-    mcs_topic_explorer_open: bool = False
+    # ── Component Explorer (inline, on the Tools tab) ──────────────────────
+    # Unified picker over every DialogComponent topic AND every
+    # TaskDialog / AgentDialog tool. Each entry carries display_name,
+    # schema_name, category, action_count and pre-built `settings_rows`
+    # (from `flatten_to_rows`). A computed search filter narrows the
+    # list; a selected schema_name surfaces the matching rows in the
+    # right pane. The legacy `mcs_topic_explorer_*` names are retained
+    # to keep the diff focused — internal symbols stayed `topic_*` even
+    # though the surface now covers both topics and tools.
     mcs_topic_explorer_search: str = ""
     mcs_topic_explorer_selected: str = ""
     mcs_topic_explorer_topics: list[dict] = []
@@ -292,26 +291,7 @@ class DynamicMixin(rx.State, mixin=True):
             "root.querySelectorAll('button[data-state=\"open\"][aria-expanded]').forEach(function(t){ t.click(); });"
         )
 
-    # ── Topic Definition Explorer events ────────────────────────────────────
-
-    @rx.event
-    def open_topic_explorer(self):
-        """Open the Topic Definition Explorer modal. Auto-selects the
-        first topic if none is currently selected."""
-        self.mcs_topic_explorer_open = True
-        if not self.mcs_topic_explorer_selected and self.mcs_topic_explorer_topics:
-            self.mcs_topic_explorer_selected = self.mcs_topic_explorer_topics[0].get("schema_name", "")
-
-    @rx.event
-    def close_topic_explorer(self):
-        self.mcs_topic_explorer_open = False
-
-    @rx.event
-    def set_topic_explorer_open(self, value: bool):
-        """Wired to the modal's `on_open_change` — closes the dialog
-        when the user clicks outside or presses Escape, and stays in
-        sync when our open_topic_explorer event sets it true."""
-        self.mcs_topic_explorer_open = value
+    # ── Component Explorer events (inline picker on the Tools tab) ─────────
 
     @rx.event
     def set_topic_explorer_search(self, value: str):
@@ -320,14 +300,6 @@ class DynamicMixin(rx.State, mixin=True):
     @rx.event
     def select_topic_in_explorer(self, schema_name: str):
         self.mcs_topic_explorer_selected = schema_name
-
-    @rx.event
-    def open_topic_in_explorer(self, schema_name: str):
-        """One-click handler used by the Topics-tab summary tables: selects
-        the requested topic and opens the Explorer modal in a single user
-        action (replaces the per-row inline settings accordion)."""
-        self.mcs_topic_explorer_selected = schema_name
-        self.mcs_topic_explorer_open = True
 
     @rx.var
     def mcs_topic_explorer_filtered(self) -> list[dict]:

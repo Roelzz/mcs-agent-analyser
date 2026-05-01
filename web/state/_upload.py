@@ -1099,23 +1099,9 @@ class UploadMixin(rx.State, mixin=True):
             "FlowTool": "amber",
         }
 
-        def _build_tool_row(t) -> dict:
-            rows = _tool_settings_rows(t)
-            return {
-                "name": t.display_name,
-                "tool_type": t.tool_type or "—",
-                "connector": t.connector_display_name or "—",
-                "mode": t.connection_mode or "—",
-                "state": t.state,
-                "description": (t.description or t.model_description or "—")[:200],
-                "type_color": _type_colors.get(t.tool_type or "", "gray"),
-                "link_id": t.display_name,
-                "row_id": f"row-{t.display_name}",
-                "settings_rows": rows,
-                "has_settings": "true" if rows else "",
-            }
-
-        self.mcs_tools_rows = [_build_tool_row(t) for t in tools]  # type: ignore[attr-defined]
+        # (Tool Inventory card removed — tools live in the inline
+        # Component Explorer. The standalone `mcs_tools_rows` table is
+        # gone.)
 
         # External calls detail (per-action rows from action_details, deduplicated)
         from collections import Counter
@@ -1667,56 +1653,11 @@ class UploadMixin(rx.State, mixin=True):
                 "has_settings": "true" if rows else "",
             }
 
-        # User topics detail (UI renders the structured settings panel inside
-        # a per-row accordion).
-        # `link_id` is the identity used by Conversation Flow → Topics deep
-        # links (matches `link_target_id` in flow rows). `row_id` is the
-        # DOM id used by the scroll-into-view JS — kept derived so the JS
-        # only needs to know the link_id with the `row-` prefix.
-        self.mcs_topics_user_rows = [  # type: ignore[attr-defined]
-            {
-                "name": c.display_name,
-                "schema": c.schema_name,
-                "state": c.state,
-                "triggers": ", ".join(c.trigger_queries[:3]) + ("..." if len(c.trigger_queries) > 3 else "")
-                if c.trigger_queries
-                else "—",
-                "description": (c.description or "—")[:150],
-                "link_id": c.schema_name,
-                "row_id": f"row-{c.schema_name}",
-                **_settings_fields(c),
-            }
-            for c in user_topics
-        ]
-
-        # Orchestrator topics detail
-        self.mcs_topics_orch_rows = [  # type: ignore[attr-defined]
-            {
-                "name": c.display_name,
-                "state": c.state,
-                "tool_type": c.tool_type or c.action_kind or "—",
-                "connector": c.connector_display_name or "—",
-                "mode": c.connection_mode or "—",
-                "link_id": c.display_name,
-                "row_id": f"row-{c.display_name}",
-                **_settings_fields(c),
-            }
-            for c in orch_topics
-        ]
-
-        # System/automation topics detail
-        self.mcs_topics_system_rows = [  # type: ignore[attr-defined]
-            {
-                "name": c.display_name,
-                "schema": c.schema_name,
-                "state": c.state,
-                "trigger": c.trigger_kind or "—",
-                "link_id": c.schema_name,
-                "row_id": f"row-{c.schema_name}",
-                **_settings_fields(c),
-            }
-            for c in system_topics
-        ]
+        # (Per-category topic detail tables — User / Orchestrator /
+        # System / Automation — were removed when the Topics tab was
+        # consolidated into the Tools tab. All topic browsing now goes
+        # through the inline Component Explorer
+        # (`mcs_topic_explorer_topics`).)
 
         # External calls (moved to Tools tab — just clear this legacy var)
         self.mcs_topics_external_calls = []  # type: ignore[attr-defined]
@@ -1779,12 +1720,13 @@ class UploadMixin(rx.State, mixin=True):
             },
         ]
 
-        # Topic Definition Explorer — flat list across every category so
-        # the modal can pick from a single unified surface. Each entry
+        # Component Explorer — flat list across every category so the
+        # inline picker can browse a single unified surface. Each entry
         # carries the pre-flattened `settings_rows` so the right pane
-        # only has to render the picked topic's rows. Sorted: user
-        # topics first, then orchestrator, then system, alphabetically
-        # within each.
+        # only has to render the picked component's rows. Includes both
+        # DialogComponent topics AND tools (TaskDialog / AgentDialog) —
+        # the picker is the canonical browse surface for the bot's
+        # static design.
         category_order = {
             "user_topics": (0, "User"),
             "orchestrator_topics": (1, "Orchestrator"),
@@ -1792,7 +1734,13 @@ class UploadMixin(rx.State, mixin=True):
             "system_topics": (3, "System"),
             "skills": (4, "Skill"),
         }
+        # Tool components live outside `by_cat` (they're classified by
+        # `c.tool_type`, not by `_classify_component`). Walk all components
+        # once so a single tool can carry both its category badge and its
+        # tool-type badge.
+        tool_kinds = {"TaskDialog", "AgentDialog"}
         explorer_entries: list[tuple[int, str, dict]] = []
+        seen_schema_names: set[str] = set()
         for cat, comps in by_cat.items():
             sort_key, cat_label = category_order.get(cat, (9, cat.replace("_", " ").title()))
             for c in comps:
@@ -1813,6 +1761,30 @@ class UploadMixin(rx.State, mixin=True):
                         },
                     )
                 )
+                seen_schema_names.add(c.schema_name)
+        # Tools (TaskDialog / AgentDialog) — sorted last in the picker
+        # so topics dominate the top, with tools grouped after.
+        for c in profile.components:
+            if c.kind not in tool_kinds:
+                continue
+            if c.schema_name in seen_schema_names:
+                continue
+            rows = _cached_settings_rows(c)
+            action_count = sum(1 for r in rows if r.get("row_type") == "kind")
+            explorer_entries.append(
+                (
+                    5,  # tools sort after all topic categories
+                    c.display_name.lower(),
+                    {
+                        "display_name": c.display_name,
+                        "schema_name": c.schema_name,
+                        "category": c.tool_type or "Tool",
+                        "action_count": str(action_count),
+                        "settings_rows": rows,
+                    },
+                )
+            )
+            seen_schema_names.add(c.schema_name)
         explorer_entries.sort(key=lambda x: (x[0], x[1]))
         self.mcs_topic_explorer_topics = [e[2] for e in explorer_entries]  # type: ignore[attr-defined]
 
@@ -2330,7 +2302,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_profile_quick_wins = []  # type: ignore[attr-defined]
         self.mcs_profile_trigger_overlaps = []  # type: ignore[attr-defined]
         self.mcs_tools_kpis = []  # type: ignore[attr-defined]
-        self.mcs_tools_rows = []  # type: ignore[attr-defined]
         self.mcs_tools_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_tools_external_calls = []  # type: ignore[attr-defined]
         self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
@@ -2350,9 +2321,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_generative_topics = []  # type: ignore[attr-defined]
         self.mcs_topics_kpis = []  # type: ignore[attr-defined]
         self.mcs_topics_summary = []  # type: ignore[attr-defined]
-        self.mcs_topics_user_rows = []  # type: ignore[attr-defined]
-        self.mcs_topics_orch_rows = []  # type: ignore[attr-defined]
-        self.mcs_topics_system_rows = []  # type: ignore[attr-defined]
         self.mcs_topics_external_calls = []  # type: ignore[attr-defined]
         self.mcs_topics_coverage = []  # type: ignore[attr-defined]
         self.mcs_topics_coverage_summary = ""  # type: ignore[attr-defined]
