@@ -762,8 +762,6 @@ class UploadMixin(rx.State, mixin=True):
                 tool_data = build_tool_call_analysis_data(timeline)
                 self.mcs_tools_call_count = len(timeline.tool_calls)  # type: ignore[attr-defined]
                 self.mcs_tools_stats_rows = tool_data["stats_rows"]  # type: ignore[attr-defined]
-                self.mcs_tools_chain_rows = tool_data["chain_rows"]  # type: ignore[attr-defined]
-                self.mcs_tools_detail_rows = tool_data["detail_rows"]  # type: ignore[attr-defined]
                 self.mcs_tools_flow_mermaid = tool_data["flow_mermaid"]  # type: ignore[attr-defined]
                 self.mcs_tools_kpis = tool_data["kpis"]  # type: ignore[attr-defined]
 
@@ -1161,8 +1159,6 @@ class UploadMixin(rx.State, mixin=True):
             tool_data = build_tool_call_analysis_data(timeline, profile)
             self.mcs_tools_call_count = len(timeline.tool_calls)  # type: ignore[attr-defined]
             self.mcs_tools_stats_rows = tool_data["stats_rows"]  # type: ignore[attr-defined]
-            self.mcs_tools_chain_rows = tool_data["chain_rows"]  # type: ignore[attr-defined]
-            self.mcs_tools_detail_rows = tool_data["detail_rows"]  # type: ignore[attr-defined]
             self.mcs_tools_flow_mermaid = tool_data["flow_mermaid"]  # type: ignore[attr-defined]
             self.mcs_tools_inventory_rows = tool_data["inventory_rows"]  # type: ignore[attr-defined]
             # Extend KPIs with runtime data
@@ -1170,8 +1166,6 @@ class UploadMixin(rx.State, mixin=True):
         else:
             self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
             self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
-            self.mcs_tools_chain_rows = []  # type: ignore[attr-defined]
-            self.mcs_tools_detail_rows = []  # type: ignore[attr-defined]
             self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]
             self.mcs_tools_inventory_rows = []  # type: ignore[attr-defined]
 
@@ -2326,8 +2320,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_tools_external_calls = []  # type: ignore[attr-defined]
         self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
         self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
-        self.mcs_tools_chain_rows = []  # type: ignore[attr-defined]
-        self.mcs_tools_detail_rows = []  # type: ignore[attr-defined]
         self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_tools_inventory_rows = []  # type: ignore[attr-defined]
         self.mcs_knowledge_kpis = []  # type: ignore[attr-defined]
