@@ -167,7 +167,6 @@ class DynamicMixin(rx.State, mixin=True):
     # view. Cleared next time another link is clicked.
     mcs_highlight_target_id: str = ""
     mcs_conv_phases: list[dict] = []
-    mcs_conv_event_log: list[dict] = []
     mcs_conv_errors: list[str] = []
     # Error/exception banner — one row per ERROR-toned flow item with the
     # `flow_id` deep-link target so the user can jump straight to the row.

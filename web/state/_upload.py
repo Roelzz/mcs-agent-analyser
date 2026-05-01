@@ -1923,33 +1923,6 @@ class UploadMixin(rx.State, mixin=True):
         # previous activity (idle gaps suppressed).
         self.mcs_conv_waterfall = build_performance_waterfall(timeline)  # type: ignore[attr-defined]
 
-        # Event log
-        _event_type_colors: dict[str, str] = {
-            "USER_MESSAGE": "green",
-            "BOT_MESSAGE": "green",
-            "PLAN_RECEIVED": "blue",
-            "PLAN_FINISHED": "blue",
-            "STEP_TRIGGERED": "teal",
-            "STEP_FINISHED": "teal",
-            "KNOWLEDGE_SEARCH": "amber",
-            "ERROR": "red",
-            "ACTION_HTTP_REQUEST": "purple",
-            "ACTION_QA": "purple",
-            "ACTION_TRIGGER_EVAL": "purple",
-            "DIALOG_TRACING": "gray",
-            "DIALOG_REDIRECT": "gray",
-        }
-        self.mcs_conv_event_log = [  # type: ignore[attr-defined]
-            {
-                "index": str(i),
-                "position": str(ev.position),
-                "event_type": ev.event_type.name,
-                "summary": ev.summary[:200],
-                "type_color": _event_type_colors.get(ev.event_type.name, "gray"),
-            }
-            for i, ev in enumerate(timeline.events, 1)
-        ]
-
         # Errors
         self.mcs_conv_errors = list(timeline.errors)  # type: ignore[attr-defined]
 
@@ -2400,7 +2373,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_highlight_target_id = ""  # type: ignore[attr-defined]
         self.mcs_conv_variables = []  # type: ignore[attr-defined]
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
-        self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
         self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
         self.mcs_conv_waterfall = []  # type: ignore[attr-defined]
@@ -2469,7 +2441,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_highlight_target_id = ""  # type: ignore[attr-defined]
         self.mcs_conv_variables = []  # type: ignore[attr-defined]
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
-        self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
         self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
         self.mcs_conv_waterfall = []  # type: ignore[attr-defined]

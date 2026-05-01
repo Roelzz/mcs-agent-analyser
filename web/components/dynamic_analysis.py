@@ -4580,42 +4580,6 @@ def _mcs_conv_phase_row(item: dict) -> rx.Component:
     )
 
 
-def _mcs_conv_event_row(item: dict) -> rx.Component:
-    return rx.grid(
-        rx.text(item["index"], font_size="13px", color="var(--gray-a9)", text_align="right"),
-        rx.text(item["position"], font_size="13px", color="var(--gray-11)", font_family=_MONO),
-        rx.badge(
-            item["event_type"],
-            color_scheme=rx.match(
-                item["type_color"],
-                ("green", "green"),
-                ("blue", "blue"),
-                ("teal", "teal"),
-                ("amber", "amber"),
-                ("red", "red"),
-                ("purple", "purple"),
-                "gray",
-            ),
-            variant="soft",
-            size="1",
-        ),
-        rx.text(
-            item["summary"],
-            font_size="12px",
-            color="var(--gray-11)",
-            overflow="hidden",
-            text_overflow="ellipsis",
-            white_space="nowrap",
-        ),
-        columns="0.5fr 0.5fr 1.5fr 4fr",
-        gap="8px",
-        align="center",
-        padding_y="6px",
-        border_bottom=f"1px solid {SURFACE_BORDER}",
-        width="100%",
-    )
-
-
 def _mcs_conv_error_item(error: str) -> rx.Component:
     return rx.box(
         rx.hstack(
@@ -5325,38 +5289,8 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                 ),
                 width="100%",
             ),
-            # Event log
-            rx.cond(
-                State.mcs_conv_event_log.length() > 0,  # type: ignore[union-attr]
-                card(
-                    rx.hstack(
-                        rx.icon("list", size=16, color=PRIMARY),
-                        section_heading("Event Log"),
-                        rx.spacer(),
-                        rx.badge(
-                            State.mcs_conv_event_log.length().to(str),  # type: ignore[union-attr]
-                            color_scheme="green",
-                            variant="soft",
-                            size="1",
-                        ),
-                        align="center",
-                        width="100%",
-                    ),
-                    rx.box(
-                        _grid_header("#", "Position", "Type", "Summary", template="0.5fr 0.5fr 1.5fr 4fr"),
-                        rx.foreach(State.mcs_conv_event_log, _mcs_conv_event_row),
-                        width="100%",
-                        border=f"1px solid {SURFACE_BORDER}",
-                        border_radius="8px",
-                        padding_x="12px",
-                        background="var(--gray-a2)",
-                        overflow_x="auto",
-                        max_height="600px",
-                        overflow_y="auto",
-                    ),
-                    width="100%",
-                ),
-            ),
+            # (Event Log removed — Conversation Flow above provides
+            # grouped, filterable, deep-linked coverage of every event.)
             # Errors
             rx.cond(
                 State.mcs_conv_errors.length() > 0,  # type: ignore[union-attr]
