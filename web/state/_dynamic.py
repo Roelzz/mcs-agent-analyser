@@ -161,6 +161,10 @@ class DynamicMixin(rx.State, mixin=True):
     # Error/exception banner — one row per ERROR-toned flow item with the
     # `flow_id` deep-link target so the user can jump straight to the row.
     mcs_conv_error_banner: list[dict] = []
+    # Performance Waterfall — one row per timed event with the gap from
+    # the previous activity. Different framing from the Gantt: shows
+    # *between-activity* time so bottlenecks stand out.
+    mcs_conv_waterfall: list[dict] = []
     mcs_conv_reasoning: list[dict] = []
     mcs_conv_sequence_mermaid: str = ""
     mcs_conv_gantt_mermaid: str = ""

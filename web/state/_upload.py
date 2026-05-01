@@ -27,6 +27,7 @@ from renderer.sections import (  # noqa: E402
     build_conversation_flow_items,
     build_conversation_visual_summary,
     build_orchestrator_decision_timeline,
+    build_performance_waterfall,
     build_plan_evolution,
     build_topic_lifecycles,
     build_trigger_match_items,
@@ -1874,6 +1875,11 @@ class UploadMixin(rx.State, mixin=True):
         # `build_variable_tracker_rows` for the row schema.
         self.mcs_conv_variables = build_variable_tracker_rows(timeline, profile)  # type: ignore[attr-defined]
 
+        # Performance Waterfall — see `build_performance_waterfall` for
+        # the row schema. One row per timed event with the gap from the
+        # previous activity (idle gaps suppressed).
+        self.mcs_conv_waterfall = build_performance_waterfall(timeline)  # type: ignore[attr-defined]
+
         # Event log
         _event_type_colors: dict[str, str] = {
             "USER_MESSAGE": "green",
@@ -2351,6 +2357,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
         self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
+        self.mcs_conv_waterfall = []  # type: ignore[attr-defined]
         self.mcs_conv_reasoning = []  # type: ignore[attr-defined]
         self.mcs_conv_sequence_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_conv_gantt_mermaid = ""  # type: ignore[attr-defined]
@@ -2418,6 +2425,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
         self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
+        self.mcs_conv_waterfall = []  # type: ignore[attr-defined]
         self.mcs_conv_reasoning = []  # type: ignore[attr-defined]
         self.mcs_conv_sequence_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_conv_gantt_mermaid = ""  # type: ignore[attr-defined]

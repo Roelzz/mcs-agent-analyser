@@ -4239,6 +4239,75 @@ def _mcs_conv_meta_row(item: dict) -> rx.Component:
     return info_row(item["property"], item["value"])
 
 
+def _mcs_waterfall_row(item: dict) -> rx.Component:
+    """One row in the Performance Waterfall: activity label + a
+    horizontal proportional bar whose width is the gap-to-previous as a
+    percentage of the largest gap. The colour reflects the event
+    category (Message / Plan / Action / Knowledge / Orchestrator /
+    Trace / Error)."""
+    return rx.hstack(
+        rx.text(
+            item["timestamp"],
+            font_size="10px",
+            color="var(--gray-a7)",
+            font_family=_MONO,
+            min_width="64px",
+            flex_shrink="0",
+        ),
+        rx.badge(
+            item["category"],
+            color_scheme=rx.match(
+                item["category"],
+                ("Message", "green"),
+                ("Plan", "blue"),
+                ("Action", "teal"),
+                ("Knowledge", "amber"),
+                ("Orchestrator", "violet"),
+                ("Trace", "gray"),
+                ("Error", "red"),
+                "gray",
+            ),
+            variant="soft",
+            size="1",
+        ),
+        rx.text(
+            item["label"],
+            font_size="11px",
+            color="var(--gray-12)",
+            min_width="180px",
+            flex_grow="1",
+            style={"overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap"},
+        ),
+        rx.box(
+            rx.box(
+                width=item["width_pct"],
+                height="10px",
+                background=item["color"],
+                border_radius="4px",
+                min_width="2px",
+            ),
+            width="40%",
+            height="10px",
+            background="var(--gray-a3)",
+            border_radius="4px",
+            position="relative",
+            overflow="hidden",
+        ),
+        rx.text(
+            item["gap_fmt"],
+            font_size="10px",
+            color="var(--gray-a8)",
+            font_family=_MONO,
+            min_width="50px",
+            text_align="right",
+        ),
+        spacing="2",
+        align="center",
+        width="100%",
+        padding="3px 0",
+    )
+
+
 def _mcs_conv_phase_row(item: dict) -> rx.Component:
     return rx.grid(
         rx.text(item["label"], font_size="13px", color="var(--gray-12)", font_weight="500"),
@@ -4900,6 +4969,43 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                         padding_x="12px",
                         background="var(--gray-a2)",
                         overflow_x="auto",
+                    ),
+                    width="100%",
+                ),
+            ),
+            # Performance Waterfall — between-activity gaps with
+            # category-colored bars so bottlenecks stand out. Different
+            # framing from the Gantt (which shows phase totals).
+            rx.cond(
+                State.mcs_conv_waterfall.length() > 0,  # type: ignore[union-attr]
+                card(
+                    rx.hstack(
+                        rx.icon("activity", size=16, color=PRIMARY),
+                        section_heading("Performance Waterfall"),
+                        rx.spacer(),
+                        rx.badge(
+                            State.mcs_conv_waterfall.length().to(str),  # type: ignore[union-attr]
+                            color_scheme="green",
+                            variant="soft",
+                            size="1",
+                        ),
+                        align="center",
+                        width="100%",
+                    ),
+                    rx.text(
+                        "Time gap between consecutive activities. Bar widths are "
+                        "proportional to the longest gap so the slowest step is "
+                        "easiest to find. User-think idle time is suppressed.",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_style="italic",
+                    ),
+                    rx.box(
+                        rx.foreach(State.mcs_conv_waterfall, _mcs_waterfall_row),
+                        width="100%",
+                        padding_top="8px",
+                        max_height="480px",
+                        overflow_y="auto",
                     ),
                     width="100%",
                 ),

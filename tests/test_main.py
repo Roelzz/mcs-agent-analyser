@@ -6146,6 +6146,92 @@ def test_citation_panel_empty_when_no_traces():
     assert build_citation_panel_rows([]) == []
 
 
+def test_performance_waterfall_emits_one_row_per_timed_event():
+    """Waterfall produces a row per timestamped event with the gap from
+    the previous activity formatted human-readably."""
+    from renderer.sections import build_performance_waterfall
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "hi"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                summary="Plan received",
+                timestamp="2024-01-01T00:00:01.500Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Action: MyTool",
+                topic_name="MyTool",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+    )
+    rows = build_performance_waterfall(timeline)
+    assert len(rows) == 3
+    assert rows[0]["category"] == "Message"
+    assert rows[1]["category"] == "Plan"
+    assert rows[2]["category"] == "Action"
+    assert rows[0]["gap_fmt"] == "—"
+    assert rows[1]["gap_fmt"] == "1.5 s"
+    assert rows[1]["width_pct"] != "0.0%"
+
+
+def test_performance_waterfall_suppresses_user_think_gap():
+    """Idle gap (BotMessage → UserMessage = user-think time) reports
+    zero so the bar doesn't dominate the view."""
+    from renderer.sections import build_performance_waterfall
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: hi",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "yo"',
+                timestamp="2024-01-01T00:00:30Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                summary="Plan received",
+                timestamp="2024-01-01T00:00:31Z",
+            ),
+        ],
+    )
+    rows = build_performance_waterfall(timeline)
+    user_msg = rows[1]
+    assert user_msg["is_idle"] == "true"
+    assert user_msg["gap_fmt"] == "—"
+
+
+def test_performance_waterfall_empty_for_zero_or_one_event():
+    """A single event has nothing to gap-from; return empty."""
+    from renderer.sections import build_performance_waterfall
+
+    assert build_performance_waterfall(ConversationTimeline()) == []
+    assert (
+        build_performance_waterfall(
+            ConversationTimeline(
+                events=[
+                    TimelineEvent(
+                        event_type=EventType.USER_MESSAGE,
+                        summary='User: "hi"',
+                        timestamp="2024-01-01T00:00:00Z",
+                    ),
+                ],
+            )
+        )
+        == []
+    )
+
+
 def test_flow_items_have_unique_flow_ids():
     """Every flow item carries a stable `flow_id` and matching `flow_row_id`
     (`row-<flow_id>`) — required for the error-banner deep-link plumbing."""
