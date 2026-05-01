@@ -5903,3 +5903,192 @@ def test_flow_unknown_topic_falls_back_to_no_link():
     triggered = next(i for i in items if i.get("event_type") == "StepTriggered")
     assert triggered["link_target_tab"] == ""
     assert triggered["link_target_id"] == ""
+
+
+def test_variable_tracker_includes_tool_call_rows():
+    """Tool calls remain a card_kind in the unified Variable Tracker, with
+    AUTO/MANUAL bindings preserved."""
+    from models import ToolCall
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        tool_calls=[
+            ToolCall(
+                step_id="s1",
+                task_dialog_id="tool.X",
+                display_name="Tool X",
+                step_type="Agent",
+                state="completed",
+                arguments={"a": "auto-val", "b": "manual-val"},
+                auto_filled_argument_names=["a"],
+                trigger_timestamp="2024-01-01T00:00:00Z",
+                finish_timestamp="2024-01-01T00:00:01Z",
+                duration_ms=1000.0,
+            ),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["card_kind"] == "tool_call"
+    assert row["display_name"] == "Tool X"
+    assert row["state"] == "completed"
+    assert row["state_tone"] == "good"
+    auto_flags = {arg["name"]: arg["auto_filled"] for arg in row["arguments"]}
+    assert auto_flags == {"a": "true", "b": ""}
+
+
+def test_variable_tracker_includes_variable_assignment_rows():
+    """Topic / Global SetVariable timeline events become card_kind
+    `variable_assignment` rows so non-orchestrator topic logic is visible."""
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT,
+                summary="Topic Topic.MyVar = hello world",
+                timestamp="2024-01-01T00:00:05Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT,
+                summary="Global Global.UserName = alice",
+                timestamp="2024-01-01T00:00:06Z",
+            ),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert [r["card_kind"] for r in rows] == ["variable_assignment", "variable_assignment"]
+    first = rows[0]
+    assert first["var_scope"] == "Topic"
+    assert first["var_name"] == "Topic.MyVar"
+    assert first["var_value"] == "hello world"
+
+
+def test_variable_tracker_includes_generative_answer_rows():
+    """Topic-level generative-answer traces become rows even when there are
+    no orchestrator tool calls — closes the previous gap where the tracker
+    silently disappeared on bots that only run topic-level GA."""
+    from models import BotProfile, ComponentSummary, GenerativeAnswerTrace
+    from web.state._upload import build_variable_tracker_rows
+
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Ai assistant Knowledge",
+                schema_name="aiAssistantKnowledge",
+                raw_dialog={
+                    "actions": [
+                        {"kind": "SearchAndSummarizeContent", "variable": "Topic.Var1"}
+                    ],
+                },
+            ),
+        ],
+    )
+    timeline = ConversationTimeline(
+        generative_answer_traces=[
+            GenerativeAnswerTrace(
+                topic_name="Ai assistant Knowledge",
+                gpt_answer_state="Answered",
+                original_message="how do I reset?",
+                rewritten_message="password reset procedure",
+                summary_text="Click forgot password.",
+                timestamp="2024-01-01T00:00:10Z",
+            ),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=profile)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["card_kind"] == "generative_answer"
+    assert row["display_name"] == "Ai assistant Knowledge"
+    assert row["ga_output_variable"] == "Topic.Var1"
+    assert row["state"] == "Answered"
+    assert row["state_tone"] == "good"
+
+
+def test_variable_tracker_empty_when_no_data():
+    """Empty timeline produces an empty row list — the UI is responsible
+    for the empty-state branch."""
+    from web.state._upload import build_variable_tracker_rows
+
+    rows = build_variable_tracker_rows(ConversationTimeline(), profile=None)
+    assert rows == []
+
+
+def test_variable_tracker_rows_share_uniform_keys():
+    """rx.foreach requires all rows in the mixed list to share the exact
+    same keys; otherwise the React reconciler crashes when rendering."""
+    from models import GenerativeAnswerTrace, ToolCall
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        tool_calls=[ToolCall(step_id="s1", task_dialog_id="tool.X", state="completed")],
+        events=[
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT,
+                summary="Topic Topic.X = 1",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+        ],
+        generative_answer_traces=[
+            GenerativeAnswerTrace(topic_name="T", gpt_answer_state="Answered"),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert len(rows) == 3
+    key_sets = [set(r.keys()) for r in rows]
+    assert key_sets[0] == key_sets[1] == key_sets[2]
+
+
+def test_variable_tracker_rows_sorted_by_timestamp():
+    """Rows from different sources interleave correctly when sorted."""
+    from models import GenerativeAnswerTrace, ToolCall
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        tool_calls=[
+            ToolCall(
+                step_id="s1",
+                task_dialog_id="tool.X",
+                state="completed",
+                trigger_timestamp="2024-01-01T00:00:05Z",
+                finish_timestamp="2024-01-01T00:00:05Z",
+            ),
+        ],
+        events=[
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT,
+                summary="Topic Topic.X = 1",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+        generative_answer_traces=[
+            GenerativeAnswerTrace(
+                topic_name="T",
+                gpt_answer_state="Answered",
+                timestamp="2024-01-01T00:00:03Z",
+            ),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert [r["card_kind"] for r in rows] == [
+        "variable_assignment",
+        "generative_answer",
+        "tool_call",
+    ]
+
+
+def test_variable_tracker_excludes_universal_search_tool():
+    """`UniversalSearchTool` is the orchestrator's wrapper around
+    SearchAndSummarizeContent — its tool-call shape duplicates info already
+    surfaced by the Knowledge tab, so we hide it from the tracker."""
+    from models import ToolCall
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        tool_calls=[ToolCall(step_id="s1", task_dialog_id="P:UniversalSearchTool", state="completed")],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert rows == []
