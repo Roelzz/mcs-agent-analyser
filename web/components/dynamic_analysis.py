@@ -4580,22 +4580,6 @@ def _mcs_conv_phase_row(item: dict) -> rx.Component:
     )
 
 
-def _mcs_conv_error_item(error: str) -> rx.Component:
-    return rx.box(
-        rx.hstack(
-            rx.icon("triangle-alert", size=14, color="var(--red-9)"),
-            rx.text(error, font_size="13px", color="var(--red-11)"),
-            spacing="2",
-            align="start",
-        ),
-        background="var(--red-a2)",
-        border="1px solid var(--red-a4)",
-        border_radius="8px",
-        padding="10px 12px",
-        width="100%",
-    )
-
-
 def _mcs_conv_reasoning_row(item: dict) -> rx.Component:
     return rx.box(
         rx.vstack(
@@ -5289,34 +5273,9 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                 ),
                 width="100%",
             ),
-            # (Event Log removed — Conversation Flow above provides
-            # grouped, filterable, deep-linked coverage of every event.)
-            # Errors
-            rx.cond(
-                State.mcs_conv_errors.length() > 0,  # type: ignore[union-attr]
-                card(
-                    rx.hstack(
-                        rx.icon("triangle-alert", size=16, color="var(--red-9)"),
-                        section_heading("Errors"),
-                        rx.spacer(),
-                        rx.badge(
-                            State.mcs_conv_errors.length().to(str),  # type: ignore[union-attr]
-                            color_scheme="red",
-                            variant="soft",
-                            size="1",
-                        ),
-                        align="center",
-                        width="100%",
-                    ),
-                    rx.vstack(
-                        rx.foreach(State.mcs_conv_errors, _mcs_conv_error_item),
-                        spacing="2",
-                        width="100%",
-                        padding_top="8px",
-                    ),
-                    width="100%",
-                ),
-            ),
+            # (Event Log + standalone Errors list removed — the Errors
+            # banner at the top of this tab enumerates the same items
+            # with click-to-jump deep links into the Conversation Flow.)
             # Orchestrator reasoning
             rx.cond(
                 State.mcs_conv_reasoning.length() > 0,  # type: ignore[union-attr]
