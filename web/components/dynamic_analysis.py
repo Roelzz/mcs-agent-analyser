@@ -1309,6 +1309,35 @@ def _mcs_profile_panel() -> rx.Component:
             width="100%",
             flex_wrap="wrap",
         ),
+        # Trigger Overlaps — static design check at the agent level
+        # (re-parented from the Topics tab where it was awkwardly inserted
+        # mid-tab). Flags topics with >50% token overlap in trigger phrases.
+        card(
+            section_heading("Trigger Overlaps"),
+            rx.text(
+                "Topics with >50% token overlap in trigger phrases — risks "
+                "ambiguous routing.",
+                font_size="12px",
+                color="var(--gray-a9)",
+                padding_bottom="8px",
+            ),
+            rx.cond(
+                State.mcs_profile_trigger_overlaps.length() > 0,  # type: ignore[union-attr]
+                _data_table(
+                    ["Topic A", "Topic B", "Overlap", "Shared Tokens"],
+                    "2fr 2fr 1fr 3fr",
+                    State.mcs_profile_trigger_overlaps,
+                    _mcs_profile_overlap_row,
+                ),
+                rx.text(
+                    "No overlaps detected — all topics have distinct trigger phrases.",
+                    font_size="12px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
+                ),
+            ),
+            width="100%",
+        ),
         # Bot Metadata
         card(
             section_heading("Bot Metadata"),
@@ -4093,32 +4122,8 @@ def _mcs_topics_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Trigger Overlaps
-        card(
-            section_heading("Trigger Overlaps"),
-            rx.text(
-                "Topics with >50% token overlap in trigger phrases.",
-                font_size="12px",
-                color="var(--gray-a9)",
-                padding_bottom="8px",
-            ),
-            rx.cond(
-                State.mcs_profile_trigger_overlaps.length() > 0,  # type: ignore[union-attr]
-                _data_table(
-                    ["Topic A", "Topic B", "Overlap", "Shared Tokens"],
-                    "2fr 2fr 1fr 3fr",
-                    State.mcs_profile_trigger_overlaps,
-                    _mcs_profile_overlap_row,
-                ),
-                rx.text(
-                    "No overlaps detected — all topics have distinct trigger phrases.",
-                    font_size="12px",
-                    color="var(--gray-a8)",
-                    font_style="italic",
-                ),
-            ),
-            width="100%",
-        ),
+        # (Trigger Overlaps moved to Profile tab — it's static-design
+        # analysis at the agent level, not topic-specific.)
         # Orchestrator Topics detail
         rx.cond(
             State.mcs_topics_orch_rows.length() > 0,  # type: ignore[union-attr]
