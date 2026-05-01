@@ -128,6 +128,17 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_topics_mermaid: str = ""
     mcs_topics_trigger_matches: list[dict] = []
 
+    # ── Topic Definition Explorer modal ──────────────────────────────────────
+    # Single unified picker over every topic. Each entry carries
+    # display_name, schema_name, category, action_count and pre-built
+    # `settings_rows` (from `flatten_to_rows`). A computed search filter
+    # narrows the list; a selected schema_name surfaces the matching
+    # rows in the right pane.
+    mcs_topic_explorer_open: bool = False
+    mcs_topic_explorer_search: str = ""
+    mcs_topic_explorer_selected: str = ""
+    mcs_topic_explorer_topics: list[dict] = []
+
     # ── Routing tab ───────────────────────────────────────────────────────────
     mcs_routing_lifecycles: list[dict] = []
     mcs_routing_decisions: list[dict] = []
@@ -161,6 +172,10 @@ class DynamicMixin(rx.State, mixin=True):
     # Error/exception banner — one row per ERROR-toned flow item with the
     # `flow_id` deep-link target so the user can jump straight to the row.
     mcs_conv_error_banner: list[dict] = []
+    # Performance Waterfall — one row per timed event with the gap from
+    # the previous activity. Different framing from the Gantt: shows
+    # *between-activity* time so bottlenecks stand out.
+    mcs_conv_waterfall: list[dict] = []
     mcs_conv_reasoning: list[dict] = []
     mcs_conv_sequence_mermaid: str = ""
     mcs_conv_gantt_mermaid: str = ""
@@ -281,6 +296,84 @@ class DynamicMixin(rx.State, mixin=True):
             "root.querySelectorAll('button[data-state=\"open\"][aria-expanded]').forEach(function(t){ t.click(); });"
         )
 
+    # ── Topic Definition Explorer events ────────────────────────────────────
+
+    @rx.event
+    def open_topic_explorer(self):
+        """Open the Topic Definition Explorer modal. Auto-selects the
+        first topic if none is currently selected."""
+        self.mcs_topic_explorer_open = True
+        if not self.mcs_topic_explorer_selected and self.mcs_topic_explorer_topics:
+            self.mcs_topic_explorer_selected = self.mcs_topic_explorer_topics[0].get("schema_name", "")
+
+    @rx.event
+    def close_topic_explorer(self):
+        self.mcs_topic_explorer_open = False
+
+    @rx.event
+    def set_topic_explorer_open(self, value: bool):
+        """Wired to the modal's `on_open_change` — closes the dialog
+        when the user clicks outside or presses Escape, and stays in
+        sync when our open_topic_explorer event sets it true."""
+        self.mcs_topic_explorer_open = value
+
+    @rx.event
+    def set_topic_explorer_search(self, value: str):
+        self.mcs_topic_explorer_search = value
+
+    @rx.event
+    def select_topic_in_explorer(self, schema_name: str):
+        self.mcs_topic_explorer_selected = schema_name
+
+    @rx.var
+    def mcs_topic_explorer_filtered(self) -> list[dict]:
+        """Topics matching the search box (case-insensitive substring on
+        display_name + schema_name + category). Returns full list when
+        the search is empty."""
+        q = (self.mcs_topic_explorer_search or "").strip().lower()
+        if not q:
+            return self.mcs_topic_explorer_topics
+        out: list[dict] = []
+        for t in self.mcs_topic_explorer_topics:
+            haystack = (
+                f"{t.get('display_name', '')} {t.get('schema_name', '')} "
+                f"{t.get('category', '')}"
+            ).lower()
+            if q in haystack:
+                out.append(t)
+        return out
+
+    @rx.var
+    def mcs_topic_explorer_selected_rows(self) -> list[dict]:
+        """Pre-flattened settings_rows for the currently selected topic.
+        Empty list when nothing is selected (or the selection no longer
+        matches a topic)."""
+        if not self.mcs_topic_explorer_selected:
+            return []
+        for t in self.mcs_topic_explorer_topics:
+            if t.get("schema_name") == self.mcs_topic_explorer_selected:
+                rows = t.get("settings_rows", [])
+                if isinstance(rows, list):
+                    return rows
+                return []
+        return []
+
+    @rx.var
+    def mcs_topic_explorer_selected_meta(self) -> dict:
+        """Display metadata for the currently selected topic, used by
+        the modal's right-pane header."""
+        if not self.mcs_topic_explorer_selected:
+            return {"display_name": "", "schema_name": "", "category": "", "action_count": "0"}
+        for t in self.mcs_topic_explorer_topics:
+            if t.get("schema_name") == self.mcs_topic_explorer_selected:
+                return {
+                    "display_name": t.get("display_name", ""),
+                    "schema_name": t.get("schema_name", ""),
+                    "category": t.get("category", ""),
+                    "action_count": t.get("action_count", "0"),
+                }
+        return {"display_name": "", "schema_name": "", "category": "", "action_count": "0"}
+
     # ── Conversation Flow filter wiring ─────────────────────────────────────
 
     # User-facing filter chip → set of EventType values it covers. Coarser
@@ -290,7 +383,15 @@ class DynamicMixin(rx.State, mixin=True):
     _FLOW_FILTER_CHIP_TO_TYPES: dict[str, list[str]] = {
         "Messages": ["UserMessage", "BotMessage"],
         "Plans": ["PlanReceived", "PlanFinished"],
-        "Actions": ["StepTriggered", "StepFinished", "ActionBeginDialog", "ActionSendActivity", "ActionHttpRequest", "ActionQA"],
+        "Actions": [
+            "StepTriggered",
+            "StepFinished",
+            "ActionBeginDialog",
+            "ActionSendActivity",
+            "ActionHttpRequest",
+            "ActionQA",
+            "ActionAIBuilder",
+        ],
         "Knowledge": ["KnowledgeSearch", "GenerativeAnswer"],
         "Traces": ["DialogTracing", "DialogRedirect", "ActionTriggerEval", "OrchestratorThinking", "IntentRecognition", "VariableAssignment"],
         "Errors": ["Error"],

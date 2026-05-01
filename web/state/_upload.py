@@ -27,6 +27,7 @@ from renderer.sections import (  # noqa: E402
     build_conversation_flow_items,
     build_conversation_visual_summary,
     build_orchestrator_decision_timeline,
+    build_performance_waterfall,
     build_plan_evolution,
     build_topic_lifecycles,
     build_trigger_match_items,
@@ -1766,6 +1767,43 @@ class UploadMixin(rx.State, mixin=True):
             },
         ]
 
+        # Topic Definition Explorer — flat list across every category so
+        # the modal can pick from a single unified surface. Each entry
+        # carries the pre-flattened `settings_rows` so the right pane
+        # only has to render the picked topic's rows. Sorted: user
+        # topics first, then orchestrator, then system, alphabetically
+        # within each.
+        category_order = {
+            "user_topics": (0, "User"),
+            "orchestrator_topics": (1, "Orchestrator"),
+            "automation_topics": (2, "Automation"),
+            "system_topics": (3, "System"),
+            "skills": (4, "Skill"),
+        }
+        explorer_entries: list[tuple[int, str, dict]] = []
+        for cat, comps in by_cat.items():
+            sort_key, cat_label = category_order.get(cat, (9, cat.replace("_", " ").title()))
+            for c in comps:
+                if c.kind != "DialogComponent":
+                    continue
+                rows = _cached_settings_rows(c)
+                action_count = sum(1 for r in rows if r.get("row_type") == "kind")
+                explorer_entries.append(
+                    (
+                        sort_key,
+                        c.display_name.lower(),
+                        {
+                            "display_name": c.display_name,
+                            "schema_name": c.schema_name,
+                            "category": cat_label,
+                            "action_count": str(action_count),
+                            "settings_rows": rows,
+                        },
+                    )
+                )
+        explorer_entries.sort(key=lambda x: (x[0], x[1]))
+        self.mcs_topic_explorer_topics = [e[2] for e in explorer_entries]  # type: ignore[attr-defined]
+
         # Mermaid topic graph — extract raw source
         topic_graph = render_topic_graph(profile)
         if topic_graph:
@@ -1873,6 +1911,11 @@ class UploadMixin(rx.State, mixin=True):
         # variable assignments, and topic-level Generative Answer traces. See
         # `build_variable_tracker_rows` for the row schema.
         self.mcs_conv_variables = build_variable_tracker_rows(timeline, profile)  # type: ignore[attr-defined]
+
+        # Performance Waterfall — see `build_performance_waterfall` for
+        # the row schema. One row per timed event with the gap from the
+        # previous activity (idle gaps suppressed).
+        self.mcs_conv_waterfall = build_performance_waterfall(timeline)  # type: ignore[attr-defined]
 
         # Event log
         _event_type_colors: dict[str, str] = {
@@ -2334,6 +2377,9 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_topics_anomalies = []  # type: ignore[attr-defined]
         self.mcs_topics_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_topics_trigger_matches = []  # type: ignore[attr-defined]
+        self.mcs_topic_explorer_topics = []  # type: ignore[attr-defined]
+        self.mcs_topic_explorer_selected = ""  # type: ignore[attr-defined]
+        self.mcs_topic_explorer_search = ""  # type: ignore[attr-defined]
         self.mcs_routing_lifecycles = []  # type: ignore[attr-defined]
         self.mcs_routing_decisions = []  # type: ignore[attr-defined]
         self.mcs_routing_plan_evolution = []  # type: ignore[attr-defined]
@@ -2351,6 +2397,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
         self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
+        self.mcs_conv_waterfall = []  # type: ignore[attr-defined]
         self.mcs_conv_reasoning = []  # type: ignore[attr-defined]
         self.mcs_conv_sequence_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_conv_gantt_mermaid = ""  # type: ignore[attr-defined]
@@ -2418,6 +2465,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
         self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
+        self.mcs_conv_waterfall = []  # type: ignore[attr-defined]
         self.mcs_conv_reasoning = []  # type: ignore[attr-defined]
         self.mcs_conv_sequence_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_conv_gantt_mermaid = ""  # type: ignore[attr-defined]

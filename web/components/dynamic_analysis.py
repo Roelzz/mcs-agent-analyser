@@ -3983,8 +3983,262 @@ def _mcs_trigger_match_card(item: dict) -> rx.Component:
     )
 
 
+def _mcs_topic_explorer_picker_row(item: dict) -> rx.Component:
+    """One row in the Topic Definition Explorer's left-hand picker.
+    Displays the topic name + category badge + action count, highlights
+    the selected row."""
+    is_selected = State.mcs_topic_explorer_selected == item["schema_name"]
+    return rx.hstack(
+        rx.vstack(
+            rx.text(
+                item["display_name"],
+                font_size="12px",
+                font_weight="600",
+                color=rx.cond(is_selected, "var(--green-12)", "var(--gray-12)"),
+                style={
+                    "overflow": "hidden",
+                    "textOverflow": "ellipsis",
+                    "whiteSpace": "nowrap",
+                },
+            ),
+            rx.hstack(
+                rx.badge(item["category"], color_scheme="teal", variant="soft", size="1"),
+                rx.text(
+                    item["action_count"],
+                    rx.text.span(" actions"),
+                    font_size="10px",
+                    color="var(--gray-a8)",
+                ),
+                spacing="2",
+                align="center",
+            ),
+            spacing="1",
+            align="start",
+            width="100%",
+            style={"minWidth": 0},
+        ),
+        on_click=State.select_topic_in_explorer(item["schema_name"]),
+        cursor="pointer",
+        padding="8px 10px",
+        border_radius="6px",
+        background=rx.cond(is_selected, "var(--green-a3)", "transparent"),
+        border=rx.cond(is_selected, "1px solid var(--green-a6)", "1px solid transparent"),
+        _hover={"background": "var(--green-a2)"},
+        transition="background 0.1s ease",
+        width="100%",
+    )
+
+
+def _mcs_topic_explorer_settings_row(row: dict) -> rx.Component:
+    """One settings row inside the Topic Definition Explorer's right
+    pane. Reuses the same kind/prop split used in the Topics tab so the
+    rendering is consistent."""
+    return rx.cond(
+        row["row_type"] == "kind",
+        _settings_kind_row(row),
+        _settings_prop_row(row),
+    )
+
+
+def _mcs_topic_explorer_modal() -> rx.Component:
+    """Dialog modal — searchable topic picker (left) + step-by-step
+    settings rows (right). Opens via the call-to-action at the top of
+    the Topics tab."""
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("Topic Definition Explorer"),
+            rx.dialog.description(
+                "Browse every topic in the agent. Search by name or category, "
+                "click a row to see its full step-by-step action tree (with "
+                "branching) on the right.",
+                size="2",
+                margin_bottom="12px",
+            ),
+            rx.hstack(
+                # Left pane — picker
+                rx.vstack(
+                    rx.input(
+                        placeholder="Search topics…",
+                        value=State.mcs_topic_explorer_search,
+                        on_change=State.set_topic_explorer_search,
+                        size="2",
+                        width="100%",
+                    ),
+                    rx.text(
+                        State.mcs_topic_explorer_filtered.length().to(str),  # type: ignore[union-attr]
+                        rx.text.span(" / "),
+                        State.mcs_topic_explorer_topics.length().to(str),  # type: ignore[union-attr]
+                        rx.text.span(" topics"),
+                        font_size="10px",
+                        color="var(--gray-a8)",
+                    ),
+                    rx.box(
+                        rx.foreach(
+                            State.mcs_topic_explorer_filtered,
+                            _mcs_topic_explorer_picker_row,
+                        ),
+                        width="100%",
+                        max_height="60vh",
+                        overflow_y="auto",
+                        border=f"1px solid {SURFACE_BORDER}",
+                        border_radius="8px",
+                        padding="6px",
+                    ),
+                    spacing="2",
+                    align="start",
+                    width="40%",
+                    flex_shrink="0",
+                ),
+                # Right pane — selected topic detail
+                rx.box(
+                    rx.cond(
+                        State.mcs_topic_explorer_selected != "",
+                        rx.vstack(
+                            rx.hstack(
+                                rx.text(
+                                    State.mcs_topic_explorer_selected_meta["display_name"],
+                                    font_size="16px",
+                                    font_weight="700",
+                                    color="var(--gray-12)",
+                                ),
+                                rx.badge(
+                                    State.mcs_topic_explorer_selected_meta["category"],
+                                    color_scheme="teal",
+                                    variant="soft",
+                                    size="1",
+                                ),
+                                rx.spacer(),
+                                rx.text(
+                                    State.mcs_topic_explorer_selected_meta["action_count"],
+                                    rx.text.span(" actions"),
+                                    font_size="11px",
+                                    color="var(--gray-a8)",
+                                ),
+                                spacing="2",
+                                align="center",
+                                width="100%",
+                            ),
+                            rx.cond(
+                                State.mcs_topic_explorer_selected_meta["schema_name"] != "",
+                                rx.code(
+                                    State.mcs_topic_explorer_selected_meta["schema_name"],
+                                    font_size="10px",
+                                    color="var(--gray-a9)",
+                                ),
+                            ),
+                            rx.divider(),
+                            rx.cond(
+                                State.mcs_topic_explorer_selected_rows.length() > 0,  # type: ignore[union-attr]
+                                rx.box(
+                                    rx.foreach(
+                                        State.mcs_topic_explorer_selected_rows,
+                                        _mcs_topic_explorer_settings_row,
+                                    ),
+                                    width="100%",
+                                    max_height="60vh",
+                                    overflow_y="auto",
+                                    padding_right="6px",
+                                ),
+                                rx.text(
+                                    "This topic has no settings rows — its dialog "
+                                    "tree is empty or wasn't captured during parse.",
+                                    font_size="11px",
+                                    color="var(--gray-a8)",
+                                    font_style="italic",
+                                ),
+                            ),
+                            spacing="2",
+                            align="start",
+                            width="100%",
+                        ),
+                        rx.center(
+                            rx.text(
+                                "Pick a topic on the left to see its action tree.",
+                                font_size="12px",
+                                color="var(--gray-a8)",
+                                font_style="italic",
+                            ),
+                            min_height="200px",
+                        ),
+                    ),
+                    flex_grow="1",
+                    width="100%",
+                    border=f"1px solid {SURFACE_BORDER}",
+                    border_radius="8px",
+                    padding="14px",
+                    background="var(--gray-a2)",
+                    style={"minWidth": 0},
+                ),
+                spacing="3",
+                align="start",
+                width="100%",
+            ),
+            rx.flex(
+                rx.dialog.close(
+                    rx.button("Close", size="2", variant="soft", color_scheme="gray"),
+                ),
+                spacing="2",
+                margin_top="14px",
+                justify="end",
+            ),
+            max_width="1100px",
+            width="92vw",
+        ),
+        open=State.mcs_topic_explorer_open,
+        on_open_change=State.set_topic_explorer_open,
+    )
+
+
+def _mcs_topic_explorer_card() -> rx.Component:
+    """Call-to-action card at the top of the Topics tab opening the
+    Topic Definition Explorer modal."""
+    return rx.cond(
+        State.mcs_topic_explorer_topics.length() > 0,  # type: ignore[union-attr]
+        card(
+            rx.hstack(
+                rx.icon("compass", size=20, color=PRIMARY),
+                rx.vstack(
+                    rx.text(
+                        "Topic Definition Explorer",
+                        font_size="14px",
+                        font_weight="700",
+                        color="var(--gray-12)",
+                    ),
+                    rx.text(
+                        "Browse every topic with a searchable picker + step-by-step "
+                        "action tree (incl. branching). Useful for understanding "
+                        "topic logic without leaving the analyser.",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        line_height="1.5",
+                    ),
+                    spacing="1",
+                    align="start",
+                    flex_grow="1",
+                ),
+                rx.button(
+                    "Open Explorer",
+                    rx.icon("external-link", size=12),
+                    size="2",
+                    variant="soft",
+                    color_scheme="green",
+                    on_click=State.open_topic_explorer,
+                ),
+                spacing="3",
+                align="center",
+                width="100%",
+            ),
+            width="100%",
+        ),
+    )
+
+
 def _mcs_topics_panel() -> rx.Component:
     return rx.vstack(
+        # Topic Definition Explorer launcher
+        _mcs_topic_explorer_card(),
+        # Explorer modal
+        _mcs_topic_explorer_modal(),
         # KPI grid
         rx.grid(
             rx.foreach(State.mcs_topics_kpis, _mcs_kpi_card),
@@ -4237,6 +4491,76 @@ def _mcs_model_panel() -> rx.Component:
 
 def _mcs_conv_meta_row(item: dict) -> rx.Component:
     return info_row(item["property"], item["value"])
+
+
+def _mcs_waterfall_row(item: dict) -> rx.Component:
+    """One row in the Performance Waterfall: activity label + a
+    horizontal proportional bar whose width is the gap-to-previous as a
+    percentage of the largest gap. The colour reflects the event
+    category (Message / Plan / Action / Knowledge / Orchestrator /
+    Trace / Error)."""
+    return rx.hstack(
+        rx.text(
+            item["timestamp"],
+            font_size="10px",
+            color="var(--gray-a7)",
+            font_family=_MONO,
+            min_width="64px",
+            flex_shrink="0",
+        ),
+        rx.badge(
+            item["category"],
+            color_scheme=rx.match(
+                item["category"],
+                ("Message", "green"),
+                ("Plan", "blue"),
+                ("Action", "teal"),
+                ("AI Builder", "purple"),
+                ("Knowledge", "amber"),
+                ("Orchestrator", "violet"),
+                ("Trace", "gray"),
+                ("Error", "red"),
+                "gray",
+            ),
+            variant="soft",
+            size="1",
+        ),
+        rx.text(
+            item["label"],
+            font_size="11px",
+            color="var(--gray-12)",
+            min_width="180px",
+            flex_grow="1",
+            style={"overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap"},
+        ),
+        rx.box(
+            rx.box(
+                width=item["width_pct"],
+                height="10px",
+                background=item["color"],
+                border_radius="4px",
+                min_width="2px",
+            ),
+            width="40%",
+            height="10px",
+            background="var(--gray-a3)",
+            border_radius="4px",
+            position="relative",
+            overflow="hidden",
+        ),
+        rx.text(
+            item["gap_fmt"],
+            font_size="10px",
+            color="var(--gray-a8)",
+            font_family=_MONO,
+            min_width="50px",
+            text_align="right",
+        ),
+        spacing="2",
+        align="center",
+        width="100%",
+        padding="3px 0",
+    )
 
 
 def _mcs_conv_phase_row(item: dict) -> rx.Component:
@@ -4900,6 +5224,43 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                         padding_x="12px",
                         background="var(--gray-a2)",
                         overflow_x="auto",
+                    ),
+                    width="100%",
+                ),
+            ),
+            # Performance Waterfall — between-activity gaps with
+            # category-colored bars so bottlenecks stand out. Different
+            # framing from the Gantt (which shows phase totals).
+            rx.cond(
+                State.mcs_conv_waterfall.length() > 0,  # type: ignore[union-attr]
+                card(
+                    rx.hstack(
+                        rx.icon("activity", size=16, color=PRIMARY),
+                        section_heading("Performance Waterfall"),
+                        rx.spacer(),
+                        rx.badge(
+                            State.mcs_conv_waterfall.length().to(str),  # type: ignore[union-attr]
+                            color_scheme="green",
+                            variant="soft",
+                            size="1",
+                        ),
+                        align="center",
+                        width="100%",
+                    ),
+                    rx.text(
+                        "Time gap between consecutive activities. Bar widths are "
+                        "proportional to the longest gap so the slowest step is "
+                        "easiest to find. User-think idle time is suppressed.",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_style="italic",
+                    ),
+                    rx.box(
+                        rx.foreach(State.mcs_conv_waterfall, _mcs_waterfall_row),
+                        width="100%",
+                        padding_top="8px",
+                        max_height="480px",
+                        overflow_y="auto",
                     ),
                     width="100%",
                 ),

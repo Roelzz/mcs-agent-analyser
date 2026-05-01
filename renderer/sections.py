@@ -10,6 +10,7 @@ from models import (
     CreditEstimate,
     EventType,
     ExecutionPhase,
+    TimelineEvent,
 )
 
 from model_comparison import build_comparison_markdown
@@ -217,7 +218,7 @@ from .profile import (  # noqa: E402
     render_topic_inventory,
     render_trigger_overlaps,
 )
-from ._helpers import _compute_idle_gaps, _format_duration, _parse_timestamp_to_epoch_ms  # noqa: E402
+from ._helpers import _compute_idle_gaps, _format_duration, _is_genuine_idle, _parse_timestamp_to_epoch_ms  # noqa: E402
 from .report import render_credit_estimate  # noqa: E402
 from .timeline_render import render_orchestrator_reasoning, render_timeline  # noqa: E402
 
@@ -568,6 +569,7 @@ def build_conversation_flow_items(
             EventType.ACTION_TRIGGER_EVAL,
             EventType.ORCHESTRATOR_THINKING,
             EventType.ERROR,
+            EventType.ACTION_AI_BUILDER,
         }:
             title_map = {
                 EventType.PLAN_RECEIVED: "Plan Received",
@@ -581,6 +583,7 @@ def build_conversation_flow_items(
                 EventType.ACTION_TRIGGER_EVAL: "Condition Eval",
                 EventType.ORCHESTRATOR_THINKING: "Orchestrator Thinking",
                 EventType.ERROR: "Error",
+                EventType.ACTION_AI_BUILDER: "AI Builder",
             }
             if ev.event_type == EventType.ERROR:
                 tone = "error"
@@ -1226,6 +1229,114 @@ def build_trigger_match_items(
         )
 
     return items
+
+
+# ---------------------------------------------------------------------------
+# Performance waterfall
+# ---------------------------------------------------------------------------
+
+
+_WATERFALL_CATEGORY: dict[str, tuple[str, str]] = {
+    # event_type.value → (category_label, css color)
+    "UserMessage": ("Message", "var(--green-9)"),
+    "BotMessage": ("Message", "var(--green-9)"),
+    "ActionSendActivity": ("Message", "var(--green-9)"),
+    "PlanReceived": ("Plan", "var(--blue-9)"),
+    "PlanFinished": ("Plan", "var(--blue-9)"),
+    "PlanReceivedDebug": ("Plan", "var(--blue-9)"),
+    "StepTriggered": ("Action", "var(--teal-9)"),
+    "StepFinished": ("Action", "var(--teal-9)"),
+    "ActionHttpRequest": ("Action", "var(--teal-9)"),
+    "ActionBeginDialog": ("Action", "var(--teal-9)"),
+    "ActionQA": ("Action", "var(--teal-9)"),
+    "ActionAIBuilder": ("AI Builder", "var(--purple-9)"),
+    "KnowledgeSearch": ("Knowledge", "var(--amber-9)"),
+    "GenerativeAnswer": ("Knowledge", "var(--amber-9)"),
+    "OrchestratorThinking": ("Orchestrator", "var(--violet-9)"),
+    "IntentRecognition": ("Orchestrator", "var(--violet-9)"),
+    "DialogTracing": ("Trace", "var(--gray-9)"),
+    "DialogRedirect": ("Trace", "var(--gray-9)"),
+    "ActionTriggerEval": ("Trace", "var(--gray-9)"),
+    "VariableAssignment": ("Trace", "var(--gray-9)"),
+    "Error": ("Error", "var(--red-9)"),
+}
+
+
+def _waterfall_category(event_type: EventType) -> tuple[str, str]:
+    return _WATERFALL_CATEGORY.get(event_type.value, ("Other", "var(--gray-9)"))
+
+
+def _format_gap(ms: float) -> str:
+    if ms < 1000:
+        return f"{ms:.0f} ms"
+    if ms < 60_000:
+        return f"{ms / 1000:.1f} s"
+    return f"{ms / 60_000:.1f} m"
+
+
+def build_performance_waterfall(timeline: ConversationTimeline) -> list[dict]:
+    """Build a one-row-per-timed-activity waterfall view exposing the gap
+    between each consecutive event so the user can spot bottlenecks.
+
+    The Gantt chart shows phase durations; the waterfall shows the
+    *gaps* between activities — distinct debugging signals. A long gap
+    between e.g. PlanReceived and StepTriggered points to orchestrator
+    reasoning latency; a long gap between BotMessage and UserMessage
+    is just user think time (and is suppressed since it's idle).
+
+    Bar widths are proportional to gap_ms / max_gap so the worst
+    offender is easiest to spot. Idle gaps (`_is_genuine_idle`) are
+    excluded so the user's own delay doesn't drown out the signal.
+    """
+    timed: list[tuple[int, TimelineEvent]] = []
+    for ev in timeline.events:
+        ms = _parse_timestamp_to_epoch_ms(ev.timestamp or "")
+        if ms is not None:
+            timed.append((ms, ev))
+    timed.sort(key=lambda x: x[0])
+    if len(timed) < 2:
+        return []
+
+    # Gaps in ms — first event has zero gap (anchor row).
+    rows: list[dict] = []
+    max_gap = 0.0
+    for i, (ms, ev) in enumerate(timed):
+        if i == 0:
+            gap_ms = 0.0
+            is_idle = False
+        else:
+            prev_ms, prev_ev = timed[i - 1]
+            gap_ms = float(ms - prev_ms)
+            is_idle = _is_genuine_idle(prev_ev, ev)
+            if is_idle:
+                gap_ms = 0.0
+        max_gap = max(max_gap, gap_ms)
+        category, color = _waterfall_category(ev.event_type)
+        label = ev.summary or ev.event_type.value
+        # Trim long summaries so the row stays readable.
+        if len(label) > 80:
+            label = label[:77] + "…"
+        rows.append(
+            {
+                "label": label,
+                "category": category,
+                "color": color,
+                "gap_ms": gap_ms,
+                "gap_fmt": _format_gap(gap_ms) if gap_ms > 0 else "—",
+                "is_idle": "true" if is_idle else "",
+                "topic_name": ev.topic_name or "",
+                "timestamp": _format_clock(ev.timestamp),
+            }
+        )
+    # Convert gap_ms to width_pct against the max so the widest bar is
+    # ~100%. Empty bars get a 0% width (rendered as a thin marker only).
+    for row in rows:
+        gap = row["gap_ms"]
+        pct = (gap / max_gap * 100.0) if max_gap > 0 else 0.0
+        row["width_pct"] = f"{pct:.1f}%"
+        # State stringification — Reflex stores everything as JSON-safe.
+        row["gap_ms"] = f"{gap:.0f}"
+    return rows
 
 
 # ---------------------------------------------------------------------------
