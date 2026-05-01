@@ -1363,44 +1363,93 @@ def _mcs_profile_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Connectors
+        # Connections (merged: Connector Definitions + Connection References + Connector Instances)
         rx.cond(
-            State.mcs_profile_connectors.length() > 0,  # type: ignore[union-attr]
+            (State.mcs_profile_connectors.length() > 0)  # type: ignore[union-attr]
+            | (State.mcs_profile_conn_refs.length() > 0)  # type: ignore[union-attr]
+            | (State.mcs_profile_conn_defs.length() > 0),  # type: ignore[union-attr]
             card(
-                section_heading("Connectors"),
-                _data_table(
-                    ["Name", "Type", "Description"],
-                    "2fr 1fr 3fr",
-                    State.mcs_profile_connectors,
-                    _mcs_profile_connector_row,
+                rx.hstack(
+                    rx.icon("plug", size=16, color=PRIMARY),
+                    section_heading("Connections"),
+                    spacing="2",
+                    align="center",
                 ),
-                width="100%",
-            ),
-        ),
-        # Connection References
-        rx.cond(
-            State.mcs_profile_conn_refs.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Connection References"),
-                _data_table(
-                    ["Name", "Connector", "Custom"],
-                    "2fr 2fr 1fr",
-                    State.mcs_profile_conn_refs,
-                    _mcs_profile_conn_ref_row,
+                rx.text(
+                    "All connector layers in one place: registered definitions, "
+                    "configured references, and deployed instances.",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
                 ),
-                width="100%",
-            ),
-        ),
-        # Connector Definitions
-        rx.cond(
-            State.mcs_profile_conn_defs.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Connector Definitions"),
-                _data_table(
-                    ["Name", "Type", "Custom", "Operations", "MCP"],
-                    "2fr 1fr 1fr 1fr 1fr",
-                    State.mcs_profile_conn_defs,
-                    _mcs_profile_conn_def_row,
+                # Definitions sub-table
+                rx.cond(
+                    State.mcs_profile_conn_defs.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Definitions",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_top="14px",
+                            padding_bottom="6px",
+                        ),
+                        _data_table(
+                            ["Name", "Type", "Custom", "Operations", "MCP"],
+                            "2fr 1fr 1fr 1fr 1fr",
+                            State.mcs_profile_conn_defs,
+                            _mcs_profile_conn_def_row,
+                        ),
+                        width="100%",
+                    ),
+                ),
+                # References sub-table
+                rx.cond(
+                    State.mcs_profile_conn_refs.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "References",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_top="14px",
+                            padding_bottom="6px",
+                        ),
+                        _data_table(
+                            ["Name", "Connector", "Custom"],
+                            "2fr 2fr 1fr",
+                            State.mcs_profile_conn_refs,
+                            _mcs_profile_conn_ref_row,
+                        ),
+                        width="100%",
+                    ),
+                ),
+                # Instances sub-table
+                rx.cond(
+                    State.mcs_profile_connectors.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Instances",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_top="14px",
+                            padding_bottom="6px",
+                        ),
+                        _data_table(
+                            ["Name", "Type", "Description"],
+                            "2fr 1fr 3fr",
+                            State.mcs_profile_connectors,
+                            _mcs_profile_connector_row,
+                        ),
+                        width="100%",
+                    ),
                 ),
                 width="100%",
             ),
