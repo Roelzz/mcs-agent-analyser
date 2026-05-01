@@ -1599,20 +1599,6 @@ def _mcs_tools_chain_card(item: dict) -> rx.Component:
     )
 
 
-def _mcs_tools_reasoning_row(item: dict) -> rx.Component:
-    """Reasoning table row."""
-    return _grid_row(
-        [
-            rx.text(item["index"], font_size="13px", color="var(--gray-a9)"),
-            rx.text(item["tool"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-            rx.text(
-                item["thought"], font_size="12px", color="var(--gray-11)", overflow="hidden", text_overflow="ellipsis"
-            ),
-        ],
-        template="0.3fr 2fr 5fr",
-    )
-
-
 def _mcs_tools_detail_card(item: dict) -> rx.Component:
     """Expandable detail card for a single tool call."""
     status_color = rx.cond(item["state"] == "completed", "green", "red")
@@ -1827,20 +1813,10 @@ def _mcs_tools_panel() -> rx.Component:
                         width="100%",
                     ),
                 ),
-                # Orchestrator reasoning
-                rx.cond(
-                    State.mcs_tools_reasoning_rows.length() > 0,  # type: ignore[union-attr]
-                    card(
-                        section_heading("Orchestrator Reasoning"),
-                        _data_table(
-                            ["#", "Tool", "Thought"],
-                            "0.3fr 2fr 5fr",
-                            State.mcs_tools_reasoning_rows,
-                            _mcs_tools_reasoning_row,
-                        ),
-                        width="100%",
-                    ),
-                ),
+                # (Tools-tab Orchestrator Reasoning removed — the full
+                # decision timeline lives on the Routing tab; per-tool
+                # `thought` text appears on each Variable Tracker
+                # tool-call card on the Conversation tab.)
                 # Tool call details (expandable)
                 rx.cond(
                     State.mcs_tools_detail_rows.length() > 0,  # type: ignore[union-attr]

@@ -91,7 +91,6 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_tools_call_count: int = 0
     mcs_tools_stats_rows: list[dict] = []
     mcs_tools_chain_rows: list[dict] = []
-    mcs_tools_reasoning_rows: list[dict] = []
     mcs_tools_detail_rows: list[dict] = []
     mcs_tools_flow_mermaid: str = ""
     mcs_tools_inventory_rows: list[dict] = []
