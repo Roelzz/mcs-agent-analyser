@@ -768,15 +768,15 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
         if d > 0
     ]
     orchestrator_durations = [p.duration_ms for p in timeline.phases if p.duration_ms > 0 and _is_orchestrator_phase(p)]
-    step_durations = [
-        d
-        for d in (
-            _active_duration(p, idle_gaps)
-            for p in timeline.phases
-            if p.duration_ms > 0 and not _is_search_phase(p) and not _is_orchestrator_phase(p)
-        )
-        if d > 0
+    # Per-step (phase, active-duration) so we can identify the slowest one
+    # by name. User wait/idle gaps are already subtracted by `_active_duration`.
+    step_phase_durations: list[tuple[str, float]] = [
+        (p.label, _active_duration(p, idle_gaps))
+        for p in timeline.phases
+        if p.duration_ms > 0 and not _is_search_phase(p) and not _is_orchestrator_phase(p)
     ]
+    step_phase_durations = [(label, d) for label, d in step_phase_durations if d > 0]
+    step_durations = [d for _, d in step_phase_durations]
 
     # KPI values
     avg_latency_str = f"{avg_latency:.0f} ms" if latencies else "—"
@@ -799,6 +799,54 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
             "tone": "warn" if latencies and p95_latency >= 6000 else "neutral",
         },
     ]
+
+    # Slowest step (excluding user wait/idle) — points to the single most
+    # expensive non-search, non-orchestrator phase. Surface the phase label
+    # in the hint so the user knows where to look.
+    if step_phase_durations:
+        slowest_label, slowest_ms = max(step_phase_durations, key=lambda lbl_d: lbl_d[1])
+        slowest_value = f"{slowest_ms / 1000:.1f}s" if slowest_ms >= 1000 else f"{slowest_ms:.0f} ms"
+        kpis.append(
+            {
+                "label": "Slowest Step",
+                "value": slowest_value,
+                "hint": f"{slowest_label} (excl. user wait)",
+                "tone": "warn" if slowest_ms >= 4000 else "neutral",
+            }
+        )
+
+    # Plans completed vs cancelled — `PLAN_FINISHED.summary` carries
+    # `(cancelled=True|False)` from timeline.py:676. Surface as a single
+    # KPI ("3 / 4 completed") so the user sees both numbers at once.
+    plan_finished_events = [e for e in timeline.events if e.event_type == EventType.PLAN_FINISHED]
+    if plan_finished_events:
+        cancelled_plans = sum(1 for e in plan_finished_events if "cancelled=True" in (e.summary or ""))
+        total_plans = len(plan_finished_events)
+        completed_plans = total_plans - cancelled_plans
+        kpis.append(
+            {
+                "label": "Plans Completed",
+                "value": f"{completed_plans} / {total_plans}",
+                "hint": f"{cancelled_plans} cancelled" if cancelled_plans else "all completed",
+                "tone": "warn" if cancelled_plans > 0 else "neutral",
+            }
+        )
+
+    # Tool-call success rate — fraction of orchestrator-invoked tool calls
+    # that finished with state == "completed". Hidden when there are no
+    # tool calls (transcripts without orchestrator activity).
+    if timeline.tool_calls:
+        total_calls = len(timeline.tool_calls)
+        success_calls = sum(1 for tc in timeline.tool_calls if tc.state == "completed")
+        success_pct = (success_calls / total_calls) * 100
+        kpis.append(
+            {
+                "label": "Tool Success Rate",
+                "value": f"{success_pct:.0f}%",
+                "hint": f"{success_calls} / {total_calls} succeeded",
+                "tone": "warn" if success_pct < 95 else "neutral",
+            }
+        )
 
     # Event mix
     mix_raw = [

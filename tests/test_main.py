@@ -6126,6 +6126,94 @@ def test_flow_items_have_unique_flow_ids():
         assert it["flow_row_id"] == f"row-{it['flow_id']}"
 
 
+def test_visual_summary_slowest_step_kpi():
+    """Slowest step KPI surfaces the phase with the longest active duration
+    excluding search and orchestrator phases."""
+    from models import ExecutionPhase
+
+    timeline = ConversationTimeline(
+        phases=[
+            ExecutionPhase(
+                label="OrchestratorThinking",
+                phase_type="OrchestratorThinking",
+                duration_ms=2000.0,
+            ),
+            ExecutionPhase(label="FastTopic", phase_type="Topic", duration_ms=500.0),
+            ExecutionPhase(label="SlowTopic", phase_type="Topic", duration_ms=7500.0),
+            ExecutionPhase(label="MyKnowledge", phase_type="KnowledgeSource", duration_ms=12000.0),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    slowest = next(k for k in result["kpis"] if k["label"] == "Slowest Step")
+    assert slowest["value"] == "7.5s"
+    assert "SlowTopic" in slowest["hint"]
+    assert slowest["tone"] == "warn"
+
+
+def test_visual_summary_plans_completed_kpi():
+    """Plans Completed KPI counts PLAN_FINISHED events and detects
+    cancellation via the summary's `cancelled=True/False` marker."""
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.PLAN_FINISHED,
+                summary="Plan finished (cancelled=False)",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_FINISHED,
+                summary="Plan finished (cancelled=True)",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_FINISHED,
+                summary="Plan finished (cancelled=False)",
+                timestamp="2024-01-01T00:00:03Z",
+            ),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    plans = next(k for k in result["kpis"] if k["label"] == "Plans Completed")
+    assert plans["value"] == "2 / 3"
+    assert "1 cancelled" in plans["hint"]
+    assert plans["tone"] == "warn"
+
+
+def test_visual_summary_tool_success_kpi():
+    """Tool Success Rate KPI is the fraction of tool_calls with
+    state == 'completed'."""
+    from models import ToolCall
+
+    timeline = ConversationTimeline(
+        tool_calls=[
+            ToolCall(step_id="s1", task_dialog_id="t1", state="completed"),
+            ToolCall(step_id="s2", task_dialog_id="t2", state="completed"),
+            ToolCall(step_id="s3", task_dialog_id="t3", state="failed"),
+            ToolCall(step_id="s4", task_dialog_id="t4", state="completed"),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    tool_kpi = next(k for k in result["kpis"] if k["label"] == "Tool Success Rate")
+    assert tool_kpi["value"] == "75%"
+    assert "3 / 4" in tool_kpi["hint"]
+    assert tool_kpi["tone"] == "warn"
+
+
+def test_visual_summary_optional_kpis_hidden_when_empty():
+    """The new KPIs are skipped (not rendered as zero) when there's no
+    underlying data — keeps the grid tight on transcript-only uploads."""
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary='User: "hi"', timestamp="2024-01-01T00:00:00Z"),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    labels = {k["label"] for k in result["kpis"]}
+    assert "Slowest Step" not in labels
+    assert "Plans Completed" not in labels
+    assert "Tool Success Rate" not in labels
+
+
 def test_error_banner_rows_filter_to_error_flow_items():
     """The Conversation tab error banner is built from flow items whose
     `tone == 'error'`, carrying their `flow_id` for click-to-jump."""
