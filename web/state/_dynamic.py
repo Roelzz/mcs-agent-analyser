@@ -252,6 +252,14 @@ class DynamicMixin(rx.State, mixin=True):
     def set_mcs_analyse_tab(self, tab: str):
         self.mcs_analyse_tab = tab
 
+    @rx.event
+    def copy_flow_row_json(self, raw_json: str):
+        """Copy a Conversation Flow row's serialized TimelineEvent to the
+        clipboard. Wired to the per-row copy button — small but valued
+        when filing bugs against Microsoft about a specific activity."""
+        yield rx.set_clipboard(raw_json)
+        yield rx.toast("Activity JSON copied", duration=2000)
+
     # ── Conversation Flow filter wiring ─────────────────────────────────────
 
     # User-facing filter chip → set of EventType values it covers. Coarser

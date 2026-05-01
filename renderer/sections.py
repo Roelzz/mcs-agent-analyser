@@ -490,6 +490,11 @@ def build_conversation_flow_items(
         # so component code doesn't have to concat at render time.
         "flow_id": "",
         "flow_row_id": "",
+        # Pretty-printed JSON of the underlying TimelineEvent — surfaced via
+        # the per-row copy button + raw-JSON accordion so the user can
+        # quickly grab the activity payload (helpful when filing bugs
+        # against Microsoft).
+        "raw_json": "",
     }
 
     latest_user_idx: int | None = None
@@ -517,6 +522,7 @@ def build_conversation_flow_items(
                     **_detail_defaults,
                 }
             )
+            items[-1]["raw_json"] = _flow_event_raw_json(ev)
             continue
 
         if ev.event_type == EventType.BOT_MESSAGE:
@@ -537,6 +543,7 @@ def build_conversation_flow_items(
                     **_detail_defaults,
                 }
             )
+            items[-1]["raw_json"] = _flow_event_raw_json(ev)
             continue
 
         if ev.event_type in {
@@ -650,12 +657,24 @@ def build_conversation_flow_items(
                     "link_target_id": link_id,
                 }
             )
+            items[-1]["raw_json"] = _flow_event_raw_json(ev)
 
     for idx, item in enumerate(items):
         item["flow_id"] = f"flow-{idx}"
         item["flow_row_id"] = f"row-flow-{idx}"
 
     return items
+
+
+def _flow_event_raw_json(ev) -> str:
+    """Pretty-print the TimelineEvent for the per-row 'Raw JSON' accordion
+    + copy button. Pydantic v2 carries `model_dump_json` which respects
+    the model schema. Stripped of trailing whitespace so the accordion
+    doesn't leave dangling lines."""
+    try:
+        return ev.model_dump_json(indent=2, exclude_none=True).strip()
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------------

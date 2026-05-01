@@ -441,6 +441,76 @@ def _has_flow_details(item: dict) -> rx.Var:
     )
 
 
+def _flow_row_actions(item: dict) -> rx.Component:
+    """Per-row copy-JSON button + collapsible Raw JSON viewer. Renders
+    only when `raw_json` is non-empty. Click handlers use
+    `stop_propagation` so they don't trigger the parent card's
+    deep-link navigation."""
+    return rx.cond(
+        item["raw_json"] != "",
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                rx.tooltip(
+                    rx.icon_button(
+                        rx.icon("copy", size=12),
+                        size="1",
+                        variant="ghost",
+                        color_scheme="green",
+                        on_click=State.copy_flow_row_json(item["raw_json"]).stop_propagation,  # type: ignore[attr-defined]
+                    ),
+                    content="Copy activity JSON",
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            rx.box(
+                rx.accordion.root(
+                    rx.accordion.item(
+                        header=rx.text(
+                            "Raw activity JSON",
+                            font_size="10px",
+                            color="var(--gray-a8)",
+                            font_weight="700",
+                        ),
+                        content=rx.box(
+                            rx.el.pre(
+                                item["raw_json"],
+                                style={
+                                    "fontSize": "10px",
+                                    "color": "var(--gray-12)",
+                                    "lineHeight": "1.5",
+                                    "whiteSpace": "pre-wrap",
+                                    "wordBreak": "break-word",
+                                    "margin": 0,
+                                },
+                            ),
+                            background="var(--gray-a3)",
+                            border_radius="6px",
+                            padding="8px 10px",
+                            max_height="280px",
+                            overflow_y="auto",
+                            width="100%",
+                        ),
+                        value="raw",
+                    ),
+                    type="single",
+                    collapsible=True,
+                    variant="ghost",
+                    width="100%",
+                ),
+                # Stop click bubbling so opening the accordion doesn't
+                # also fire the card's deep-link navigation.
+                on_click=rx.stop_propagation,
+                width="100%",
+            ),
+            spacing="0",
+            width="100%",
+        ),
+    )
+
+
 def _mcs_flow_event(item: dict) -> rx.Component:
     is_error = item["tone"] == "error"
     is_trace = item["tone"] == "trace"
@@ -522,8 +592,11 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                             _flow_event_detail_accordion(item),
                             rx.box(),
                         ),
+                        # Per-row copy + raw JSON
+                        _flow_row_actions(item),
                         align="start",
                         spacing="1",
+                        width="100%",
                     ),
                     spacing="2",
                     align="start",

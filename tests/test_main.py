@@ -6266,6 +6266,35 @@ def test_visual_summary_optional_kpis_hidden_when_empty():
     assert "Tool Success Rate" not in labels
 
 
+def test_flow_items_carry_raw_json_payload():
+    """Each flow item exposes a pretty-printed `raw_json` of its source
+    TimelineEvent — wired to the per-row copy button + Raw JSON
+    accordion. Required so users can grab activity payloads when filing
+    bugs against Microsoft."""
+    import json
+
+    from renderer.sections import build_conversation_flow_items
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Action Started: MyTopic",
+                topic_name="MyTopic",
+                step_id="abc",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    assert len(items) == 1
+    raw = items[0]["raw_json"]
+    assert raw  # non-empty
+    parsed = json.loads(raw)
+    assert parsed["step_id"] == "abc"
+    assert parsed["topic_name"] == "MyTopic"
+
+
 def test_error_banner_rows_filter_to_error_flow_items():
     """The Conversation tab error banner is built from flow items whose
     `tone == 'error'`, carrying their `flow_id` for click-to-jump."""
