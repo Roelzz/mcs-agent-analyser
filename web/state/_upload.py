@@ -762,9 +762,6 @@ class UploadMixin(rx.State, mixin=True):
                 tool_data = build_tool_call_analysis_data(timeline)
                 self.mcs_tools_call_count = len(timeline.tool_calls)  # type: ignore[attr-defined]
                 self.mcs_tools_stats_rows = tool_data["stats_rows"]  # type: ignore[attr-defined]
-                self.mcs_tools_chain_rows = tool_data["chain_rows"]  # type: ignore[attr-defined]
-                self.mcs_tools_reasoning_rows = tool_data["reasoning_rows"]  # type: ignore[attr-defined]
-                self.mcs_tools_detail_rows = tool_data["detail_rows"]  # type: ignore[attr-defined]
                 self.mcs_tools_flow_mermaid = tool_data["flow_mermaid"]  # type: ignore[attr-defined]
                 self.mcs_tools_kpis = tool_data["kpis"]  # type: ignore[attr-defined]
 
@@ -787,9 +784,6 @@ class UploadMixin(rx.State, mixin=True):
             cat = _classify_component(comp)
             if cat:
                 by_cat.setdefault(cat, []).append(comp)
-
-        user_topics = by_cat.get("user_topics", [])
-        tools = [c for c in profile.components if c.tool_type]
 
         # Quick wins
         quick_wins: list[dict] = []
@@ -882,12 +876,30 @@ class UploadMixin(rx.State, mixin=True):
                         }
                     )
 
-        # KPIs
+        # KPIs — Profile tab is the agent-level lens; per-capability
+        # counts (User Topics, Tools, Knowledge) live on their own tabs
+        # to avoid duplicating numbers across multiple grids.
         total_comps = sum(len(v) for k, v in by_cat.items() if k in _CATEGORY_ORDER)
+        instructions_chars = (
+            len(profile.gpt_info.instructions) if profile.gpt_info and profile.gpt_info.instructions else 0
+        )
+        starter_count = (
+            len(profile.gpt_info.conversation_starters) if profile.gpt_info and profile.gpt_info.conversation_starters else 0
+        )
         self.mcs_profile_kpis = [  # type: ignore[attr-defined]
             {"label": "Components", "value": str(total_comps), "hint": "Total config items", "tone": "neutral"},
-            {"label": "User Topics", "value": str(len(user_topics)), "hint": "Trigger-based", "tone": "neutral"},
-            {"label": "Tools", "value": str(len(tools)), "hint": "Agent tools", "tone": "neutral"},
+            {
+                "label": "Instructions",
+                "value": f"{instructions_chars:,}",
+                "hint": "characters" if instructions_chars else "not configured",
+                "tone": "warn" if instructions_chars == 0 else "neutral",
+            },
+            {
+                "label": "Conversation Starters",
+                "value": str(starter_count),
+                "hint": "Suggested prompts" if starter_count else "not configured",
+                "tone": "warn" if starter_count == 0 else "neutral",
+            },
             {
                 "label": "Quick Wins",
                 "value": str(len(quick_wins)),
@@ -1162,9 +1174,6 @@ class UploadMixin(rx.State, mixin=True):
             tool_data = build_tool_call_analysis_data(timeline, profile)
             self.mcs_tools_call_count = len(timeline.tool_calls)  # type: ignore[attr-defined]
             self.mcs_tools_stats_rows = tool_data["stats_rows"]  # type: ignore[attr-defined]
-            self.mcs_tools_chain_rows = tool_data["chain_rows"]  # type: ignore[attr-defined]
-            self.mcs_tools_reasoning_rows = tool_data["reasoning_rows"]  # type: ignore[attr-defined]
-            self.mcs_tools_detail_rows = tool_data["detail_rows"]  # type: ignore[attr-defined]
             self.mcs_tools_flow_mermaid = tool_data["flow_mermaid"]  # type: ignore[attr-defined]
             self.mcs_tools_inventory_rows = tool_data["inventory_rows"]  # type: ignore[attr-defined]
             # Extend KPIs with runtime data
@@ -1172,9 +1181,6 @@ class UploadMixin(rx.State, mixin=True):
         else:
             self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
             self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
-            self.mcs_tools_chain_rows = []  # type: ignore[attr-defined]
-            self.mcs_tools_reasoning_rows = []  # type: ignore[attr-defined]
-            self.mcs_tools_detail_rows = []  # type: ignore[attr-defined]
             self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]
             self.mcs_tools_inventory_rows = []  # type: ignore[attr-defined]
 
@@ -1923,33 +1929,6 @@ class UploadMixin(rx.State, mixin=True):
         # previous activity (idle gaps suppressed).
         self.mcs_conv_waterfall = build_performance_waterfall(timeline)  # type: ignore[attr-defined]
 
-        # Event log
-        _event_type_colors: dict[str, str] = {
-            "USER_MESSAGE": "green",
-            "BOT_MESSAGE": "green",
-            "PLAN_RECEIVED": "blue",
-            "PLAN_FINISHED": "blue",
-            "STEP_TRIGGERED": "teal",
-            "STEP_FINISHED": "teal",
-            "KNOWLEDGE_SEARCH": "amber",
-            "ERROR": "red",
-            "ACTION_HTTP_REQUEST": "purple",
-            "ACTION_QA": "purple",
-            "ACTION_TRIGGER_EVAL": "purple",
-            "DIALOG_TRACING": "gray",
-            "DIALOG_REDIRECT": "gray",
-        }
-        self.mcs_conv_event_log = [  # type: ignore[attr-defined]
-            {
-                "index": str(i),
-                "position": str(ev.position),
-                "event_type": ev.event_type.name,
-                "summary": ev.summary[:200],
-                "type_color": _event_type_colors.get(ev.event_type.name, "gray"),
-            }
-            for i, ev in enumerate(timeline.events, 1)
-        ]
-
         # Errors
         self.mcs_conv_errors = list(timeline.errors)  # type: ignore[attr-defined]
 
@@ -2356,9 +2335,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_tools_external_calls = []  # type: ignore[attr-defined]
         self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
         self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
-        self.mcs_tools_chain_rows = []  # type: ignore[attr-defined]
-        self.mcs_tools_reasoning_rows = []  # type: ignore[attr-defined]
-        self.mcs_tools_detail_rows = []  # type: ignore[attr-defined]
         self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_tools_inventory_rows = []  # type: ignore[attr-defined]
         self.mcs_knowledge_kpis = []  # type: ignore[attr-defined]
@@ -2400,7 +2376,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_highlight_target_id = ""  # type: ignore[attr-defined]
         self.mcs_conv_variables = []  # type: ignore[attr-defined]
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
-        self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
         self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
         self.mcs_conv_waterfall = []  # type: ignore[attr-defined]
@@ -2469,7 +2444,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_highlight_target_id = ""  # type: ignore[attr-defined]
         self.mcs_conv_variables = []  # type: ignore[attr-defined]
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
-        self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
         self.mcs_conv_error_banner = []  # type: ignore[attr-defined]
         self.mcs_conv_waterfall = []  # type: ignore[attr-defined]

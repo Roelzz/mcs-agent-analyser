@@ -1309,6 +1309,35 @@ def _mcs_profile_panel() -> rx.Component:
             width="100%",
             flex_wrap="wrap",
         ),
+        # Trigger Overlaps — static design check at the agent level
+        # (re-parented from the Topics tab where it was awkwardly inserted
+        # mid-tab). Flags topics with >50% token overlap in trigger phrases.
+        card(
+            section_heading("Trigger Overlaps"),
+            rx.text(
+                "Topics with >50% token overlap in trigger phrases — risks "
+                "ambiguous routing.",
+                font_size="12px",
+                color="var(--gray-a9)",
+                padding_bottom="8px",
+            ),
+            rx.cond(
+                State.mcs_profile_trigger_overlaps.length() > 0,  # type: ignore[union-attr]
+                _data_table(
+                    ["Topic A", "Topic B", "Overlap", "Shared Tokens"],
+                    "2fr 2fr 1fr 3fr",
+                    State.mcs_profile_trigger_overlaps,
+                    _mcs_profile_overlap_row,
+                ),
+                rx.text(
+                    "No overlaps detected — all topics have distinct trigger phrases.",
+                    font_size="12px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
+                ),
+            ),
+            width="100%",
+        ),
         # Bot Metadata
         card(
             section_heading("Bot Metadata"),
@@ -1334,44 +1363,93 @@ def _mcs_profile_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Connectors
+        # Connections (merged: Connector Definitions + Connection References + Connector Instances)
         rx.cond(
-            State.mcs_profile_connectors.length() > 0,  # type: ignore[union-attr]
+            (State.mcs_profile_connectors.length() > 0)  # type: ignore[union-attr]
+            | (State.mcs_profile_conn_refs.length() > 0)  # type: ignore[union-attr]
+            | (State.mcs_profile_conn_defs.length() > 0),  # type: ignore[union-attr]
             card(
-                section_heading("Connectors"),
-                _data_table(
-                    ["Name", "Type", "Description"],
-                    "2fr 1fr 3fr",
-                    State.mcs_profile_connectors,
-                    _mcs_profile_connector_row,
+                rx.hstack(
+                    rx.icon("plug", size=16, color=PRIMARY),
+                    section_heading("Connections"),
+                    spacing="2",
+                    align="center",
                 ),
-                width="100%",
-            ),
-        ),
-        # Connection References
-        rx.cond(
-            State.mcs_profile_conn_refs.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Connection References"),
-                _data_table(
-                    ["Name", "Connector", "Custom"],
-                    "2fr 2fr 1fr",
-                    State.mcs_profile_conn_refs,
-                    _mcs_profile_conn_ref_row,
+                rx.text(
+                    "All connector layers in one place: registered definitions, "
+                    "configured references, and deployed instances.",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
                 ),
-                width="100%",
-            ),
-        ),
-        # Connector Definitions
-        rx.cond(
-            State.mcs_profile_conn_defs.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Connector Definitions"),
-                _data_table(
-                    ["Name", "Type", "Custom", "Operations", "MCP"],
-                    "2fr 1fr 1fr 1fr 1fr",
-                    State.mcs_profile_conn_defs,
-                    _mcs_profile_conn_def_row,
+                # Definitions sub-table
+                rx.cond(
+                    State.mcs_profile_conn_defs.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Definitions",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_top="14px",
+                            padding_bottom="6px",
+                        ),
+                        _data_table(
+                            ["Name", "Type", "Custom", "Operations", "MCP"],
+                            "2fr 1fr 1fr 1fr 1fr",
+                            State.mcs_profile_conn_defs,
+                            _mcs_profile_conn_def_row,
+                        ),
+                        width="100%",
+                    ),
+                ),
+                # References sub-table
+                rx.cond(
+                    State.mcs_profile_conn_refs.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "References",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_top="14px",
+                            padding_bottom="6px",
+                        ),
+                        _data_table(
+                            ["Name", "Connector", "Custom"],
+                            "2fr 2fr 1fr",
+                            State.mcs_profile_conn_refs,
+                            _mcs_profile_conn_ref_row,
+                        ),
+                        width="100%",
+                    ),
+                ),
+                # Instances sub-table
+                rx.cond(
+                    State.mcs_profile_connectors.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Instances",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_top="14px",
+                            padding_bottom="6px",
+                        ),
+                        _data_table(
+                            ["Name", "Type", "Description"],
+                            "2fr 1fr 3fr",
+                            State.mcs_profile_connectors,
+                            _mcs_profile_connector_row,
+                        ),
+                        width="100%",
+                    ),
                 ),
                 width="100%",
             ),
@@ -1514,7 +1592,7 @@ def _mcs_tool_row(item: dict) -> rx.Component:
             border_bottom=f"1px solid {SURFACE_BORDER}",
             width="100%",
         ),
-        _settings_explained_accordion(item),
+        _open_in_explorer_link(item),
         spacing="0",
         width="100%",
         id=item["row_id"],
@@ -1555,196 +1633,6 @@ def _mcs_tools_stats_row(item: dict) -> rx.Component:
         template="2fr 1fr 0.5fr 1fr 1fr 1fr",
     )
 
-
-def _mcs_tools_chain_card(item: dict) -> rx.Component:
-    """Summary card for an async/polling chain."""
-    return rx.box(
-        rx.hstack(
-            rx.text(item["tool"], font_size="13px", font_weight="600", color="var(--gray-12)"),
-            rx.badge(item["call_count_label"], color_scheme="purple", variant="soft", size="1"),
-            rx.text(item["total_duration"], font_size="12px", color="var(--gray-a9)"),
-            rx.badge(
-                item["final_state"],
-                color_scheme=rx.cond(item["final_state"] == "completed", "green", "red"),
-                variant="soft",
-                size="1",
-            ),
-            spacing="2",
-            align="center",
-        ),
-        rx.cond(
-            item["status_label"] != "",
-            rx.hstack(
-                rx.text("Status:", font_size="11px", color="var(--gray-a8)"),
-                rx.badge(item["status_label"], color_scheme="blue", variant="outline", size="1"),
-                spacing="1",
-                align="center",
-                padding_top="4px",
-            ),
-        ),
-        rx.cond(
-            item["correlation_label"] != "",
-            rx.text(
-                rx.text.span("Correlation: ", font_weight="600", color="var(--gray-a8)"),
-                rx.text.span(item["correlation_label"], font_size="11px", color="var(--gray-11)"),
-                font_size="11px",
-                padding_top="2px",
-            ),
-        ),
-        padding="10px 14px",
-        border=f"1px solid {SURFACE_BORDER}",
-        border_radius="8px",
-        background="var(--gray-a2)",
-        width="100%",
-    )
-
-
-def _mcs_tools_reasoning_row(item: dict) -> rx.Component:
-    """Reasoning table row."""
-    return _grid_row(
-        [
-            rx.text(item["index"], font_size="13px", color="var(--gray-a9)"),
-            rx.text(item["tool"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-            rx.text(
-                item["thought"], font_size="12px", color="var(--gray-11)", overflow="hidden", text_overflow="ellipsis"
-            ),
-        ],
-        template="0.3fr 2fr 5fr",
-    )
-
-
-def _mcs_tools_detail_card(item: dict) -> rx.Component:
-    """Expandable detail card for a single tool call."""
-    status_color = rx.cond(item["state"] == "completed", "green", "red")
-
-    header = rx.hstack(
-        rx.text(item["index_label"], font_size="12px", color="var(--gray-a8)", font_weight="600"),
-        rx.text(item["tool"], font_size="13px", font_weight="600", color="var(--gray-12)"),
-        rx.cond(
-            item["tool_type"] != "",
-            rx.badge(item["tool_type"], color_scheme="gray", variant="soft", size="1"),
-        ),
-        rx.badge(item["state"], color_scheme=status_color, variant="soft", size="1"),
-        rx.text(item["duration"], font_size="12px", color="var(--gray-a9)"),
-        rx.cond(
-            item["chain_id"] != "",
-            rx.badge("chain", color_scheme="purple", variant="outline", size="1"),
-        ),
-        spacing="2",
-        align="center",
-        width="100%",
-    )
-
-    # Build content sections
-    content_parts = []
-
-    # Thought
-    content_parts.append(
-        rx.cond(
-            item["thought"] != "",
-            rx.box(
-                rx.text(
-                    item["thought"], font_size="12px", font_style="italic", color="var(--gray-a9)", line_height="1.4"
-                ),
-                padding="8px 12px",
-                border_left="3px solid var(--green-a6)",
-                background="var(--green-a2)",
-                border_radius="0 6px 6px 0",
-                width="100%",
-            ),
-        )
-    )
-
-    # Arguments — pre-computed as formatted text
-    content_parts.append(
-        rx.cond(
-            item["arguments_text"] != "",
-            rx.vstack(
-                rx.text("Arguments", font_size="11px", font_weight="600", color="var(--gray-a8)"),
-                rx.box(
-                    rx.el.pre(
-                        item["arguments_text"],
-                        font_size="11px",
-                        color="var(--gray-11)",
-                        white_space="pre-wrap",
-                        font_family="var(--font-mono)",
-                    ),
-                    width="100%",
-                    padding="6px 10px",
-                    border=f"1px solid {SURFACE_BORDER}",
-                    border_radius="6px",
-                    background="var(--gray-a2)",
-                ),
-                spacing="1",
-                width="100%",
-            ),
-        )
-    )
-
-    # Observation summary
-    content_parts.append(
-        rx.cond(
-            item["observation_summary"] != "",
-            rx.vstack(
-                rx.text("Response", font_size="11px", font_weight="600", color="var(--gray-a8)"),
-                rx.text(item["observation_summary"], font_size="12px", color="var(--gray-11)"),
-                spacing="1",
-                width="100%",
-            ),
-        )
-    )
-
-    # Raw JSON (interactive tree viewer)
-    content_parts.append(
-        rx.cond(
-            item["observation_json"] != "",
-            rx.vstack(
-                rx.text("Response JSON", font_size="11px", font_weight="600", color="var(--gray-a8)"),
-                rx.box(
-                    rx.el.div(
-                        class_name="json-tree-viewer",
-                        custom_attrs={"data-json": item["observation_json"]},
-                    ),
-                    max_height="400px",
-                    overflow_y="auto",
-                    width="100%",
-                    padding="10px 14px",
-                    background="var(--gray-a2)",
-                    border=f"1px solid {SURFACE_BORDER}",
-                    border_radius="8px",
-                ),
-                spacing="1",
-                width="100%",
-            ),
-        )
-    )
-
-    # Error
-    content_parts.append(
-        rx.cond(
-            item["error"] != "",
-            rx.text(item["error"], font_size="12px", color="var(--red-9)", font_weight="500"),
-        )
-    )
-
-    return rx.accordion.root(
-        rx.accordion.item(
-            header=header,
-            content=rx.vstack(
-                *content_parts,
-                spacing="3",
-                width="100%",
-                padding_top="8px",
-            ),
-            value=item["accordion_value"],
-        ),
-        collapsible=True,
-        width="100%",
-        variant="ghost",
-        border=f"1px solid {SURFACE_BORDER}",
-        border_radius="10px",
-        background="var(--gray-a2)",
-    )
 
 
 def _mcs_tools_panel() -> rx.Component:
@@ -1814,43 +1702,40 @@ def _mcs_tools_panel() -> rx.Component:
                         width="100%",
                     ),
                 ),
-                # Async chains
+                # Per-call detail lives on the Conversation tab
+                # Variable Tracker (richer: AUTO/MANUAL bindings,
+                # arguments, output preview, raw JSON, errors). Provide
+                # a small CTA link rather than duplicate the rendering
+                # here. Async/polling chains and per-call expandable
+                # detail cards used to live here too — same reasoning.
                 rx.cond(
-                    State.mcs_tools_chain_rows.length() > 0,  # type: ignore[union-attr]
-                    card(
-                        section_heading("Async / Polling Chains"),
-                        rx.vstack(
-                            rx.foreach(State.mcs_tools_chain_rows, _mcs_tools_chain_card),
-                            spacing="2",
-                            width="100%",
+                    State.mcs_tools_call_count > 0,  # type: ignore[operator]
+                    rx.box(
+                        rx.hstack(
+                            rx.icon("variable", size=14, color=PRIMARY),
+                            rx.text(
+                                "Per-call detail (arguments, outputs, AUTO/MANUAL "
+                                "bindings, raw JSON, errors) lives in the ",
+                                font_size="12px",
+                                color="var(--gray-a9)",
+                                line_height="1.5",
+                            ),
+                            rx.link(
+                                "Variable Tracker on the Conversation tab →",
+                                font_size="12px",
+                                font_weight="600",
+                                color="var(--green-11)",
+                                cursor="pointer",
+                                on_click=State.set_mcs_analyse_tab("conversation"),
+                            ),
+                            spacing="1",
+                            align="center",
+                            flex_wrap="wrap",
                         ),
-                        width="100%",
-                    ),
-                ),
-                # Orchestrator reasoning
-                rx.cond(
-                    State.mcs_tools_reasoning_rows.length() > 0,  # type: ignore[union-attr]
-                    card(
-                        section_heading("Orchestrator Reasoning"),
-                        _data_table(
-                            ["#", "Tool", "Thought"],
-                            "0.3fr 2fr 5fr",
-                            State.mcs_tools_reasoning_rows,
-                            _mcs_tools_reasoning_row,
-                        ),
-                        width="100%",
-                    ),
-                ),
-                # Tool call details (expandable)
-                rx.cond(
-                    State.mcs_tools_detail_rows.length() > 0,  # type: ignore[union-attr]
-                    card(
-                        section_heading("Tool Call Details"),
-                        rx.vstack(
-                            rx.foreach(State.mcs_tools_detail_rows, _mcs_tools_detail_card),
-                            spacing="2",
-                            width="100%",
-                        ),
+                        background="var(--green-a2)",
+                        border="1px solid var(--green-a4)",
+                        border_radius="8px",
+                        padding="10px 12px",
                         width="100%",
                     ),
                 ),
@@ -2659,16 +2544,29 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                     padding="6px 0",
                 ),
             ),
-            # Citations
+            # Citations (inline summary — full audit table with answer
+            # state, completion state, moderation + provenance flags is
+            # in the Citation Verification panel below).
             rx.cond(
                 trace["citation_count"] != "0",
                 rx.box(
-                    rx.text(
-                        "Citations cited in answer",
-                        font_size="11px",
-                        color="var(--gray-a8)",
-                        font_weight="700",
+                    rx.hstack(
+                        rx.text(
+                            "Citations cited in answer",
+                            font_size="11px",
+                            color="var(--gray-a8)",
+                            font_weight="700",
+                        ),
+                        rx.spacer(),
+                        rx.text(
+                            "Detailed audit in Citation Verification panel ↓",
+                            font_size="10px",
+                            color="var(--gray-a7)",
+                            font_style="italic",
+                        ),
+                        align="center",
                         margin_bottom="4px",
+                        width="100%",
                     ),
                     rx.foreach(trace["citations"].to(list[dict]), _gen_trace_citation_row),
                     width="100%",
@@ -2875,16 +2773,109 @@ def _mcs_knowledge_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Coverage table
+        # Knowledge Sources (merged: Coverage config + KE runtime stats).
+        # Two sub-tables under one card so the user sees both the static
+        # configuration and runtime effectiveness for the same set of
+        # sources without flipping between cards.
         rx.cond(
-            State.mcs_knowledge_coverage.length() > 0,  # type: ignore[union-attr]
+            (State.mcs_knowledge_coverage.length() > 0)  # type: ignore[union-attr]
+            | (State.mcs_ins_ke_kpis.length() > 0),  # type: ignore[union-attr]
             card(
-                section_heading("Coverage"),
-                _data_table(
-                    ["Name", "Type", "State", "Trigger", "Notes"],
-                    "2fr 1fr 1fr 1fr 2fr",
-                    State.mcs_knowledge_coverage,
-                    _mcs_ks_coverage_row,
+                rx.hstack(
+                    rx.icon("database", size=16, color="var(--amber-9)"),
+                    section_heading("Knowledge Sources"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "Configured knowledge sources and their runtime effectiveness "
+                    "(hit rate, contribution to grounded responses).",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
+                ),
+                # Runtime KPIs (formerly under "Knowledge Source Effectiveness")
+                rx.cond(
+                    State.mcs_ins_ke_kpis.length() > 0,  # type: ignore[union-attr]
+                    rx.hstack(
+                        rx.foreach(State.mcs_ins_ke_kpis, _ins_kpi),
+                        spacing="3",
+                        width="100%",
+                        overflow_x="auto",
+                        padding_y="12px",
+                    ),
+                ),
+                # Configuration sub-table (formerly "Coverage")
+                rx.cond(
+                    State.mcs_knowledge_coverage.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Configuration",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_y="8px",
+                        ),
+                        _data_table(
+                            ["Name", "Type", "State", "Trigger", "Notes"],
+                            "2fr 1fr 1fr 1fr 2fr",
+                            State.mcs_knowledge_coverage,
+                            _mcs_ks_coverage_row,
+                        ),
+                        width="100%",
+                    ),
+                ),
+                # Runtime effectiveness sub-table (formerly "Knowledge Source Effectiveness")
+                rx.cond(
+                    State.mcs_ins_ke_kpis.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Runtime effectiveness",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_y="8px",
+                        ),
+                        rx.box(
+                            rx.grid(
+                                rx.text("Source", **_INS_HEADER_CELL),
+                                rx.text("Queries", **_INS_HEADER_CELL, text_align="right"),
+                                rx.text("Contributed", **_INS_HEADER_CELL, text_align="right"),
+                                rx.text("Hit Rate", **_INS_HEADER_CELL),
+                                rx.text("Errors", **_INS_HEADER_CELL, text_align="right"),
+                                rx.text("Avg Results", **_INS_HEADER_CELL, text_align="right"),
+                                columns="2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr",
+                                gap="8px",
+                                padding_y="8px",
+                                border_bottom=f"2px solid {SURFACE_BORDER}",
+                                width="100%",
+                            ),
+                            rx.foreach(State.mcs_ins_ke_rows, _ins_ke_row),
+                            width="100%",
+                        ),
+                        rx.cond(
+                            State.mcs_ins_ke_warnings.length() > 0,  # type: ignore[union-attr]
+                            rx.box(
+                                rx.text(
+                                    "Low-performing sources",
+                                    font_size="12px",
+                                    font_weight="700",
+                                    color="var(--amber-9)",
+                                    padding_top="12px",
+                                ),
+                                rx.foreach(
+                                    State.mcs_ins_ke_warnings,
+                                    lambda w: rx.text(f"• {w}", font_size="12px", color="var(--gray-a9)"),
+                                ),
+                                width="100%",
+                            ),
+                        ),
+                        width="100%",
+                    ),
                 ),
                 width="100%",
             ),
@@ -2981,60 +2972,9 @@ def _mcs_knowledge_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Knowledge Source Effectiveness (moved from Insights)
-        rx.cond(
-            State.mcs_ins_ke_kpis.length() > 0,  # type: ignore[union-attr]
-            card(
-                _ins_card_header(
-                    "database",
-                    "var(--amber-9)",
-                    "Knowledge Source Effectiveness",
-                    "Per-source hit rate and contribution to grounded responses.",
-                ),
-                rx.hstack(
-                    rx.foreach(State.mcs_ins_ke_kpis, _ins_kpi),
-                    spacing="3",
-                    width="100%",
-                    overflow_x="auto",
-                    padding_y="12px",
-                ),
-                rx.box(
-                    rx.grid(
-                        rx.text("Source", **_INS_HEADER_CELL),
-                        rx.text("Queries", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Contributed", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Hit Rate", **_INS_HEADER_CELL),
-                        rx.text("Errors", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Avg Results", **_INS_HEADER_CELL, text_align="right"),
-                        columns="2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr",
-                        gap="8px",
-                        padding_y="8px",
-                        border_bottom=f"2px solid {SURFACE_BORDER}",
-                        width="100%",
-                    ),
-                    rx.foreach(State.mcs_ins_ke_rows, _ins_ke_row),
-                    width="100%",
-                ),
-                rx.cond(
-                    State.mcs_ins_ke_warnings.length() > 0,  # type: ignore[union-attr]
-                    rx.box(
-                        rx.text(
-                            "Low-performing sources",
-                            font_size="12px",
-                            font_weight="700",
-                            color="var(--amber-9)",
-                            padding_top="12px",
-                        ),
-                        rx.foreach(
-                            State.mcs_ins_ke_warnings,
-                            lambda w: rx.text(f"• {w}", font_size="12px", color="var(--gray-a9)"),
-                        ),
-                        width="100%",
-                    ),
-                ),
-                width="100%",
-            ),
-        ),
+        # (Knowledge Source Effectiveness merged into "Knowledge Sources"
+        # card above — the unified card renders config + runtime stats
+        # for the same set of sources in one place.)
         spacing="4",
         width="100%",
     )
@@ -3451,9 +3391,13 @@ def _mcs_routing_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Section 2: Plan Evolution (only when >1 plan)
+        # Section 2: Plan Evolution (merged — KPIs + per-replan diffs +
+        # full plan-evolution cards). Previously rendered as two separate
+        # cards ("Plan Evolution" and "Plan Evolution Diffs"); merged
+        # here so all plan-replanning information lives in one place.
         rx.cond(
-            State.mcs_routing_plan_evolution.length() > 0,  # type: ignore[union-attr]
+            (State.mcs_routing_plan_evolution.length() > 0)  # type: ignore[union-attr]
+            | (State.mcs_ins_plan_diffs.length() > 0),  # type: ignore[union-attr]
             card(
                 rx.hstack(
                     rx.icon("git-compare", size=16, color="var(--amber-9)"),
@@ -3462,18 +3406,63 @@ def _mcs_routing_panel() -> rx.Component:
                     align="center",
                 ),
                 rx.text(
-                    "How the orchestrator's plan changed across replanning attempts.",
+                    "How the orchestrator's plan changed across replanning attempts — "
+                    "summary KPIs, per-turn diffs, and the full plan-by-plan timeline.",
                     font_size="12px",
                     color="var(--gray-a9)",
                     padding_bottom="8px",
                 ),
-                rx.box(
-                    rx.foreach(State.mcs_routing_plan_evolution, _mcs_plan_evolution_card),
-                    width="100%",
-                    border=f"1px solid {SURFACE_BORDER}",
-                    border_radius="8px",
-                    background="var(--gray-a2)",
-                    overflow="hidden",
+                # KPIs (formerly under "Plan Evolution Diffs")
+                rx.cond(
+                    State.mcs_ins_plan_kpis.length() > 0,  # type: ignore[union-attr]
+                    rx.hstack(
+                        rx.foreach(State.mcs_ins_plan_kpis, _ins_kpi),
+                        spacing="3",
+                        width="100%",
+                        overflow_x="auto",
+                        padding_y="12px",
+                    ),
+                ),
+                # Per-turn replan diffs (formerly under "Plan Evolution Diffs")
+                rx.cond(
+                    State.mcs_ins_plan_diffs.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Per-turn replan diffs",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_y="8px",
+                        ),
+                        rx.foreach(State.mcs_ins_plan_diffs, _ins_plan_diff_item),
+                        width="100%",
+                    ),
+                ),
+                # Full plan-by-plan timeline (formerly the standalone "Plan Evolution" card)
+                rx.cond(
+                    State.mcs_routing_plan_evolution.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Plan-by-plan timeline",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_y="8px",
+                        ),
+                        rx.box(
+                            rx.foreach(State.mcs_routing_plan_evolution, _mcs_plan_evolution_card),
+                            width="100%",
+                            border=f"1px solid {SURFACE_BORDER}",
+                            border_radius="8px",
+                            background="var(--gray-a2)",
+                            overflow="hidden",
+                        ),
+                        width="100%",
+                    ),
                 ),
                 width="100%",
             ),
@@ -3489,7 +3478,10 @@ def _mcs_routing_panel() -> rx.Component:
                     align="center",
                 ),
                 rx.text(
-                    "How topics were triggered, executed, and completed during the conversation.",
+                    "Per-topic runtime view — answers \"which topics fired, "
+                    "what was their state, what did each contribute?\". For "
+                    "phase-level (recognition / planning / execution) timing, "
+                    "see Conversation → Phase Breakdown.",
                     font_size="12px",
                     color="var(--gray-a9)",
                     padding_bottom="8px",
@@ -3516,7 +3508,10 @@ def _mcs_routing_panel() -> rx.Component:
                     align="center",
                 ),
                 rx.text(
-                    "How user messages matched against topic trigger phrases.",
+                    "Answers \"for each user message, which trigger phrase did "
+                    "the orchestrator pick and how strong was the match?\". "
+                    "Pairs with Topic Coverage (below) which lists topics that "
+                    "didn't fire at all.",
                     font_size="12px",
                     color="var(--gray-a9)",
                     padding_bottom="8px",
@@ -3532,30 +3527,7 @@ def _mcs_routing_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Section 5: Plan Evolution Diffs (moved from Insights)
-        rx.cond(
-            State.mcs_ins_plan_diffs.length() > 0,  # type: ignore[union-attr]
-            card(
-                _ins_card_header(
-                    "git-compare",
-                    "var(--violet-9)",
-                    "Plan Evolution Diffs",
-                    "How the orchestrator changed its plan within a single turn.",
-                ),
-                rx.cond(
-                    State.mcs_ins_plan_kpis.length() > 0,  # type: ignore[union-attr]
-                    rx.hstack(
-                        rx.foreach(State.mcs_ins_plan_kpis, _ins_kpi),
-                        spacing="3",
-                        width="100%",
-                        overflow_x="auto",
-                        padding_y="12px",
-                    ),
-                ),
-                rx.foreach(State.mcs_ins_plan_diffs, _ins_plan_diff_item),
-                width="100%",
-            ),
-        ),
+        # (Plan Evolution Diffs merged into Section 2 above.)
         # Section 6: Topic Coverage (moved from Topics)
         rx.cond(
             State.mcs_topics_coverage.length() > 0,  # type: ignore[union-attr]
@@ -3565,6 +3537,13 @@ def _mcs_routing_panel() -> rx.Component:
                     section_heading("Topic Coverage"),
                     spacing="2",
                     align="center",
+                ),
+                rx.text(
+                    "Answers \"which topics never fired in this conversation?\" — "
+                    "complement to Trigger Phrase Analysis above.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="6px",
                 ),
                 rx.text(
                     State.mcs_topics_coverage_summary,
@@ -3703,68 +3682,30 @@ def _settings_prop_row(row: dict) -> rx.Component:
     )
 
 
-def _settings_row_dispatch(row: dict) -> rx.Component:
-    """Render either a kind row or a prop row based on `row_type`."""
-    return rx.cond(
-        row["row_type"] == "kind",
-        _settings_kind_row(row),
-        _settings_prop_row(row),
-    )
-
-
-def _settings_explained_accordion(item: dict) -> rx.Component:
-    """Per-row accordion that opens to the structured settings panel.
-
-    Each setting in the panel has an (i) icon. Hovering reveals a card with
-    the KB-sourced explanation and a Microsoft Learn link. Undocumented
-    settings show a circle-help icon and an explicit "not in KB" hover.
-
-    Rendered only when `settings_rows` is non-empty, so non-DialogComponent
-    rows collapse cleanly.
-    """
+def _open_in_explorer_link(item: dict) -> rx.Component:
+    """Compact 'Open in Explorer' link replacing the per-row inline
+    settings accordion. The Topic Definition Explorer modal is the
+    canonical full-tree view; per-row tables on the Topics tab now
+    show summary columns only."""
     return rx.cond(
         item["has_settings"] != "",
-        rx.accordion.root(
-            rx.accordion.item(
-                header=rx.hstack(
-                    rx.icon("settings", size=12, color=PRIMARY),
+        rx.box(
+            rx.link(
+                rx.hstack(
+                    rx.icon("compass", size=10, color="var(--green-11)"),
                     rx.text(
-                        "Settings",
-                        font_size="11px",
-                        color="var(--gray-a9)",
-                        font_weight="700",
-                    ),
-                    rx.text(
-                        "(hover ⓘ to explain)",
+                        "Open in Topic Explorer",
                         font_size="10px",
-                        color="var(--gray-a8)",
-                        font_style="italic",
+                        color="var(--green-11)",
+                        font_weight="600",
                     ),
-                    spacing="2",
+                    spacing="1",
                     align="center",
                 ),
-                content=rx.box(
-                    rx.vstack(
-                        rx.foreach(
-                            item["settings_rows"].to(list[dict]),  # type: ignore[union-attr]
-                            _settings_row_dispatch,
-                        ),
-                        spacing="0",
-                        align="start",
-                        width="100%",
-                    ),
-                    padding="10px 14px",
-                    background="var(--gray-a2)",
-                    border_radius="6px",
-                    max_height="520px",
-                    overflow_y="auto",
-                ),
-                value="settings_explained",
+                cursor="pointer",
+                on_click=State.open_topic_in_explorer(item["link_id"]),
             ),
-            type="single",
-            collapsible=True,
-            width="100%",
-            variant="ghost",
+            padding="2px 8px",
         ),
     )
 
@@ -3814,7 +3755,7 @@ def _mcs_topics_user_row(item: dict) -> rx.Component:
             ],
             template="2fr 2fr 1fr 2fr 2fr",
         ),
-        _settings_explained_accordion(item),
+        _open_in_explorer_link(item),
         spacing="0",
         width="100%",
         id=item["row_id"],
@@ -3839,7 +3780,7 @@ def _mcs_topics_orch_row(item: dict) -> rx.Component:
             ],
             template="2fr 1fr 1fr 1fr 1fr",
         ),
-        _settings_explained_accordion(item),
+        _open_in_explorer_link(item),
         spacing="0",
         width="100%",
         id=item["row_id"],
@@ -3863,7 +3804,7 @@ def _mcs_topics_system_row(item: dict) -> rx.Component:
             ],
             template="2fr 2fr 1fr 1fr",
         ),
-        _settings_explained_accordion(item),
+        _open_in_explorer_link(item),
         spacing="0",
         width="100%",
         id=item["row_id"],
@@ -4286,32 +4227,8 @@ def _mcs_topics_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Trigger Overlaps
-        card(
-            section_heading("Trigger Overlaps"),
-            rx.text(
-                "Topics with >50% token overlap in trigger phrases.",
-                font_size="12px",
-                color="var(--gray-a9)",
-                padding_bottom="8px",
-            ),
-            rx.cond(
-                State.mcs_profile_trigger_overlaps.length() > 0,  # type: ignore[union-attr]
-                _data_table(
-                    ["Topic A", "Topic B", "Overlap", "Shared Tokens"],
-                    "2fr 2fr 1fr 3fr",
-                    State.mcs_profile_trigger_overlaps,
-                    _mcs_profile_overlap_row,
-                ),
-                rx.text(
-                    "No overlaps detected — all topics have distinct trigger phrases.",
-                    font_size="12px",
-                    color="var(--gray-a8)",
-                    font_style="italic",
-                ),
-            ),
-            width="100%",
-        ),
+        # (Trigger Overlaps moved to Profile tab — it's static-design
+        # analysis at the agent level, not topic-specific.)
         # Orchestrator Topics detail
         rx.cond(
             State.mcs_topics_orch_rows.length() > 0,  # type: ignore[union-attr]
@@ -4576,58 +4493,6 @@ def _mcs_conv_phase_row(item: dict) -> rx.Component:
         align="center",
         padding_y="6px",
         border_bottom=f"1px solid {SURFACE_BORDER}",
-        width="100%",
-    )
-
-
-def _mcs_conv_event_row(item: dict) -> rx.Component:
-    return rx.grid(
-        rx.text(item["index"], font_size="13px", color="var(--gray-a9)", text_align="right"),
-        rx.text(item["position"], font_size="13px", color="var(--gray-11)", font_family=_MONO),
-        rx.badge(
-            item["event_type"],
-            color_scheme=rx.match(
-                item["type_color"],
-                ("green", "green"),
-                ("blue", "blue"),
-                ("teal", "teal"),
-                ("amber", "amber"),
-                ("red", "red"),
-                ("purple", "purple"),
-                "gray",
-            ),
-            variant="soft",
-            size="1",
-        ),
-        rx.text(
-            item["summary"],
-            font_size="12px",
-            color="var(--gray-11)",
-            overflow="hidden",
-            text_overflow="ellipsis",
-            white_space="nowrap",
-        ),
-        columns="0.5fr 0.5fr 1.5fr 4fr",
-        gap="8px",
-        align="center",
-        padding_y="6px",
-        border_bottom=f"1px solid {SURFACE_BORDER}",
-        width="100%",
-    )
-
-
-def _mcs_conv_error_item(error: str) -> rx.Component:
-    return rx.box(
-        rx.hstack(
-            rx.icon("triangle-alert", size=14, color="var(--red-9)"),
-            rx.text(error, font_size="13px", color="var(--red-11)"),
-            spacing="2",
-            align="start",
-        ),
-        background="var(--red-a2)",
-        border="1px solid var(--red-a4)",
-        border_radius="8px",
-        padding="10px 12px",
         width="100%",
     )
 
@@ -5214,6 +5079,15 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                         spacing="2",
                         align="center",
                     ),
+                    rx.text(
+                        "Answers \"how long did each conversation phase take?\" "
+                        "(recognition, planning, execution, delivery). For per-topic "
+                        "lifecycle detail see Routing → Topic Lifecycles.",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_style="italic",
+                        padding_bottom="8px",
+                    ),
                     rx.box(
                         _grid_header(
                             "Phase", "Type", "Duration", "% of Total", "Status", template="2fr 1fr 1fr 1fr 1fr"
@@ -5325,64 +5199,9 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                 ),
                 width="100%",
             ),
-            # Event log
-            rx.cond(
-                State.mcs_conv_event_log.length() > 0,  # type: ignore[union-attr]
-                card(
-                    rx.hstack(
-                        rx.icon("list", size=16, color=PRIMARY),
-                        section_heading("Event Log"),
-                        rx.spacer(),
-                        rx.badge(
-                            State.mcs_conv_event_log.length().to(str),  # type: ignore[union-attr]
-                            color_scheme="green",
-                            variant="soft",
-                            size="1",
-                        ),
-                        align="center",
-                        width="100%",
-                    ),
-                    rx.box(
-                        _grid_header("#", "Position", "Type", "Summary", template="0.5fr 0.5fr 1.5fr 4fr"),
-                        rx.foreach(State.mcs_conv_event_log, _mcs_conv_event_row),
-                        width="100%",
-                        border=f"1px solid {SURFACE_BORDER}",
-                        border_radius="8px",
-                        padding_x="12px",
-                        background="var(--gray-a2)",
-                        overflow_x="auto",
-                        max_height="600px",
-                        overflow_y="auto",
-                    ),
-                    width="100%",
-                ),
-            ),
-            # Errors
-            rx.cond(
-                State.mcs_conv_errors.length() > 0,  # type: ignore[union-attr]
-                card(
-                    rx.hstack(
-                        rx.icon("triangle-alert", size=16, color="var(--red-9)"),
-                        section_heading("Errors"),
-                        rx.spacer(),
-                        rx.badge(
-                            State.mcs_conv_errors.length().to(str),  # type: ignore[union-attr]
-                            color_scheme="red",
-                            variant="soft",
-                            size="1",
-                        ),
-                        align="center",
-                        width="100%",
-                    ),
-                    rx.vstack(
-                        rx.foreach(State.mcs_conv_errors, _mcs_conv_error_item),
-                        spacing="2",
-                        width="100%",
-                        padding_top="8px",
-                    ),
-                    width="100%",
-                ),
-            ),
+            # (Event Log + standalone Errors list removed — the Errors
+            # banner at the top of this tab enumerates the same items
+            # with click-to-jump deep links into the Conversation Flow.)
             # Orchestrator reasoning
             rx.cond(
                 State.mcs_conv_reasoning.length() > 0,  # type: ignore[union-attr]

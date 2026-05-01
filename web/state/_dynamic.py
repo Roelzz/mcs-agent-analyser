@@ -90,9 +90,6 @@ class DynamicMixin(rx.State, mixin=True):
     # Runtime tool call analysis
     mcs_tools_call_count: int = 0
     mcs_tools_stats_rows: list[dict] = []
-    mcs_tools_chain_rows: list[dict] = []
-    mcs_tools_reasoning_rows: list[dict] = []
-    mcs_tools_detail_rows: list[dict] = []
     mcs_tools_flow_mermaid: str = ""
     mcs_tools_inventory_rows: list[dict] = []
 
@@ -167,7 +164,6 @@ class DynamicMixin(rx.State, mixin=True):
     # view. Cleared next time another link is clicked.
     mcs_highlight_target_id: str = ""
     mcs_conv_phases: list[dict] = []
-    mcs_conv_event_log: list[dict] = []
     mcs_conv_errors: list[str] = []
     # Error/exception banner — one row per ERROR-toned flow item with the
     # `flow_id` deep-link target so the user can jump straight to the row.
@@ -324,6 +320,14 @@ class DynamicMixin(rx.State, mixin=True):
     @rx.event
     def select_topic_in_explorer(self, schema_name: str):
         self.mcs_topic_explorer_selected = schema_name
+
+    @rx.event
+    def open_topic_in_explorer(self, schema_name: str):
+        """One-click handler used by the Topics-tab summary tables: selects
+        the requested topic and opens the Explorer modal in a single user
+        action (replaces the per-row inline settings accordion)."""
+        self.mcs_topic_explorer_selected = schema_name
+        self.mcs_topic_explorer_open = True
 
     @rx.var
     def mcs_topic_explorer_filtered(self) -> list[dict]:
