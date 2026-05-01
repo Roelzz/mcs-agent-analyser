@@ -1596,6 +1596,63 @@ class UploadMixin(rx.State, mixin=True):
             for p in timeline.phases
         ]
 
+        # Variable Tracker — one card per ToolCall, with arguments
+        # (AUTO/MANUAL badged) and a compact preview of the harvested
+        # output. Skips knowledge-search calls (already surfaced on the
+        # Knowledge tab).
+        _state_tone = {"completed": "good", "failed": "bad", "inProgress": "info"}
+
+        def _build_var_row(tc) -> dict:
+            arg_rows = [
+                {
+                    "name": name,
+                    "value": str(value),
+                    "auto_filled": "true" if name in tc.auto_filled_argument_names else "",
+                }
+                for name, value in tc.arguments.items()
+            ]
+            output_preview = ""
+            output_full = ""
+            if tc.observation is not None:
+                output_full = tc.observation.raw_json or ""
+                if tc.observation.structured_content:
+                    # Compact one-line preview of the structured payload
+                    sc = tc.observation.structured_content
+                    if isinstance(sc, dict):
+                        keys = list(sc.keys())[:5]
+                        output_preview = "{" + ", ".join(keys) + (", …" if len(sc) > len(keys) else "") + "}"
+                    else:
+                        output_preview = str(sc)[:120]
+                elif tc.observation.content:
+                    first = tc.observation.content[0] if tc.observation.content else None
+                    if isinstance(first, dict):
+                        output_preview = (first.get("text") or first.get("content") or "")[:120]
+                    elif first is not None:
+                        output_preview = str(first)[:120]
+            return {
+                "step_id": tc.step_id,
+                "display_name": tc.display_name or tc.task_dialog_id or tc.step_id,
+                "task_dialog_id": tc.task_dialog_id,
+                "step_type": tc.step_type or "—",
+                "state": tc.state or "—",
+                "state_tone": _state_tone.get(tc.state, "info"),
+                "duration": _format_duration(tc.duration_ms) if tc.duration_ms else "—",
+                "thought": tc.thought or "",
+                "arguments": arg_rows,
+                "has_arguments": "true" if arg_rows else "",
+                "output_preview": output_preview,
+                "output_full": output_full,
+                "has_output": "true" if (output_preview or output_full) else "",
+                "error": tc.error or "",
+                "row_id": f"var-row-{tc.step_id}" if tc.step_id else "",
+            }
+
+        self.mcs_conv_variables = [  # type: ignore[attr-defined]
+            _build_var_row(tc)
+            for tc in timeline.tool_calls
+            if tc.task_dialog_id != "P:UniversalSearchTool"
+        ]
+
         # Event log
         _event_type_colors: dict[str, str] = {
             "USER_MESSAGE": "green",
@@ -2051,6 +2108,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_metadata = []  # type: ignore[attr-defined]
         self.mcs_conversation_id = ""  # type: ignore[attr-defined]
         self.mcs_highlight_target_id = ""  # type: ignore[attr-defined]
+        self.mcs_conv_variables = []  # type: ignore[attr-defined]
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]
@@ -2115,6 +2173,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_conv_metadata = []  # type: ignore[attr-defined]
         self.mcs_conversation_id = ""  # type: ignore[attr-defined]
         self.mcs_highlight_target_id = ""  # type: ignore[attr-defined]
+        self.mcs_conv_variables = []  # type: ignore[attr-defined]
         self.mcs_conv_phases = []  # type: ignore[attr-defined]
         self.mcs_conv_event_log = []  # type: ignore[attr-defined]
         self.mcs_conv_errors = []  # type: ignore[attr-defined]

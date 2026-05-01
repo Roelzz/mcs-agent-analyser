@@ -4015,6 +4015,191 @@ def _mcs_conv_reasoning_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_var_argument_row(arg: dict) -> rx.Component:
+    """One argument inside a Variable Tracker card. Shows the binding key,
+    its value, and an AUTO/MANUAL badge."""
+    return rx.hstack(
+        rx.text(
+            arg["name"],
+            font_size="11px",
+            color="var(--gray-a9)",
+            font_family=_MONO,
+            min_width="140px",
+        ),
+        rx.code(arg["value"], font_size="11px", color="var(--gray-12)"),
+        rx.spacer(),
+        rx.cond(
+            arg["auto_filled"] != "",
+            rx.badge("AUTO", color_scheme="amber", variant="soft", size="1"),
+            rx.badge("MANUAL", color_scheme="gray", variant="soft", size="1"),
+        ),
+        spacing="2",
+        align="center",
+        width="100%",
+        padding="3px 0",
+    )
+
+
+def _mcs_var_card(item: dict) -> rx.Component:
+    """One Variable Tracker card per ToolCall: header (name + state) +
+    arguments table + collapsible output preview."""
+    return rx.box(
+        rx.vstack(
+            # Header — display name + step type + state pill + duration
+            rx.hstack(
+                rx.icon("variable", size=14, color=PRIMARY),
+                rx.text(
+                    item["display_name"],
+                    font_size="13px",
+                    font_weight="700",
+                    color="var(--gray-12)",
+                ),
+                rx.badge(
+                    item["step_type"],
+                    color_scheme="teal",
+                    variant="soft",
+                    size="1",
+                ),
+                _status_badge(item["state"], item["state_tone"]),
+                rx.cond(
+                    item["duration"] != "—",
+                    rx.text(
+                        item["duration"],
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_family=_MONO,
+                    ),
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+                flex_wrap="wrap",
+            ),
+            rx.cond(
+                item["thought"] != "",
+                rx.text(
+                    item["thought"],
+                    font_size="11px",
+                    font_style="italic",
+                    color="var(--gray-a9)",
+                    line_height="1.4",
+                ),
+            ),
+            # Arguments
+            rx.cond(
+                item["has_arguments"] != "",
+                rx.box(
+                    rx.text(
+                        "Arguments",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_weight="700",
+                        margin_bottom="4px",
+                    ),
+                    rx.foreach(
+                        item["arguments"].to(list[dict]),  # type: ignore[union-attr]
+                        _mcs_var_argument_row,
+                    ),
+                    width="100%",
+                ),
+            ),
+            # Output preview + expandable raw JSON
+            rx.cond(
+                item["has_output"] != "",
+                rx.vstack(
+                    rx.cond(
+                        item["output_preview"] != "",
+                        rx.hstack(
+                            rx.text(
+                                "Output:",
+                                font_size="11px",
+                                color="var(--gray-a8)",
+                                font_weight="700",
+                            ),
+                            rx.code(
+                                item["output_preview"],
+                                font_size="11px",
+                                color="var(--gray-12)",
+                            ),
+                            spacing="2",
+                            align="center",
+                        ),
+                    ),
+                    rx.cond(
+                        item["output_full"] != "",
+                        rx.accordion.root(
+                            rx.accordion.item(
+                                header=rx.text(
+                                    "Raw output JSON",
+                                    font_size="11px",
+                                    color="var(--gray-a9)",
+                                    font_weight="700",
+                                ),
+                                content=rx.box(
+                                    rx.el.pre(
+                                        item["output_full"],
+                                        style={
+                                            "fontSize": "10px",
+                                            "color": "var(--gray-12)",
+                                            "lineHeight": "1.5",
+                                            "whiteSpace": "pre-wrap",
+                                            "wordBreak": "break-word",
+                                        },
+                                    ),
+                                    background="var(--gray-a3)",
+                                    border_radius="6px",
+                                    padding="8px 10px",
+                                    max_height="320px",
+                                    overflow_y="auto",
+                                    width="100%",
+                                ),
+                                value="raw_json",
+                            ),
+                            type="single",
+                            collapsible=True,
+                            variant="ghost",
+                            width="100%",
+                        ),
+                    ),
+                    spacing="2",
+                    align="start",
+                    width="100%",
+                ),
+            ),
+            # Error block — when state is failed
+            rx.cond(
+                item["error"] != "",
+                rx.box(
+                    rx.hstack(
+                        rx.icon("triangle-alert", size=12, color="var(--red-9)"),
+                        rx.text(
+                            item["error"],
+                            font_size="11px",
+                            color="var(--red-11)",
+                        ),
+                        spacing="2",
+                        align="center",
+                    ),
+                    background="var(--red-a2)",
+                    border="1px solid var(--red-a4)",
+                    border_radius="6px",
+                    padding="6px 10px",
+                    width="100%",
+                ),
+            ),
+            spacing="3",
+            align="start",
+            width="100%",
+        ),
+        id=item["row_id"],
+        padding="14px 16px",
+        background="var(--gray-a2)",
+        border=f"1px solid {SURFACE_BORDER}",
+        border_radius="10px",
+        width="100%",
+    )
+
+
 def _mcs_conversation_detail_panel() -> rx.Component:
     return rx.cond(
         State.has_mcs_conv_detail,
@@ -4060,6 +4245,41 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                         padding_x="12px",
                         background="var(--gray-a2)",
                         overflow_x="auto",
+                    ),
+                    width="100%",
+                ),
+            ),
+            # Variable Tracker — per-tool-call inputs / outputs with
+            # AUTO/MANUAL binding badges.
+            rx.cond(
+                State.mcs_conv_variables.length() > 0,  # type: ignore[union-attr]
+                card(
+                    rx.hstack(
+                        rx.icon("variable", size=16, color=PRIMARY),
+                        section_heading("Variable Tracker"),
+                        rx.spacer(),
+                        rx.badge(
+                            State.mcs_conv_variables.length().to(str),  # type: ignore[union-attr]
+                            color_scheme="green",
+                            variant="soft",
+                            size="1",
+                        ),
+                        align="center",
+                        width="100%",
+                    ),
+                    rx.text(
+                        "Per-step input bindings and harvested outputs. AUTO badges mark "
+                        "arguments the orchestrator filled itself; MANUAL marks bindings "
+                        "set in the topic YAML.",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_style="italic",
+                    ),
+                    rx.vstack(
+                        rx.foreach(State.mcs_conv_variables, _mcs_var_card),
+                        spacing="3",
+                        width="100%",
+                        padding_top="8px",
                     ),
                     width="100%",
                 ),

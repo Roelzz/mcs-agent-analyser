@@ -150,6 +150,11 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_conv_reasoning: list[dict] = []
     mcs_conv_sequence_mermaid: str = ""
     mcs_conv_gantt_mermaid: str = ""
+    # Variable Tracker — per-tool-call arguments + outputs surfaced as
+    # cards on the Conversation tab. Each row corresponds to one
+    # `ToolCall` from the timeline; arguments are rendered with
+    # AUTO/MANUAL badges when the orchestrator auto-filled them.
+    mcs_conv_variables: list[dict] = []
 
     # ── Insights tab (conversation analysis features) ──────────────────────
     # Turn Efficiency

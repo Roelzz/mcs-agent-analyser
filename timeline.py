@@ -55,6 +55,10 @@ class _TimelineState:
     tool_display_names: dict[str, str] = field(default_factory=dict)
     pending_custom_searches: dict[str, CustomSearchStep] = field(default_factory=dict)
     pending_tool_args: dict[str, dict[str, str]] = field(default_factory=dict)  # step_id -> arguments
+    # step_id → list of argument names that were AUTO-filled by the
+    # orchestrator (vs. MANUAL bindings authored in the YAML). Sourced
+    # from `DynamicPlanStepBindUpdate.value.autoFilledArguments`.
+    pending_auto_filled: dict[str, list[str]] = field(default_factory=dict)
     tool_calls: list[ToolCall] = field(default_factory=list)
     generative_answer_traces: list[GenerativeAnswerTrace] = field(default_factory=list)
     last_step_topic: str | None = None  # most recent in-progress topic, for trace attribution
@@ -650,6 +654,7 @@ def _process_trace_event(
                         step_type=trigger_type,
                         thought=state.step_trigger_thoughts.get(step_id),
                         arguments=state.pending_tool_args.pop(step_id, {}),
+                        auto_filled_argument_names=state.pending_auto_filled.pop(step_id, []),
                         observation=tc_observation,
                         state=step_state,
                         error=error_msg,
@@ -724,10 +729,17 @@ def _process_trace_event(
             bind_task_dialog_id = value.get("taskDialogId", "")
             bind_step_id = value.get("stepId", "")
             bind_arguments = value.get("arguments", {}) or {}
+            bind_auto_filled = value.get("autoFilledArguments", []) or []
 
             # Generic: capture arguments for any tool
             if bind_step_id and bind_arguments:
                 state.pending_tool_args[bind_step_id] = {k: str(v) for k, v in bind_arguments.items()}
+            # Capture which argument names were auto-filled (vs manually bound)
+            # so the Variable Tracker panel can badge each row.
+            if bind_step_id:
+                state.pending_auto_filled[bind_step_id] = [
+                    str(name) for name in bind_auto_filled if isinstance(name, str)
+                ]
 
             # Existing knowledge search argument capture (preserve exactly)
             if bind_task_dialog_id == "P:UniversalSearchTool":

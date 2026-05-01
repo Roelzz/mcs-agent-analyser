@@ -5731,6 +5731,56 @@ def test_build_timeline_extracts_conversation_id_from_bot_debug_reply():
     assert tl.conversation_id == "ed082483-aa8e-47c7-a8fd-a7225d26c37b"
 
 
+def test_tool_call_captures_auto_filled_argument_names():
+    """`DynamicPlanStepBindUpdate.value.autoFilledArguments` is the runtime
+    signal for AUTO vs MANUAL bindings — the parser must capture it onto
+    the ToolCall so the Variable Tracker can render the badges."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepTriggered",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "value": {
+                "stepId": "s1",
+                "taskDialogId": "tool.X",
+                "type": "Agent",
+                "thought": "trying X",
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepBindUpdate",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "value": {
+                "stepId": "s1",
+                "taskDialogId": "tool.X",
+                "arguments": {"a": "auto-val", "b": "manual-val"},
+                "autoFilledArguments": ["a"],
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:02Z",
+            "value": {
+                "stepId": "s1",
+                "taskDialogId": "tool.X",
+                "state": "completed",
+                "executionTime": "00:00:01",
+                "observation": {"content": [{"text": "ok"}]},
+            },
+        },
+    ]
+    timeline = build_timeline(activities, schema_lookup={})
+    assert len(timeline.tool_calls) == 1
+    tc = timeline.tool_calls[0]
+    assert tc.arguments == {"a": "auto-val", "b": "manual-val"}
+    assert tc.auto_filled_argument_names == ["a"]
+
+
 def test_build_timeline_no_conversation_id_when_not_present():
     """When no shape carries the id, leave it empty rather than emitting a
     bogus value."""
