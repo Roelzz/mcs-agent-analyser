@@ -195,8 +195,13 @@ def _best_trigger_phrase(user_text: str, topic_name: str, components: list) -> s
     return ""
 
 
-from .knowledge import render_knowledge_search_section
-from .profile import (
+# Deferred imports — `renderer/report.py` and `renderer/timeline_render.py`
+# both import from this module, so importing them at the top here would
+# create a circular dependency. They sit below the trigger-score helpers
+# above (which both `report` and `timeline_render` consume). The
+# `noqa` markers below acknowledge the deliberate ordering.
+from .knowledge import render_knowledge_search_section  # noqa: E402
+from .profile import (  # noqa: E402
     render_ai_config,
     render_bot_metadata,
     render_bot_profile,
@@ -212,9 +217,9 @@ from .profile import (
     render_topic_inventory,
     render_trigger_overlaps,
 )
-from ._helpers import _compute_idle_gaps, _format_duration, _parse_timestamp_to_epoch_ms
-from .report import render_credit_estimate
-from .timeline_render import render_orchestrator_reasoning, render_timeline
+from ._helpers import _compute_idle_gaps, _format_duration, _parse_timestamp_to_epoch_ms  # noqa: E402
+from .report import render_credit_estimate  # noqa: E402
+from .timeline_render import render_orchestrator_reasoning, render_timeline  # noqa: E402
 
 
 def render_report_sections(

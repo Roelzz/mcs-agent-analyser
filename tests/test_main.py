@@ -206,7 +206,16 @@ def test_timeline_greeting_only():
     timeline = build_timeline(activities, lookup)
 
     assert timeline.user_query == "Hi"
-    assert len(timeline.phases) == 0  # No DynamicPlanStepFinished for simple greeting
+    # No DynamicPlanStepFinished for a simple greeting, so no per-step
+    # ExecutionPhase records — but the orchestrator's "Planning response"
+    # phase (OrchestratorThinking) IS legitimately captured today, since
+    # the runtime emits a DynamicPlanReceived/Finished pair even for a
+    # trivial greeting. Allow at most one phase, and if present, require
+    # that it's the orchestrator-thinking summary phase rather than a
+    # genuine action step.
+    assert len(timeline.phases) <= 1
+    if timeline.phases:
+        assert timeline.phases[0].phase_type == "OrchestratorThinking"
     assert len(timeline.errors) == 0
 
 
@@ -444,15 +453,33 @@ def test_report_order():
 
 
 def test_system_instructions_visible():
-    """System instructions should be shown directly, not in a collapsible block."""
+    """System instructions should be shown directly, not buried in a
+    collapsible `<details>` block.
+
+    The report contains other legitimate `<details>` blocks elsewhere
+    (raw JSON for failed tool observations, the topic-explainer's
+    rewrite/summarisation prompts), so we narrow the assertion to the
+    System Instructions section specifically — from `**System
+    Instructions**` to the next blank-line-then-heading boundary.
+    """
     profile, lookup = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
     activities = parse_dialog_json(BASE_DIR / "botContent (1)" / "dialog.json")
     timeline = build_timeline(activities, lookup)
     report = render_report(profile, timeline)
 
     assert "**System Instructions**" in report
-    assert "<details>" not in report
-    assert "</details>" not in report
+
+    # Slice from the System Instructions header to the next H2/H3 heading
+    start = report.index("**System Instructions**")
+    rest = report[start:]
+    # Look for the next section break: a blank line followed by a heading.
+    import re
+
+    next_section = re.search(r"\n\n#{1,3} ", rest)
+    section = rest[: next_section.start()] if next_section else rest
+    assert "<details>" not in section, (
+        "System Instructions section should render inline, not collapsed"
+    )
 
 
 # --- Newline sanitization tests ---
