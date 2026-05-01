@@ -4798,10 +4798,39 @@ def _mcs_error_banner() -> rx.Component:
     )
 
 
+def _mcs_conv_expand_collapse_bar() -> rx.Component:
+    """Compact button row toggling every accordion under the Conversation
+    tab open or closed. Click handlers walk the DOM via call_script."""
+    return rx.hstack(
+        rx.spacer(),
+        rx.button(
+            rx.icon("chevrons-down", size=12),
+            "Expand all",
+            size="1",
+            variant="soft",
+            color_scheme="gray",
+            on_click=State.conv_expand_all,
+        ),
+        rx.button(
+            rx.icon("chevrons-up", size=12),
+            "Collapse all",
+            size="1",
+            variant="soft",
+            color_scheme="gray",
+            on_click=State.conv_collapse_all,
+        ),
+        spacing="2",
+        align="center",
+        width="100%",
+    )
+
+
 def _mcs_conversation_detail_panel() -> rx.Component:
     return rx.cond(
         State.has_mcs_conv_detail,
         rx.vstack(
+            # Expand/collapse-all toolbar (Conv tab scope)
+            _mcs_conv_expand_collapse_bar(),
             # Error banner (hidden when no errors)
             _mcs_error_banner(),
             # Metadata card
@@ -4989,6 +5018,7 @@ def _mcs_conversation_detail_panel() -> rx.Component:
             ),
             spacing="4",
             width="100%",
+            id="mcs-conv-tab-root",
         ),
     )
 

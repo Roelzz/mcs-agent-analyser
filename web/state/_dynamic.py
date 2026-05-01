@@ -260,6 +260,27 @@ class DynamicMixin(rx.State, mixin=True):
         yield rx.set_clipboard(raw_json)
         yield rx.toast("Activity JSON copied", duration=2000)
 
+    @rx.event
+    def conv_expand_all(self):
+        """Expand every accordion under the Conversation tab. Targets
+        Radix accordion triggers (those with both `data-state` and
+        `aria-expanded` attributes) so unrelated `data-state` consumers
+        elsewhere in the tree are unaffected."""
+        return rx.call_script(
+            "var root = document.getElementById('mcs-conv-tab-root');"
+            "if (!root) return;"
+            "root.querySelectorAll('button[data-state=\"closed\"][aria-expanded]').forEach(function(t){ t.click(); });"
+        )
+
+    @rx.event
+    def conv_collapse_all(self):
+        """Collapse every open accordion under the Conversation tab."""
+        return rx.call_script(
+            "var root = document.getElementById('mcs-conv-tab-root');"
+            "if (!root) return;"
+            "root.querySelectorAll('button[data-state=\"open\"][aria-expanded]').forEach(function(t){ t.click(); });"
+        )
+
     # ── Conversation Flow filter wiring ─────────────────────────────────────
 
     # User-facing filter chip → set of EventType values it covers. Coarser
