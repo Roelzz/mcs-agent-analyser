@@ -1595,17 +1595,28 @@ class UploadMixin(rx.State, mixin=True):
             },
         ]
 
-        # Category summary — `orchestrator_topics` is split into "Tools"
-        # and "Agents" rows based on tool_type so the user-visible labels
-        # match what they see in Copilot Studio's authoring UI (the
-        # internal "Orchestrator Topics" bucket bundles both).
+        # Category summary — `orchestrator_topics` is split by
+        # `tool_type` so each tool kind (MCP servers, connector tools,
+        # flow tools, child/connected agents) gets its own row instead
+        # of being lumped under the internal "Orchestrator Topics"
+        # bucket.
         agent_tool_types = {"ChildAgent", "ConnectedAgent", "A2AAgent"}
-        cat_order = [
+        # Friendly label + icon per tool_type. Anything we haven't
+        # explicitly mapped falls back to a generic "Tools" row.
+        tool_type_display: dict[str, tuple[str, str]] = {
+            "MCPServer": ("MCP Servers", "server"),
+            "ConnectorTool": ("Connector Tools", "plug"),
+            "FlowTool": ("Power Automate Flows", "workflow"),
+            "ChildAgent": ("Child Agents", "users"),
+            "ConnectedAgent": ("Connected Agents", "network"),
+            "A2AAgent": ("A2A Agents", "share-2"),
+        }
+        topic_cat_order = [
             "user_topics",
             "system_topics",
             "automation_topics",
-            "tools",  # synthetic — split from orchestrator_topics
-            "agents",  # synthetic — split from orchestrator_topics
+        ]
+        misc_cat_order = [
             "skills",
             "custom_entities",
             "variables",
@@ -1615,22 +1626,65 @@ class UploadMixin(rx.State, mixin=True):
             "user_topics": ("User Topics", "user-round"),
             "system_topics": ("System Topics", "settings"),
             "automation_topics": ("Automation Topics", "bot"),
-            "tools": ("Tools", "wrench"),
-            "agents": ("Agents", "network"),
             "skills": ("Skills & Connectors", "puzzle"),
             "custom_entities": ("Custom Entities", "database"),
             "variables": ("Variables", "variable"),
             "settings": ("Settings", "sliders"),
         }
-        # Build effective groupings: copy `by_cat` and split
-        # orchestrator_topics into the two synthetic buckets.
-        summary_groups: dict[str, list] = {k: list(v) for k, v in by_cat.items()}
-        orch_comps = summary_groups.pop("orchestrator_topics", [])
-        summary_groups["tools"] = [c for c in orch_comps if (c.tool_type or "") not in agent_tool_types]
-        summary_groups["agents"] = [c for c in orch_comps if (c.tool_type or "") in agent_tool_types]
         summary_rows: list[dict] = []
-        for cat in cat_order:
-            comps = summary_groups.get(cat, [])
+        # Topic categories first
+        for cat in topic_cat_order:
+            comps = by_cat.get(cat, [])
+            if not comps:
+                continue
+            display, icon = cat_display.get(cat, (cat, "list"))
+            active = sum(1 for c in comps if c.state == "Active")
+            summary_rows.append(
+                {
+                    "category": display,
+                    "count": str(len(comps)),
+                    "active": str(active),
+                    "inactive": str(len(comps) - active),
+                    "icon": icon,
+                }
+            )
+        # Per-tool-type rows from orchestrator_topics, sorted: tools
+        # first (alphabetical by display), agents next.
+        orch_comps = by_cat.get("orchestrator_topics", [])
+        by_tool_type: dict[str, list] = {}
+        for c in orch_comps:
+            key = c.tool_type or "Other"
+            by_tool_type.setdefault(key, []).append(c)
+        # Order: known tool types in declared order, then any unknown
+        # types alphabetically. Agents grouped after non-agent tools.
+        non_agent_keys = [k for k in by_tool_type if k not in agent_tool_types]
+        agent_keys = [k for k in by_tool_type if k in agent_tool_types]
+
+        def _tool_row(key: str) -> dict | None:
+            comps = by_tool_type.get(key, [])
+            if not comps:
+                return None
+            display, icon = tool_type_display.get(key, (key or "Tools", "wrench"))
+            active = sum(1 for c in comps if c.state == "Active")
+            return {
+                "category": display,
+                "count": str(len(comps)),
+                "active": str(active),
+                "inactive": str(len(comps) - active),
+                "icon": icon,
+            }
+
+        for key in sorted(non_agent_keys, key=lambda k: tool_type_display.get(k, (k, ""))[0].lower()):
+            row = _tool_row(key)
+            if row:
+                summary_rows.append(row)
+        for key in sorted(agent_keys, key=lambda k: tool_type_display.get(k, (k, ""))[0].lower()):
+            row = _tool_row(key)
+            if row:
+                summary_rows.append(row)
+        # Misc (skills, entities, variables, settings) at the bottom
+        for cat in misc_cat_order:
+            comps = by_cat.get(cat, [])
             if not comps:
                 continue
             display, icon = cat_display.get(cat, (cat, "list"))
