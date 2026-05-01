@@ -5,6 +5,7 @@ from __future__ import annotations
 import reflex as rx
 
 from web.components.common import _MONO
+from web.components.report import _audit_options_popover, _audit_section_card
 from web.mermaid import render_segment_styled
 from web.state import State
 
@@ -5760,8 +5761,125 @@ def _ins_grid_header(*cols: tuple[str, str]) -> rx.Component:
     return rx.box(*children, display="contents")
 
 
+def _mcs_audit_runner_card() -> rx.Component:
+    """LLM Audit Runner — header card on the Quality tab. Mirrors the
+    Instruction Lint button on the document-report page so the audit
+    feature is reachable from both views.
+
+    Default behaviour (one click) runs the static-config audit;
+    everything else is opt-in via the "Audit options" popover."""
+    return rx.cond(
+        State.can_lint,
+        card(
+            rx.hstack(
+                rx.icon("scan-search", size=18, color="var(--amber-9)"),
+                section_heading("LLM Audit Runner"),
+                rx.spacer(),
+                rx.hstack(
+                    rx.button(
+                        rx.cond(
+                            State.is_linting,
+                            rx.hstack(
+                                rx.spinner(size="1"),
+                                rx.text("Linting..."),
+                                align="center",
+                                spacing="2",
+                            ),
+                            rx.hstack(
+                                rx.icon("scan-search", size=14),
+                                rx.text("Instruction Lint"),
+                                align="center",
+                                spacing="2",
+                            ),
+                        ),
+                        variant="outline",
+                        color_scheme="amber",
+                        size="2",
+                        on_click=State.run_lint,
+                        disabled=State.is_linting,
+                        cursor="pointer",
+                    ),
+                    _audit_options_popover(),
+                    spacing="2",
+                    align="center",
+                ),
+                align="center",
+                width="100%",
+            ),
+            rx.text(
+                "Run LLM audits over the bot's static configuration and (optionally) "
+                "the conversation transcript. The default Instruction Lint runs the "
+                "static-config audit only; use Audit options to opt into Sentiment, "
+                "PII detection, Answer Accuracy, Topic Routing Quality, and custom "
+                "prompts.",
+                font_size="11px",
+                color="var(--gray-a8)",
+                font_style="italic",
+                line_height="1.5",
+            ),
+            rx.cond(
+                State.lint_error != "",
+                rx.callout(
+                    State.lint_error,
+                    icon="triangle_alert",
+                    color_scheme="red",
+                    size="1",
+                    margin_top="8px",
+                ),
+            ),
+            rx.cond(
+                State.has_lint_report,
+                rx.box(
+                    rx.hstack(
+                        rx.text(
+                            "Audit results",
+                            font_size="11px",
+                            font_weight="700",
+                            color="var(--gray-a9)",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                        ),
+                        rx.badge(
+                            State.lint_audit_results.length().to(str),  # type: ignore[union-attr]
+                            color_scheme="amber",
+                            variant="soft",
+                            size="1",
+                        ),
+                        rx.spacer(),
+                        rx.button(
+                            rx.icon("download", size=12),
+                            "Download",
+                            variant="ghost",
+                            size="1",
+                            color_scheme="amber",
+                            on_click=State.download_lint_report,
+                        ),
+                        rx.button(
+                            rx.icon("x", size=12),
+                            "Clear",
+                            variant="ghost",
+                            size="1",
+                            color_scheme="gray",
+                            on_click=State.clear_lint,
+                        ),
+                        spacing="2",
+                        align="center",
+                        width="100%",
+                        margin_top="12px",
+                    ),
+                    rx.foreach(State.lint_audit_results, _audit_section_card),
+                    width="100%",
+                ),
+            ),
+            width="100%",
+        ),
+    )
+
+
 def _mcs_quality_panel() -> rx.Component:
     return rx.vstack(
+        # ── LLM Audit Runner (visible when a profile is loaded) ────────────
+        _mcs_audit_runner_card(),
         # ── Credits (moved from Credits tab) ───────────────────────────────
         rx.cond(
             State.mcs_credit_rows.length() > 0,  # type: ignore[union-attr]
