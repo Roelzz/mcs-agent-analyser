@@ -55,6 +55,9 @@ class DynamicMixin(rx.State, mixin=True):
 
     # Conversation flow
     mcs_conversation_flow: list[dict] = []
+    # Conversation flow grouped into plan cards + loose-message groups.
+    # Built from `mcs_conversation_flow` via `renderer.sections.group_flow_items`.
+    mcs_conversation_flow_groups: list[dict] = []
     mcs_conversation_flow_source: str = ""  # "snapshot" | "transcript" | ""
 
     # Custom rule findings for dynamic view

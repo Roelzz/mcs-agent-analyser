@@ -359,11 +359,16 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_section_conversation = ""  # type: ignore[attr-defined]
             self.mcs_section_credits = ""  # type: ignore[attr-defined]
 
-        # Conversation flow
+        # Conversation flow + plan-tree groupings.
         if timeline is not None:
-            self.mcs_conversation_flow = build_conversation_flow_items(timeline, profile=profile)  # type: ignore[attr-defined]
+            from renderer.sections import group_flow_items
+
+            flow_items = build_conversation_flow_items(timeline, profile=profile)
+            self.mcs_conversation_flow = flow_items  # type: ignore[attr-defined]
+            self.mcs_conversation_flow_groups = group_flow_items(flow_items)  # type: ignore[attr-defined]
         else:
             self.mcs_conversation_flow = []  # type: ignore[attr-defined]
+            self.mcs_conversation_flow_groups = []  # type: ignore[attr-defined]
         self.mcs_conversation_flow_source = source  # type: ignore[attr-defined]
 
         # Visual summary
@@ -2159,6 +2164,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_section_conversation = ""  # type: ignore[attr-defined]
         self.mcs_section_credits = ""  # type: ignore[attr-defined]
         self.mcs_conversation_flow = []  # type: ignore[attr-defined]
+        self.mcs_conversation_flow_groups = []  # type: ignore[attr-defined]
         self.mcs_conversation_flow_source = ""  # type: ignore[attr-defined]
         self.mcs_conv_kpis = []  # type: ignore[attr-defined]
         self.mcs_conv_event_mix = []  # type: ignore[attr-defined]

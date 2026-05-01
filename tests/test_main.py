@@ -5731,6 +5731,86 @@ def test_build_timeline_extracts_conversation_id_from_bot_debug_reply():
     assert tl.conversation_id == "ed082483-aa8e-47c7-a8fd-a7225d26c37b"
 
 
+def test_group_flow_items_buckets_plans_separate_from_loose_messages():
+    """Plan-bracketed events form a plan group; user/bot messages outside
+    any plan form a separate `loose` group rendered without a header."""
+    from renderer.sections import group_flow_items
+
+    flat = [
+        {"kind": "message", "event_type": "", "summary": 'User: "hi"'},
+        {
+            "kind": "event",
+            "event_type": "PlanReceived",
+            "plan_identifier": "plan-aaa-1234",
+            "summary": "Plan received",
+            "timestamp": "00:01:00",
+        },
+        {"kind": "event", "event_type": "StepTriggered", "summary": "Step 1"},
+        {"kind": "event", "event_type": "StepFinished", "summary": "Step 1 done"},
+        {
+            "kind": "event",
+            "event_type": "PlanFinished",
+            "plan_identifier": "plan-aaa-1234",
+            "summary": "Plan finished (cancelled=False)",
+        },
+        {"kind": "message", "event_type": "", "summary": "Bot: hello"},
+    ]
+    groups = group_flow_items(flat)
+    # Three groups expected: leading user message (loose) → plan → trailing bot message (loose).
+    assert len(groups) == 3
+    assert groups[0]["is_plan"] == ""
+    assert groups[1]["is_plan"] == "true"
+    assert groups[1]["status"] == "completed"
+    assert groups[1]["status_tone"] == "good"
+    assert "Plan plan-aaa" in groups[1]["header_summary"]
+    assert len(groups[1]["items"]) == 4  # received + step trig + step fin + finished
+    assert groups[2]["is_plan"] == ""
+    assert groups[2]["items"][0]["summary"].startswith("Bot:")
+
+
+def test_group_flow_items_marks_cancelled_plan():
+    from renderer.sections import group_flow_items
+
+    flat = [
+        {
+            "kind": "event",
+            "event_type": "PlanReceived",
+            "plan_identifier": "p1",
+            "summary": "Plan",
+            "timestamp": "",
+        },
+        {
+            "kind": "event",
+            "event_type": "PlanFinished",
+            "plan_identifier": "p1",
+            "summary": "Plan finished (cancelled=True)",
+        },
+    ]
+    groups = group_flow_items(flat)
+    assert len(groups) == 1
+    assert groups[0]["status"] == "cancelled"
+    assert groups[0]["status_tone"] == "bad"
+
+
+def test_group_flow_items_marks_running_plan_when_no_finish():
+    from renderer.sections import group_flow_items
+
+    flat = [
+        {
+            "kind": "event",
+            "event_type": "PlanReceived",
+            "plan_identifier": "p1",
+            "summary": "Plan",
+            "timestamp": "",
+        },
+        {"kind": "event", "event_type": "StepTriggered", "summary": "step"},
+    ]
+    groups = group_flow_items(flat)
+    assert len(groups) == 1
+    assert groups[0]["status"] == "running"
+    assert "running" in groups[0]["header_summary"]
+
+
 def test_tool_call_captures_auto_filled_argument_names():
     """`DynamicPlanStepBindUpdate.value.autoFilledArguments` is the runtime
     signal for AUTO vs MANUAL bindings — the parser must capture it onto

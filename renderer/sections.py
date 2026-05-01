@@ -349,6 +349,109 @@ def _strip_prefix(text: str, prefix: str) -> str:
     return text
 
 
+def group_flow_items(items: list[dict]) -> list[dict]:
+    """Group conversation flow items into plan cards + loose groups.
+
+    The orchestrator emits a `PlanReceived` event at the start of every
+    plan and a `PlanFinished` at the end. Everything between them is
+    part of that plan's execution. Grouping makes long, multi-plan
+    conversations dramatically more readable in the UI — each plan
+    becomes a collapsible card with a status pill (running / completed
+    / cancelled), instead of a flat undifferentiated stream.
+
+    Returns a list of group dicts. Two shapes:
+
+    - **Plan group** (`is_plan == "true"`): header + items list. Status
+      derives from `PlanFinished.summary` ("cancelled=True/False"); a
+      plan that never gets a `PlanFinished` is reported as `running`.
+
+    - **Loose group** (`is_plan == ""`): items not enclosed in any plan
+      (typically `UserMessage` / `BotMessage` / standalone errors).
+      No header rendered.
+
+    Group-row dict keys (uniform across both shapes for ``rx.foreach``):
+      ``is_plan``, ``plan_identifier``, ``status``, ``status_tone``,
+      ``header_summary``, ``first_timestamp``, ``items`` (list of flow
+      row dicts).
+    """
+
+    groups: list[dict] = []
+    current_plan: dict | None = None
+    loose: dict | None = None
+
+    def _empty_loose() -> dict:
+        return {
+            "is_plan": "",
+            "plan_identifier": "",
+            "status": "",
+            "status_tone": "neutral",
+            "header_summary": "",
+            "first_timestamp": "",
+            "items": [],
+        }
+
+    def _close_loose() -> None:
+        nonlocal loose
+        if loose is not None and loose["items"]:
+            groups.append(loose)
+        loose = None
+
+    def _close_plan(status: str, status_tone: str) -> None:
+        nonlocal current_plan
+        if current_plan is None:
+            return
+        current_plan["status"] = status
+        current_plan["status_tone"] = status_tone
+        n = len(current_plan["items"])
+        pid = current_plan["plan_identifier"]
+        short_pid = pid[:8] if pid else "<unknown>"
+        current_plan["header_summary"] = f"Plan {short_pid} — {n} event{'s' if n != 1 else ''}"
+        groups.append(current_plan)
+        current_plan = None
+
+    for item in items:
+        et = item.get("event_type", "")
+        if et == "PlanReceived":
+            _close_loose()
+            current_plan = {
+                "is_plan": "true",
+                "plan_identifier": item.get("plan_identifier") or "",
+                "status": "running",
+                "status_tone": "info",
+                "header_summary": "",  # filled when closed
+                "first_timestamp": item.get("timestamp", ""),
+                "items": [item],
+            }
+            continue
+        if et == "PlanFinished" and current_plan is not None:
+            current_plan["items"].append(item)
+            summary_text = (item.get("summary") or "").lower()
+            cancelled = "cancelled=true" in summary_text
+            _close_plan(
+                "cancelled" if cancelled else "completed",
+                "bad" if cancelled else "good",
+            )
+            continue
+        if current_plan is not None:
+            current_plan["items"].append(item)
+        else:
+            if loose is None:
+                loose = _empty_loose()
+            loose["items"].append(item)
+
+    # Flush — a plan that never received PlanFinished stays as "running".
+    if current_plan is not None:
+        n = len(current_plan["items"])
+        pid = current_plan["plan_identifier"]
+        short_pid = pid[:8] if pid else "<unknown>"
+        current_plan["status"] = "running"
+        current_plan["status_tone"] = "info"
+        current_plan["header_summary"] = f"Plan {short_pid} — {n} event{'s' if n != 1 else ''} (running)"
+        groups.append(current_plan)
+    _close_loose()
+    return groups
+
+
 def build_conversation_flow_items(
     timeline: ConversationTimeline,
     profile: BotProfile | None = None,

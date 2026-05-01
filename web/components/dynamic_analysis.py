@@ -550,6 +550,78 @@ def _mcs_flow_item(item: dict) -> rx.Component:
     return rx.cond(item["kind"] == "message", _mcs_flow_message(item), _mcs_flow_event(item))
 
 
+def _mcs_flow_group(group: dict) -> rx.Component:
+    """Render one Conversation Flow group: either a collapsible plan card
+    (with status pill + step count) or a flat run of loose items
+    (messages, standalone errors)."""
+    return rx.cond(
+        group["is_plan"] != "",
+        # Plan card — collapsible accordion with header
+        rx.box(
+            rx.accordion.root(
+                rx.accordion.item(
+                    header=rx.hstack(
+                        rx.icon("git-branch", size=14, color=PRIMARY),
+                        rx.text(
+                            group["header_summary"],
+                            font_size="12px",
+                            font_weight="700",
+                            color="var(--gray-12)",
+                        ),
+                        rx.spacer(),
+                        _status_badge(group["status"], group["status_tone"]),
+                        rx.cond(
+                            group["first_timestamp"] != "",
+                            rx.text(
+                                group["first_timestamp"],
+                                font_size="11px",
+                                color="var(--gray-a8)",
+                                font_family=_MONO,
+                            ),
+                        ),
+                        spacing="2",
+                        align="center",
+                        width="100%",
+                    ),
+                    content=rx.box(
+                        rx.vstack(
+                            rx.foreach(
+                                group["items"].to(list[dict]),  # type: ignore[union-attr]
+                                _mcs_flow_item,
+                            ),
+                            spacing="3",
+                            width="100%",
+                            align="stretch",
+                        ),
+                        padding="10px 4px 0 4px",
+                    ),
+                    value="plan_open",
+                ),
+                type="single",
+                collapsible=True,
+                default_value="plan_open",  # plans default to open
+                width="100%",
+                variant="ghost",
+            ),
+            background="var(--green-a2)",
+            border="1px solid var(--green-a4)",
+            border_radius="10px",
+            padding="8px 10px",
+            width="100%",
+        ),
+        # Loose group — render items inline, no header
+        rx.vstack(
+            rx.foreach(
+                group["items"].to(list[dict]),  # type: ignore[union-attr]
+                _mcs_flow_item,
+            ),
+            spacing="3",
+            width="100%",
+            align="stretch",
+        ),
+    )
+
+
 def _mcs_conversation_flow_panel() -> rx.Component:
     return card(
         rx.hstack(
@@ -576,7 +648,7 @@ def _mcs_conversation_flow_panel() -> rx.Component:
         ),
         rx.box(
             rx.vstack(
-                rx.foreach(State.mcs_conversation_flow, _mcs_flow_item),
+                rx.foreach(State.mcs_conversation_flow_groups, _mcs_flow_group),
                 spacing="4",
                 width="100%",
                 align="stretch",
