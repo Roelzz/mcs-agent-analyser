@@ -879,12 +879,30 @@ class UploadMixin(rx.State, mixin=True):
                         }
                     )
 
-        # KPIs
+        # KPIs — Profile tab is the agent-level lens; per-capability
+        # counts (User Topics, Tools, Knowledge) live on their own tabs
+        # to avoid duplicating numbers across multiple grids.
         total_comps = sum(len(v) for k, v in by_cat.items() if k in _CATEGORY_ORDER)
+        instructions_chars = (
+            len(profile.gpt_info.instructions) if profile.gpt_info and profile.gpt_info.instructions else 0
+        )
+        starter_count = (
+            len(profile.gpt_info.conversation_starters) if profile.gpt_info and profile.gpt_info.conversation_starters else 0
+        )
         self.mcs_profile_kpis = [  # type: ignore[attr-defined]
             {"label": "Components", "value": str(total_comps), "hint": "Total config items", "tone": "neutral"},
-            {"label": "User Topics", "value": str(len(user_topics)), "hint": "Trigger-based", "tone": "neutral"},
-            {"label": "Tools", "value": str(len(tools)), "hint": "Agent tools", "tone": "neutral"},
+            {
+                "label": "Instructions",
+                "value": f"{instructions_chars:,}",
+                "hint": "characters" if instructions_chars else "not configured",
+                "tone": "warn" if instructions_chars == 0 else "neutral",
+            },
+            {
+                "label": "Conversation Starters",
+                "value": str(starter_count),
+                "hint": "Suggested prompts" if starter_count else "not configured",
+                "tone": "warn" if starter_count == 0 else "neutral",
+            },
             {
                 "label": "Quick Wins",
                 "value": str(len(quick_wins)),
