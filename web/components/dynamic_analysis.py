@@ -2146,6 +2146,94 @@ def _gen_trace_prompt_block(text) -> rx.Component:
     )
 
 
+def _mcs_citation_panel_row(item: dict) -> rx.Component:
+    """One row of the Citation Verification panel: citation id + title +
+    answer/completion state + moderation/provenance flags. Wraps the URL
+    snippet so the user can audit grounding inline."""
+    return rx.box(
+        rx.vstack(
+            rx.hstack(
+                rx.badge(
+                    item["citation_id"],
+                    color_scheme="green",
+                    variant="solid",
+                    size="1",
+                ),
+                rx.cond(
+                    item["url"] != "",
+                    rx.link(
+                        item["title"],
+                        href=item["url"],
+                        is_external=True,
+                        font_size="12px",
+                        font_weight="700",
+                        color="var(--green-11)",
+                    ),
+                    rx.text(item["title"], font_size="12px", font_weight="700", color="var(--gray-12)"),
+                ),
+                rx.cond(
+                    item["trace_topic"] != "—",
+                    rx.badge(item["trace_topic"], color_scheme="teal", variant="soft", size="1"),
+                    rx.box(),
+                ),
+                rx.spacer(),
+                _status_badge(item["answer_state"], item["answer_state_tone"]),
+                rx.cond(
+                    item["completion_state"] != "—",
+                    rx.badge(
+                        item["completion_state"],
+                        color_scheme="gray",
+                        variant="soft",
+                        size="1",
+                    ),
+                    rx.box(),
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+                flex_wrap="wrap",
+            ),
+            rx.cond(
+                item["snippet"] != "",
+                rx.text(
+                    item["snippet"],
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    line_height="1.5",
+                    style={"wordBreak": "break-word"},
+                ),
+            ),
+            rx.hstack(
+                rx.text(
+                    "Moderation:",
+                    font_size="10px",
+                    color="var(--gray-a8)",
+                    font_weight="700",
+                ),
+                _status_badge(item["moderation"], item["moderation_tone"]),
+                rx.text(
+                    "Provenance:",
+                    font_size="10px",
+                    color="var(--gray-a8)",
+                    font_weight="700",
+                ),
+                _status_badge(item["provenance"], item["provenance_tone"]),
+                spacing="2",
+                align="center",
+                flex_wrap="wrap",
+            ),
+            spacing="2",
+            align="start",
+            width="100%",
+        ),
+        background="var(--gray-a2)",
+        border=f"1px solid {SURFACE_BORDER}",
+        border_radius="10px",
+        padding="10px 12px",
+        width="100%",
+    )
+
+
 def _mcs_generative_trace_card(trace: dict) -> rx.Component:
     """Card surfacing one topic-level SearchAndSummarizeContent diagnostic record."""
     return card(
@@ -2754,6 +2842,42 @@ def _mcs_knowledge_panel() -> rx.Component:
                 ),
                 rx.foreach(State.mcs_generative_traces, _mcs_generative_trace_card),
                 spacing="3",
+                width="100%",
+            ),
+        ),
+        # Citation Verification panel — flat audit table of every citation
+        # across all generative-answer traces with answer/completion state
+        # and safety flags. Hidden when no citations exist.
+        rx.cond(
+            State.mcs_knowledge_citation_panel.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("badge-check", size=16, color=PRIMARY),
+                    section_heading("Citation Verification"),
+                    rx.spacer(),
+                    rx.badge(
+                        State.mcs_knowledge_citation_panel.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="green",
+                        variant="soft",
+                        size="1",
+                    ),
+                    align="center",
+                    width="100%",
+                ),
+                rx.text(
+                    "Every citation referenced in the conversation, with the trace's "
+                    "gptAnswerState / completionState and content moderation + provenance "
+                    "flags. Click a row to open the source.",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
+                ),
+                rx.vstack(
+                    rx.foreach(State.mcs_knowledge_citation_panel, _mcs_citation_panel_row),
+                    spacing="2",
+                    width="100%",
+                    padding_top="8px",
+                ),
                 width="100%",
             ),
         ),

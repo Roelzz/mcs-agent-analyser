@@ -233,6 +233,53 @@ def _generative_answer_var_row(trace, idx: int, topic_to_var: dict[str, str]) ->
     return row
 
 
+def build_citation_panel_rows(traces) -> list[dict]:
+    """Flat audit list of every (trace, citation) pair across the
+    conversation. Each row carries the trace's answer / completion state
+    and content moderation / provenance flags so the user can audit
+    grounding from a single table without drilling into each trace card.
+
+    Used by the Citation Verification panel on the Knowledge tab.
+    """
+    panel: list[dict] = []
+    for trace_idx, trace in enumerate(traces, 1):
+        if not trace.citations:
+            continue
+        answer_state = trace.gpt_answer_state or "—"
+        completion_state = trace.completion_state or "—"
+        if answer_state == "Answered":
+            ans_tone = "good"
+        elif answer_state in (
+            "Answer not Found in Search Results",
+            "GPT Fallback",
+            "No Search Results",
+        ):
+            ans_tone = "warn"
+        else:
+            ans_tone = "neutral"
+        moderation = "Yes" if trace.performed_content_moderation else "No"
+        provenance = "Yes" if trace.performed_content_provenance else "No"
+        for cit_idx, c in enumerate(trace.citations, 1):
+            snippet = (c.snippet or "").replace("\r", "")
+            panel.append(
+                {
+                    "citation_id": f"T{trace_idx}·C{cit_idx}",
+                    "trace_topic": trace.topic_name or "—",
+                    "title": c.title or c.url or f"Citation {cit_idx}",
+                    "url": c.url or "",
+                    "snippet": snippet,
+                    "answer_state": answer_state,
+                    "answer_state_tone": ans_tone,
+                    "completion_state": completion_state,
+                    "moderation": moderation,
+                    "moderation_tone": "good" if moderation == "Yes" else "neutral",
+                    "provenance": provenance,
+                    "provenance_tone": "good" if provenance == "Yes" else "neutral",
+                }
+            )
+    return panel
+
+
 def build_variable_tracker_rows(timeline, profile=None) -> list[dict]:
     """Unified Variable Tracker row list, time-sorted, covering three card
     kinds: orchestrator tool calls, Topic/Global variable assignments, and
@@ -1480,6 +1527,10 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_generative_traces = gen_rows  # type: ignore[attr-defined]
         self.mcs_generative_topics = sorted(gen_topics)  # type: ignore[attr-defined]
 
+        # Citation Verification panel — see `build_citation_panel_rows`
+        # for the row schema.
+        self.mcs_knowledge_citation_panel = build_citation_panel_rows(traces)  # type: ignore[attr-defined]
+
     # ── Topics tab data extraction ───────────────────────────────────────────
 
     def _populate_topics_data(self, profile, timeline) -> None:
@@ -2269,6 +2320,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_knowledge_searches = []  # type: ignore[attr-defined]
         self.mcs_knowledge_custom_steps = []  # type: ignore[attr-defined]
         self.mcs_knowledge_general_enabled = False  # type: ignore[attr-defined]
+        self.mcs_knowledge_citation_panel = []  # type: ignore[attr-defined]
         self.mcs_generative_traces = []  # type: ignore[attr-defined]
         self.mcs_generative_topics = []  # type: ignore[attr-defined]
         self.mcs_topics_kpis = []  # type: ignore[attr-defined]

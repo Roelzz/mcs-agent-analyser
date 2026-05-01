@@ -6094,6 +6094,58 @@ def test_variable_tracker_excludes_universal_search_tool():
     assert rows == []
 
 
+def test_citation_panel_rows_aggregate_across_traces():
+    """Citation Verification panel emits one row per (trace, citation)
+    pair with the trace's answer/completion state and safety flags
+    propagated to each citation."""
+    from models import GenerativeAnswerCitation, GenerativeAnswerTrace
+    from web.state._upload import build_citation_panel_rows
+
+    traces = [
+        GenerativeAnswerTrace(
+            topic_name="Onboarding",
+            gpt_answer_state="Answered",
+            completion_state="Complete",
+            performed_content_moderation=True,
+            performed_content_provenance=True,
+            citations=[
+                GenerativeAnswerCitation(title="Doc A", url="https://x/a", snippet="alpha"),
+                GenerativeAnswerCitation(title="Doc B", url="https://x/b", snippet="beta"),
+            ],
+        ),
+        GenerativeAnswerTrace(
+            topic_name="Returns",
+            gpt_answer_state="Answer not Found in Search Results",
+            performed_content_moderation=False,
+            performed_content_provenance=False,
+            citations=[],  # no citations -> no rows
+        ),
+        GenerativeAnswerTrace(
+            topic_name="Pricing",
+            gpt_answer_state="GPT Fallback",
+            performed_content_moderation=True,
+            performed_content_provenance=False,
+            citations=[GenerativeAnswerCitation(title="Doc C", url="https://x/c", snippet="gamma")],
+        ),
+    ]
+    rows = build_citation_panel_rows(traces)
+    assert len(rows) == 3
+    assert [r["citation_id"] for r in rows] == ["T1·C1", "T1·C2", "T3·C1"]
+    assert rows[0]["trace_topic"] == "Onboarding"
+    assert rows[0]["answer_state"] == "Answered"
+    assert rows[0]["answer_state_tone"] == "good"
+    assert rows[0]["moderation"] == "Yes"
+    assert rows[2]["answer_state_tone"] == "warn"  # GPT Fallback
+    assert rows[2]["provenance"] == "No"
+
+
+def test_citation_panel_empty_when_no_traces():
+    """No traces → no rows; the panel hides itself in the UI."""
+    from web.state._upload import build_citation_panel_rows
+
+    assert build_citation_panel_rows([]) == []
+
+
 def test_flow_items_have_unique_flow_ids():
     """Every flow item carries a stable `flow_id` and matching `flow_row_id`
     (`row-<flow_id>`) — required for the error-banner deep-link plumbing."""

@@ -105,6 +105,11 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_knowledge_searches: list[dict] = []
     mcs_knowledge_custom_steps: list[dict] = []
     mcs_knowledge_general_enabled: bool = False
+    # Citation Verification panel — flat list of every (trace, citation)
+    # pair across the conversation with answer_state, completion_state,
+    # moderation/provenance flags. Lets the user audit grounding at a
+    # glance without expanding each generative-answer card.
+    mcs_knowledge_citation_panel: list[dict] = []
     # Topic-level Search & Summarize diagnostic traces (one row per call,
     # plus expandable child rows for results and citations).
     mcs_generative_traces: list[dict] = []
