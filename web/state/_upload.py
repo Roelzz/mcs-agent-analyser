@@ -1595,12 +1595,17 @@ class UploadMixin(rx.State, mixin=True):
             },
         ]
 
-        # Category summary
+        # Category summary — `orchestrator_topics` is split into "Tools"
+        # and "Agents" rows based on tool_type so the user-visible labels
+        # match what they see in Copilot Studio's authoring UI (the
+        # internal "Orchestrator Topics" bucket bundles both).
+        agent_tool_types = {"ChildAgent", "ConnectedAgent", "A2AAgent"}
         cat_order = [
             "user_topics",
             "system_topics",
             "automation_topics",
-            "orchestrator_topics",
+            "tools",  # synthetic — split from orchestrator_topics
+            "agents",  # synthetic — split from orchestrator_topics
             "skills",
             "custom_entities",
             "variables",
@@ -1610,15 +1615,22 @@ class UploadMixin(rx.State, mixin=True):
             "user_topics": ("User Topics", "user-round"),
             "system_topics": ("System Topics", "settings"),
             "automation_topics": ("Automation Topics", "bot"),
-            "orchestrator_topics": ("Orchestrator Topics", "network"),
+            "tools": ("Tools", "wrench"),
+            "agents": ("Agents", "network"),
             "skills": ("Skills & Connectors", "puzzle"),
             "custom_entities": ("Custom Entities", "database"),
             "variables": ("Variables", "variable"),
             "settings": ("Settings", "sliders"),
         }
+        # Build effective groupings: copy `by_cat` and split
+        # orchestrator_topics into the two synthetic buckets.
+        summary_groups: dict[str, list] = {k: list(v) for k, v in by_cat.items()}
+        orch_comps = summary_groups.pop("orchestrator_topics", [])
+        summary_groups["tools"] = [c for c in orch_comps if (c.tool_type or "") not in agent_tool_types]
+        summary_groups["agents"] = [c for c in orch_comps if (c.tool_type or "") in agent_tool_types]
         summary_rows: list[dict] = []
         for cat in cat_order:
-            comps = by_cat.get(cat, [])
+            comps = summary_groups.get(cat, [])
             if not comps:
                 continue
             display, icon = cat_display.get(cat, (cat, "list"))
