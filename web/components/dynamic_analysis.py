@@ -1543,7 +1543,7 @@ def _mcs_tool_row(item: dict) -> rx.Component:
             border_bottom=f"1px solid {SURFACE_BORDER}",
             width="100%",
         ),
-        _settings_explained_accordion(item),
+        _open_in_explorer_link(item),
         spacing="0",
         width="100%",
         id=item["row_id"],
@@ -3539,68 +3539,30 @@ def _settings_prop_row(row: dict) -> rx.Component:
     )
 
 
-def _settings_row_dispatch(row: dict) -> rx.Component:
-    """Render either a kind row or a prop row based on `row_type`."""
-    return rx.cond(
-        row["row_type"] == "kind",
-        _settings_kind_row(row),
-        _settings_prop_row(row),
-    )
-
-
-def _settings_explained_accordion(item: dict) -> rx.Component:
-    """Per-row accordion that opens to the structured settings panel.
-
-    Each setting in the panel has an (i) icon. Hovering reveals a card with
-    the KB-sourced explanation and a Microsoft Learn link. Undocumented
-    settings show a circle-help icon and an explicit "not in KB" hover.
-
-    Rendered only when `settings_rows` is non-empty, so non-DialogComponent
-    rows collapse cleanly.
-    """
+def _open_in_explorer_link(item: dict) -> rx.Component:
+    """Compact 'Open in Explorer' link replacing the per-row inline
+    settings accordion. The Topic Definition Explorer modal is the
+    canonical full-tree view; per-row tables on the Topics tab now
+    show summary columns only."""
     return rx.cond(
         item["has_settings"] != "",
-        rx.accordion.root(
-            rx.accordion.item(
-                header=rx.hstack(
-                    rx.icon("settings", size=12, color=PRIMARY),
+        rx.box(
+            rx.link(
+                rx.hstack(
+                    rx.icon("compass", size=10, color="var(--green-11)"),
                     rx.text(
-                        "Settings",
-                        font_size="11px",
-                        color="var(--gray-a9)",
-                        font_weight="700",
-                    ),
-                    rx.text(
-                        "(hover ⓘ to explain)",
+                        "Open in Topic Explorer",
                         font_size="10px",
-                        color="var(--gray-a8)",
-                        font_style="italic",
+                        color="var(--green-11)",
+                        font_weight="600",
                     ),
-                    spacing="2",
+                    spacing="1",
                     align="center",
                 ),
-                content=rx.box(
-                    rx.vstack(
-                        rx.foreach(
-                            item["settings_rows"].to(list[dict]),  # type: ignore[union-attr]
-                            _settings_row_dispatch,
-                        ),
-                        spacing="0",
-                        align="start",
-                        width="100%",
-                    ),
-                    padding="10px 14px",
-                    background="var(--gray-a2)",
-                    border_radius="6px",
-                    max_height="520px",
-                    overflow_y="auto",
-                ),
-                value="settings_explained",
+                cursor="pointer",
+                on_click=State.open_topic_in_explorer(item["link_id"]),
             ),
-            type="single",
-            collapsible=True,
-            width="100%",
-            variant="ghost",
+            padding="2px 8px",
         ),
     )
 
@@ -3650,7 +3612,7 @@ def _mcs_topics_user_row(item: dict) -> rx.Component:
             ],
             template="2fr 2fr 1fr 2fr 2fr",
         ),
-        _settings_explained_accordion(item),
+        _open_in_explorer_link(item),
         spacing="0",
         width="100%",
         id=item["row_id"],
@@ -3675,7 +3637,7 @@ def _mcs_topics_orch_row(item: dict) -> rx.Component:
             ],
             template="2fr 1fr 1fr 1fr 1fr",
         ),
-        _settings_explained_accordion(item),
+        _open_in_explorer_link(item),
         spacing="0",
         width="100%",
         id=item["row_id"],
@@ -3699,7 +3661,7 @@ def _mcs_topics_system_row(item: dict) -> rx.Component:
             ],
             template="2fr 2fr 1fr 1fr",
         ),
-        _settings_explained_accordion(item),
+        _open_in_explorer_link(item),
         spacing="0",
         width="100%",
         id=item["row_id"],

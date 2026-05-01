@@ -321,6 +321,14 @@ class DynamicMixin(rx.State, mixin=True):
     def select_topic_in_explorer(self, schema_name: str):
         self.mcs_topic_explorer_selected = schema_name
 
+    @rx.event
+    def open_topic_in_explorer(self, schema_name: str):
+        """One-click handler used by the Topics-tab summary tables: selects
+        the requested topic and opens the Explorer modal in a single user
+        action (replaces the per-row inline settings accordion)."""
+        self.mcs_topic_explorer_selected = schema_name
+        self.mcs_topic_explorer_open = True
+
     @rx.var
     def mcs_topic_explorer_filtered(self) -> list[dict]:
         """Topics matching the search box (case-insensitive substring on
