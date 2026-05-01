@@ -1793,25 +1793,43 @@ class UploadMixin(rx.State, mixin=True):
         # DialogComponent topics AND tools (TaskDialog / AgentDialog) —
         # the picker is the canonical browse surface for the bot's
         # static design.
-        category_order = {
-            "user_topics": (0, "User"),
-            "orchestrator_topics": (1, "Orchestrator"),
-            "automation_topics": (2, "Automation"),
-            "system_topics": (3, "System"),
-            "skills": (4, "Skill"),
+        # Sort buckets: topics first (alpha-grouped), then tools by
+        # tool_type (MCP / Connector / Flow / generic), then agents by
+        # their specific kind, then misc (skills).
+        category_order: dict[str, tuple[int, str]] = {
+            "user_topics": (0, "User Topic"),
+            "system_topics": (1, "System Topic"),
+            "automation_topics": (2, "Automation Topic"),
+            "skills": (8, "Skill"),
         }
-        # Tool components live outside `by_cat` (they're classified by
-        # `c.tool_type`, not by `_classify_component`). Walk all components
-        # once so a single tool can carry both its category badge and its
-        # tool-type badge.
-        tool_kinds = {"TaskDialog", "AgentDialog"}
+        # Per-tool-type badge for components in `orchestrator_topics`
+        # (which contains all TaskDialog + AgentDialog components).
+        tool_type_label: dict[str, tuple[int, str]] = {
+            "MCPServer": (3, "MCP"),
+            "ConnectorTool": (4, "Connector"),
+            "FlowTool": (5, "Flow"),
+            "ChildAgent": (6, "Child Agent"),
+            "ConnectedAgent": (6, "Connected Agent"),
+            "A2AAgent": (6, "A2A Agent"),
+        }
         explorer_entries: list[tuple[int, str, dict]] = []
-        seen_schema_names: set[str] = set()
         for cat, comps in by_cat.items():
-            sort_key, cat_label = category_order.get(cat, (9, cat.replace("_", " ").title()))
             for c in comps:
                 if c.kind != "DialogComponent":
                     continue
+                # Resolve the picker badge:
+                #   - orchestrator_topics → tool_type-specific label
+                #   - everything else → category-derived label
+                if cat == "orchestrator_topics":
+                    sort_key, cat_label = tool_type_label.get(
+                        c.tool_type or "",
+                        (7, "Tool"),
+                    )
+                else:
+                    sort_key, cat_label = category_order.get(
+                        cat,
+                        (9, cat.replace("_", " ").title()),
+                    )
                 rows = _cached_settings_rows(c)
                 action_count = sum(1 for r in rows if r.get("row_type") == "kind")
                 explorer_entries.append(
@@ -1827,30 +1845,6 @@ class UploadMixin(rx.State, mixin=True):
                         },
                     )
                 )
-                seen_schema_names.add(c.schema_name)
-        # Tools (TaskDialog / AgentDialog) — sorted last in the picker
-        # so topics dominate the top, with tools grouped after.
-        for c in profile.components:
-            if c.kind not in tool_kinds:
-                continue
-            if c.schema_name in seen_schema_names:
-                continue
-            rows = _cached_settings_rows(c)
-            action_count = sum(1 for r in rows if r.get("row_type") == "kind")
-            explorer_entries.append(
-                (
-                    5,  # tools sort after all topic categories
-                    c.display_name.lower(),
-                    {
-                        "display_name": c.display_name,
-                        "schema_name": c.schema_name,
-                        "category": c.tool_type or "Tool",
-                        "action_count": str(action_count),
-                        "settings_rows": rows,
-                    },
-                )
-            )
-            seen_schema_names.add(c.schema_name)
         explorer_entries.sort(key=lambda x: (x[0], x[1]))
         self.mcs_topic_explorer_topics = [e[2] for e in explorer_entries]  # type: ignore[attr-defined]
 
