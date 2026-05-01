@@ -575,3 +575,49 @@ def render_generative_answer_traces(
             lines.append("</details>\n")
 
     return "\n".join(lines)
+
+
+def render_citation_verification_md(timeline: ConversationTimeline) -> str:
+    """Markdown equivalent of the dynamic page's Citation Verification
+    panel. Flat audit table of every (trace, citation) pair with the
+    parent trace's answer / completion state and content moderation +
+    provenance flags. Empty when no citations exist."""
+    from .dynamic_data import build_citation_panel_rows
+
+    rows = build_citation_panel_rows(timeline.generative_answer_traces)
+    if not rows:
+        return ""
+
+    def _esc(s: str) -> str:
+        return (s or "").replace("|", "\\|").replace("\n", " ").replace("\r", "")
+
+    lines: list[str] = ["## Citation Verification\n"]
+    lines.append(
+        "_Every citation referenced in the conversation, with the trace's "
+        "`gptAnswerState` / `completionState` and content moderation + provenance "
+        "flags. Useful for compliance review without expanding each trace card._\n"
+    )
+    lines.append("| ID | Topic | Title | URL | Answer State | Completion | Moderation | Provenance | Snippet |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
+    for r in rows:
+        snippet = _esc(r.get("snippet", ""))
+        if len(snippet) > 100:
+            snippet = snippet[:97] + "…"
+        title = _esc(r.get("title", ""))
+        if len(title) > 80:
+            title = title[:77] + "…"
+        url = r.get("url") or ""
+        url_cell = f"[link]({url})" if url else "—"
+        lines.append(
+            f"| `{r.get('citation_id', '—')}` "
+            f"| {_esc(r.get('trace_topic', '—'))} "
+            f"| {title} "
+            f"| {url_cell} "
+            f"| {_esc(r.get('answer_state', '—'))} "
+            f"| {_esc(r.get('completion_state', '—'))} "
+            f"| {_esc(r.get('moderation', '—'))} "
+            f"| {_esc(r.get('provenance', '—'))} "
+            f"| {snippet} |"
+        )
+    lines.append("")
+    return "\n".join(lines)
