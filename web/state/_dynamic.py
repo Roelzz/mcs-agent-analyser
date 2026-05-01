@@ -383,7 +383,15 @@ class DynamicMixin(rx.State, mixin=True):
     _FLOW_FILTER_CHIP_TO_TYPES: dict[str, list[str]] = {
         "Messages": ["UserMessage", "BotMessage"],
         "Plans": ["PlanReceived", "PlanFinished"],
-        "Actions": ["StepTriggered", "StepFinished", "ActionBeginDialog", "ActionSendActivity", "ActionHttpRequest", "ActionQA"],
+        "Actions": [
+            "StepTriggered",
+            "StepFinished",
+            "ActionBeginDialog",
+            "ActionSendActivity",
+            "ActionHttpRequest",
+            "ActionQA",
+            "ActionAIBuilder",
+        ],
         "Knowledge": ["KnowledgeSearch", "GenerativeAnswer"],
         "Traces": ["DialogTracing", "DialogRedirect", "ActionTriggerEval", "OrchestratorThinking", "IntentRecognition", "VariableAssignment"],
         "Errors": ["Error"],

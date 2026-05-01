@@ -6146,6 +6146,35 @@ def test_citation_panel_empty_when_no_traces():
     assert build_citation_panel_rows([]) == []
 
 
+def test_dialog_tracing_invoke_ai_builder_maps_to_action_ai_builder():
+    """`DialogTracingInfo.actions[*]` with actionType
+    `InvokeAIBuilderModelAction` becomes a distinct
+    `EventType.ACTION_AI_BUILDER` event (vs. falling through to the
+    generic DIALOG_TRACING bucket) so the UI can colour-code, filter,
+    and link AI Builder calls separately."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DialogTracingInfo",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "value": {
+                "actions": [
+                    {
+                        "topicId": "Onboarding",
+                        "actionType": "InvokeAIBuilderModelAction",
+                    }
+                ]
+            },
+        },
+    ]
+    timeline = build_timeline(activities, schema_lookup={"Onboarding": "Onboarding"})
+    ai_events = [e for e in timeline.events if e.event_type == EventType.ACTION_AI_BUILDER]
+    assert len(ai_events) == 1
+    assert ai_events[0].topic_name == "Onboarding"
+    assert "AI Builder model" in ai_events[0].summary
+
+
 def test_performance_waterfall_emits_one_row_per_timed_event():
     """Waterfall produces a row per timestamped event with the gap from
     the previous activity formatted human-readably."""

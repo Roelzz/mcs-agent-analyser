@@ -10,6 +10,7 @@ from models import (
     CreditEstimate,
     EventType,
     ExecutionPhase,
+    TimelineEvent,
 )
 
 from model_comparison import build_comparison_markdown
@@ -568,6 +569,7 @@ def build_conversation_flow_items(
             EventType.ACTION_TRIGGER_EVAL,
             EventType.ORCHESTRATOR_THINKING,
             EventType.ERROR,
+            EventType.ACTION_AI_BUILDER,
         }:
             title_map = {
                 EventType.PLAN_RECEIVED: "Plan Received",
@@ -581,6 +583,7 @@ def build_conversation_flow_items(
                 EventType.ACTION_TRIGGER_EVAL: "Condition Eval",
                 EventType.ORCHESTRATOR_THINKING: "Orchestrator Thinking",
                 EventType.ERROR: "Error",
+                EventType.ACTION_AI_BUILDER: "AI Builder",
             }
             if ev.event_type == EventType.ERROR:
                 tone = "error"
@@ -1246,6 +1249,7 @@ _WATERFALL_CATEGORY: dict[str, tuple[str, str]] = {
     "ActionHttpRequest": ("Action", "var(--teal-9)"),
     "ActionBeginDialog": ("Action", "var(--teal-9)"),
     "ActionQA": ("Action", "var(--teal-9)"),
+    "ActionAIBuilder": ("AI Builder", "var(--purple-9)"),
     "KnowledgeSearch": ("Knowledge", "var(--amber-9)"),
     "GenerativeAnswer": ("Knowledge", "var(--amber-9)"),
     "OrchestratorThinking": ("Orchestrator", "var(--violet-9)"),
@@ -1284,7 +1288,7 @@ def build_performance_waterfall(timeline: ConversationTimeline) -> list[dict]:
     offender is easiest to spot. Idle gaps (`_is_genuine_idle`) are
     excluded so the user's own delay doesn't drown out the signal.
     """
-    timed: list[tuple[int, "TimelineEvent"]] = []
+    timed: list[tuple[int, TimelineEvent]] = []
     for ev in timeline.events:
         ms = _parse_timestamp_to_epoch_ms(ev.timestamp or "")
         if ms is not None:

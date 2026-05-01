@@ -125,6 +125,11 @@ class EventType(str, Enum):
     ACTION_TRIGGER_EVAL = "ActionTriggerEval"
     ACTION_BEGIN_DIALOG = "ActionBeginDialog"
     ACTION_SEND_ACTIVITY = "ActionSendActivity"
+    # AI Builder model invocation surfaced from `DialogTracingInfo.actions[*]`
+    # whose actionType is `InvokeAIBuilderModelAction`. Distinct from the
+    # generic DIALOG_TRACING bucket so the UI can colour-code, filter, and
+    # link AI Builder calls to the matching topic action.
+    ACTION_AI_BUILDER = "ActionAIBuilder"
     ORCHESTRATOR_THINKING = "OrchestratorThinking"
     INTENT_RECOGNITION = "IntentRecognition"
     GENERATIVE_ANSWER = "GenerativeAnswer"

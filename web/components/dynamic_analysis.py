@@ -4515,6 +4515,7 @@ def _mcs_waterfall_row(item: dict) -> rx.Component:
                 ("Message", "green"),
                 ("Plan", "blue"),
                 ("Action", "teal"),
+                ("AI Builder", "purple"),
                 ("Knowledge", "amber"),
                 ("Orchestrator", "violet"),
                 ("Trace", "gray"),

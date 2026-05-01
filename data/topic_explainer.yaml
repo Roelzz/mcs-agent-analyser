@@ -286,8 +286,24 @@ kinds:
 
   InvokeAIBuilderModelAction:
     category: action
-    summary: "Invokes an AI Builder model (prediction, form processing, prompt) as an action."
+    summary: "Invokes an AI Builder model (prediction, form processing, prompt) as an action. Resolves the model by `aIModelId`, supplies inputs via `input.binding`, and harvests outputs into the variable named in `output.binding.predictionOutput`."
     doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-ai-builder"
+    properties:
+      aIModelId:
+        summary: "GUID of the AI Builder model invoked. Resolves at runtime to a Power Apps `aIModel` record. Different model types (prediction / form processing / prompt) follow different input shapes."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-ai-builder"
+      input:
+        summary: "Container for input parameter bindings. The actual mapping lives under `input.binding` — one entry per parameter the AI model expects."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-ai-builder"
+      input.binding:
+        summary: "Map of model input parameter name → Power Fx expression resolving the value at runtime (Topic / Global variables, literal text, or computed expressions)."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-variables"
+      output:
+        summary: "Container for output bindings. The standard pattern uses `output.binding.predictionOutput` to harvest the model's structured response into a topic / global variable."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/advanced-ai-builder"
+      output.binding:
+        summary: "Map of model output name → topic / global variable that receives the value. For prompt models, `predictionOutput.text` carries the generated text; structured models populate `predictionOutput.structuredOutput`."
+        doc: "https://learn.microsoft.com/en-us/microsoft-copilot-studio/authoring-variables"
 
   InvokeConnectorTaskAction:
     category: action

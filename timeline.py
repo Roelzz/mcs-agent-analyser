@@ -686,6 +686,7 @@ def _process_trace_event(
                 "SendActivity": EventType.ACTION_SEND_ACTIVITY,
                 "ConditionGroup": EventType.ACTION_TRIGGER_EVAL,
                 "ConditionItem": EventType.ACTION_TRIGGER_EVAL,
+                "InvokeAIBuilderModelAction": EventType.ACTION_AI_BUILDER,
             }
 
             SUMMARY_TEMPLATES = {
@@ -694,6 +695,7 @@ def _process_trace_event(
                 EventType.ACTION_TRIGGER_EVAL: "Evaluate: {topic}",
                 EventType.ACTION_BEGIN_DIALOG: "Call to {topic}",
                 EventType.ACTION_SEND_ACTIVITY: "Send response in {topic}",
+                EventType.ACTION_AI_BUILDER: "AI Builder model in {topic}",
             }
 
             actions = value.get("actions", [])
