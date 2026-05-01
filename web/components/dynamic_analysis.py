@@ -2760,16 +2760,109 @@ def _mcs_knowledge_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Coverage table
+        # Knowledge Sources (merged: Coverage config + KE runtime stats).
+        # Two sub-tables under one card so the user sees both the static
+        # configuration and runtime effectiveness for the same set of
+        # sources without flipping between cards.
         rx.cond(
-            State.mcs_knowledge_coverage.length() > 0,  # type: ignore[union-attr]
+            (State.mcs_knowledge_coverage.length() > 0)  # type: ignore[union-attr]
+            | (State.mcs_ins_ke_kpis.length() > 0),  # type: ignore[union-attr]
             card(
-                section_heading("Coverage"),
-                _data_table(
-                    ["Name", "Type", "State", "Trigger", "Notes"],
-                    "2fr 1fr 1fr 1fr 2fr",
-                    State.mcs_knowledge_coverage,
-                    _mcs_ks_coverage_row,
+                rx.hstack(
+                    rx.icon("database", size=16, color="var(--amber-9)"),
+                    section_heading("Knowledge Sources"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "Configured knowledge sources and their runtime effectiveness "
+                    "(hit rate, contribution to grounded responses).",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
+                ),
+                # Runtime KPIs (formerly under "Knowledge Source Effectiveness")
+                rx.cond(
+                    State.mcs_ins_ke_kpis.length() > 0,  # type: ignore[union-attr]
+                    rx.hstack(
+                        rx.foreach(State.mcs_ins_ke_kpis, _ins_kpi),
+                        spacing="3",
+                        width="100%",
+                        overflow_x="auto",
+                        padding_y="12px",
+                    ),
+                ),
+                # Configuration sub-table (formerly "Coverage")
+                rx.cond(
+                    State.mcs_knowledge_coverage.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Configuration",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_y="8px",
+                        ),
+                        _data_table(
+                            ["Name", "Type", "State", "Trigger", "Notes"],
+                            "2fr 1fr 1fr 1fr 2fr",
+                            State.mcs_knowledge_coverage,
+                            _mcs_ks_coverage_row,
+                        ),
+                        width="100%",
+                    ),
+                ),
+                # Runtime effectiveness sub-table (formerly "Knowledge Source Effectiveness")
+                rx.cond(
+                    State.mcs_ins_ke_kpis.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Runtime effectiveness",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_y="8px",
+                        ),
+                        rx.box(
+                            rx.grid(
+                                rx.text("Source", **_INS_HEADER_CELL),
+                                rx.text("Queries", **_INS_HEADER_CELL, text_align="right"),
+                                rx.text("Contributed", **_INS_HEADER_CELL, text_align="right"),
+                                rx.text("Hit Rate", **_INS_HEADER_CELL),
+                                rx.text("Errors", **_INS_HEADER_CELL, text_align="right"),
+                                rx.text("Avg Results", **_INS_HEADER_CELL, text_align="right"),
+                                columns="2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr",
+                                gap="8px",
+                                padding_y="8px",
+                                border_bottom=f"2px solid {SURFACE_BORDER}",
+                                width="100%",
+                            ),
+                            rx.foreach(State.mcs_ins_ke_rows, _ins_ke_row),
+                            width="100%",
+                        ),
+                        rx.cond(
+                            State.mcs_ins_ke_warnings.length() > 0,  # type: ignore[union-attr]
+                            rx.box(
+                                rx.text(
+                                    "Low-performing sources",
+                                    font_size="12px",
+                                    font_weight="700",
+                                    color="var(--amber-9)",
+                                    padding_top="12px",
+                                ),
+                                rx.foreach(
+                                    State.mcs_ins_ke_warnings,
+                                    lambda w: rx.text(f"• {w}", font_size="12px", color="var(--gray-a9)"),
+                                ),
+                                width="100%",
+                            ),
+                        ),
+                        width="100%",
+                    ),
                 ),
                 width="100%",
             ),
@@ -2866,60 +2959,9 @@ def _mcs_knowledge_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Knowledge Source Effectiveness (moved from Insights)
-        rx.cond(
-            State.mcs_ins_ke_kpis.length() > 0,  # type: ignore[union-attr]
-            card(
-                _ins_card_header(
-                    "database",
-                    "var(--amber-9)",
-                    "Knowledge Source Effectiveness",
-                    "Per-source hit rate and contribution to grounded responses.",
-                ),
-                rx.hstack(
-                    rx.foreach(State.mcs_ins_ke_kpis, _ins_kpi),
-                    spacing="3",
-                    width="100%",
-                    overflow_x="auto",
-                    padding_y="12px",
-                ),
-                rx.box(
-                    rx.grid(
-                        rx.text("Source", **_INS_HEADER_CELL),
-                        rx.text("Queries", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Contributed", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Hit Rate", **_INS_HEADER_CELL),
-                        rx.text("Errors", **_INS_HEADER_CELL, text_align="right"),
-                        rx.text("Avg Results", **_INS_HEADER_CELL, text_align="right"),
-                        columns="2fr 0.7fr 0.9fr 0.7fr 0.6fr 0.7fr",
-                        gap="8px",
-                        padding_y="8px",
-                        border_bottom=f"2px solid {SURFACE_BORDER}",
-                        width="100%",
-                    ),
-                    rx.foreach(State.mcs_ins_ke_rows, _ins_ke_row),
-                    width="100%",
-                ),
-                rx.cond(
-                    State.mcs_ins_ke_warnings.length() > 0,  # type: ignore[union-attr]
-                    rx.box(
-                        rx.text(
-                            "Low-performing sources",
-                            font_size="12px",
-                            font_weight="700",
-                            color="var(--amber-9)",
-                            padding_top="12px",
-                        ),
-                        rx.foreach(
-                            State.mcs_ins_ke_warnings,
-                            lambda w: rx.text(f"• {w}", font_size="12px", color="var(--gray-a9)"),
-                        ),
-                        width="100%",
-                    ),
-                ),
-                width="100%",
-            ),
-        ),
+        # (Knowledge Source Effectiveness merged into "Knowledge Sources"
+        # card above — the unified card renders config + runtime stats
+        # for the same set of sources in one place.)
         spacing="4",
         width="100%",
     )
