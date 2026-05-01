@@ -1195,6 +1195,14 @@ class UploadMixin(rx.State, mixin=True):
             ]
 
             attempt_label = f"↻ Retry #{trace.attempt_index}" if trace.is_retry else f"#{trace.attempt_index}"
+            # Sanitize topic_name → DOM id for the deep-link anchor.
+            # Variable Tracker generative_answer cards use the raw
+            # topic_name; the click handler in `jump_to_knowledge_topic`
+            # applies the same sanitizer.
+            _topic_for_anchor = trace.topic_name or ""
+            gen_anchor_id = "row-gen-" + "".join(
+                c if c.isalnum() else "-" for c in _topic_for_anchor
+            ) if _topic_for_anchor else ""
             gen_rows.append(
                 {
                     "index": str(idx),
@@ -1202,6 +1210,7 @@ class UploadMixin(rx.State, mixin=True):
                     "is_retry": "true" if trace.is_retry else "",
                     "retry_reason": trace.previous_attempt_state or "",
                     "topic": trace.topic_name or "—",
+                    "gen_anchor_id": gen_anchor_id,
                     "status_label": status_label,
                     "status_tone": status_tone,
                     "outcome_icon": outcome_icon,
@@ -1675,20 +1684,37 @@ class UploadMixin(rx.State, mixin=True):
             },
         ]
 
-        # Phase breakdown
+        # Phase breakdown — annotate each row with a deep-link target so
+        # the user can jump from a slow phase to its component
+        # definition. Knowledge phases jump to the Knowledge tab;
+        # everything else jumps to the Tools tab Component Explorer.
+        from renderer.dynamic_data import _build_component_lookup, _resolve_component_schema
+
         total_ms = timeline.total_elapsed_ms or 0.0
         _phase_status_tone = {"completed": "good", "failed": "bad"}
-        self.mcs_conv_phases = [  # type: ignore[attr-defined]
-            {
-                "label": p.label,
-                "phase_type": p.phase_type,
-                "duration": _format_duration(p.duration_ms),
-                "pct": _pct(p.duration_ms, total_ms),
-                "status": p.state,
-                "status_tone": _phase_status_tone.get(p.state, "info"),
-            }
-            for p in timeline.phases
-        ]
+        _phase_lookup = _build_component_lookup(profile)
+        phases: list[dict] = []
+        for p in timeline.phases:
+            if p.phase_type == "KnowledgeSource":
+                link_kind = "knowledge"
+                link_id = p.label or ""
+            else:
+                schema = _resolve_component_schema(p.label or "", _phase_lookup)
+                link_kind = "component" if schema else ""
+                link_id = schema
+            phases.append(
+                {
+                    "label": p.label,
+                    "phase_type": p.phase_type,
+                    "duration": _format_duration(p.duration_ms),
+                    "pct": _pct(p.duration_ms, total_ms),
+                    "status": p.state,
+                    "status_tone": _phase_status_tone.get(p.state, "info"),
+                    "link_target_kind": link_kind,
+                    "link_target_id": link_id,
+                }
+            )
+        self.mcs_conv_phases = phases  # type: ignore[attr-defined]
 
         # Variable Tracker — unified canvas covering tool calls, Topic/Global
         # variable assignments, and topic-level Generative Answer traces. See
@@ -1697,8 +1723,9 @@ class UploadMixin(rx.State, mixin=True):
 
         # Performance Waterfall — see `build_performance_waterfall` for
         # the row schema. One row per timed event with the gap from the
-        # previous activity (idle gaps suppressed).
-        self.mcs_conv_waterfall = build_performance_waterfall(timeline)  # type: ignore[attr-defined]
+        # previous activity (idle gaps suppressed). Profile is passed so
+        # rows naming a component carry a Tools-tab link target.
+        self.mcs_conv_waterfall = build_performance_waterfall(timeline, profile)  # type: ignore[attr-defined]
 
         # Errors
         self.mcs_conv_errors = list(timeline.errors)  # type: ignore[attr-defined]
@@ -1762,6 +1789,9 @@ class UploadMixin(rx.State, mixin=True):
                 # Merge has_recommendations from trigger or finish
                 has_recs = "true" if ev.has_recommendations or fin_has_recs else ""
 
+                # Resolve the topic to a Component Explorer schema_name
+                # so the row can hyperlink into the Tools tab.
+                schema = _resolve_component_schema(ev.topic_name or "", _phase_lookup)
                 reasoning.append(
                     {
                         "step": str(step_num),
@@ -1774,6 +1804,8 @@ class UploadMixin(rx.State, mixin=True):
                         "error": fin_error,
                         "has_recommendations": has_recs,
                         "used_outputs": fin_used_outputs,
+                        "link_target_kind": "component" if schema else "",
+                        "link_target_id": schema,
                     }
                 )
         self.mcs_conv_reasoning = reasoning  # type: ignore[attr-defined]

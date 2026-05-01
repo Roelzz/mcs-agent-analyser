@@ -173,7 +173,7 @@ def render_report(
         sections.append(conv_flow)
 
     # 7.3 Performance Waterfall — between-activity gap-time table
-    waterfall = render_performance_waterfall_md(timeline)
+    waterfall = render_performance_waterfall_md(timeline, profile=profile)
     if waterfall:
         sections.append(waterfall)
 

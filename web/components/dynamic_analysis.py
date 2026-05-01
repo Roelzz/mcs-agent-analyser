@@ -2695,6 +2695,7 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
         ),
         width="100%",
         padding="14px",
+        id=trace["gen_anchor_id"],
     )
 
 
@@ -3981,6 +3982,7 @@ def _mcs_component_explorer_panel() -> rx.Component:
                 width="100%",
             ),
             width="100%",
+            id="row-component-explorer",
         ),
     )
 
@@ -4136,8 +4138,12 @@ def _mcs_waterfall_row(item: dict) -> rx.Component:
     """One row in the Performance Waterfall: activity label + a
     horizontal proportional bar whose width is the gap-to-previous as a
     percentage of the largest gap. The colour reflects the event
-    category (Message / Plan / Action / Knowledge / Orchestrator /
-    Trace / Error)."""
+    category. When the row references a tool / topic / agent or a
+    knowledge call, the entire row becomes clickable and jumps to the
+    canonical destination."""
+    is_component_link = item["link_target_kind"] == "component"
+    is_knowledge_link = item["link_target_kind"] == "knowledge"
+    is_linked = item["link_target_kind"] != ""
     return rx.hstack(
         rx.text(
             item["timestamp"],
@@ -4172,6 +4178,10 @@ def _mcs_waterfall_row(item: dict) -> rx.Component:
             flex_grow="1",
             style={"overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap"},
         ),
+        rx.cond(
+            is_linked,
+            rx.icon("arrow-up-right", size=10, color="var(--green-a10)"),
+        ),
         rx.box(
             rx.box(
                 width=item["width_pct"],
@@ -4199,12 +4209,38 @@ def _mcs_waterfall_row(item: dict) -> rx.Component:
         align="center",
         width="100%",
         padding="3px 0",
+        cursor=rx.cond(is_linked, "pointer", "default"),
+        on_click=rx.cond(
+            is_component_link,
+            State.jump_to_component_in_explorer(item["link_target_id"]),
+            rx.cond(
+                is_knowledge_link,
+                State.jump_to_knowledge_topic(item["link_target_id"]),
+                rx.noop(),
+            ),
+        ),
+        _hover=rx.cond(is_linked, {"background": "var(--green-a2)"}, {}),
+        transition="background 0.15s ease",
     )
 
 
 def _mcs_conv_phase_row(item: dict) -> rx.Component:
+    """Phase Breakdown row — clickable when the phase label resolves to
+    a component (jumps to Tools tab) or the phase is a knowledge call
+    (jumps to Knowledge tab)."""
+    is_component_link = item["link_target_kind"] == "component"
+    is_knowledge_link = item["link_target_kind"] == "knowledge"
+    is_linked = item["link_target_kind"] != ""
     return rx.grid(
-        rx.text(item["label"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+        rx.hstack(
+            rx.text(item["label"], font_size="13px", color="var(--gray-12)", font_weight="500"),
+            rx.cond(
+                is_linked,
+                rx.icon("arrow-up-right", size=10, color="var(--green-a10)"),
+            ),
+            spacing="1",
+            align="center",
+        ),
         rx.text(item["phase_type"], font_size="13px", color="var(--gray-a9)"),
         rx.text(item["duration"], font_size="13px", color="var(--gray-11)", font_family=_MONO),
         rx.text(item["pct"], font_size="13px", color="var(--gray-a9)", text_align="right"),
@@ -4215,10 +4251,23 @@ def _mcs_conv_phase_row(item: dict) -> rx.Component:
         padding_y="6px",
         border_bottom=f"1px solid {SURFACE_BORDER}",
         width="100%",
+        cursor=rx.cond(is_linked, "pointer", "default"),
+        on_click=rx.cond(
+            is_component_link,
+            State.jump_to_component_in_explorer(item["link_target_id"]),
+            rx.cond(
+                is_knowledge_link,
+                State.jump_to_knowledge_topic(item["link_target_id"]),
+                rx.noop(),
+            ),
+        ),
+        _hover=rx.cond(is_linked, {"background": "var(--green-a2)"}, {}),
+        transition="background 0.15s ease",
     )
 
 
 def _mcs_conv_reasoning_row(item: dict) -> rx.Component:
+    is_linked = item["link_target_kind"] == "component"
     return rx.box(
         rx.vstack(
             # Header row: step number + topic badge + step_type badge + status badge + duration
@@ -4229,7 +4278,23 @@ def _mcs_conv_reasoning_row(item: dict) -> rx.Component:
                     font_size="12px",
                     color="var(--gray-a9)",
                 ),
-                rx.badge(item["topic"], color_scheme="teal", variant="soft", size="1"),
+                rx.box(
+                    rx.hstack(
+                        rx.badge(item["topic"], color_scheme="teal", variant="soft", size="1"),
+                        rx.cond(
+                            is_linked,
+                            rx.icon("arrow-up-right", size=10, color="var(--green-a10)"),
+                        ),
+                        spacing="1",
+                        align="center",
+                    ),
+                    cursor=rx.cond(is_linked, "pointer", "default"),
+                    on_click=rx.cond(
+                        is_linked,
+                        State.jump_to_component_in_explorer(item["link_target_id"]),
+                        rx.noop(),
+                    ),
+                ),
                 rx.cond(
                     item["step_type"] != "",
                     rx.badge(item["step_type"], color_scheme="gray", variant="outline", size="1"),
@@ -4322,7 +4387,14 @@ def _mcs_var_argument_row(arg: dict) -> rx.Component:
 
 
 def _mcs_var_card_header(item: dict, icon_name: str, badge_color: str) -> rx.Component:
-    """Header row shared across the three Variable Tracker card kinds."""
+    """Header row shared across the three Variable Tracker card kinds.
+    When the row carries a `link_target_kind` (`"component"` or
+    `"knowledge"`), the header gets an arrow-up-right icon and a click
+    handler that jumps to the canonical destination — matching the
+    deep-link affordance on Conversation Flow rows."""
+    is_component_link = item["link_target_kind"] == "component"
+    is_knowledge_link = item["link_target_kind"] == "knowledge"
+    is_linked = item["link_target_kind"] != ""
     return rx.vstack(
         rx.hstack(
             rx.icon(icon_name, size=14, color=PRIMARY),
@@ -4357,10 +4429,24 @@ def _mcs_var_card_header(item: dict, icon_name: str, badge_color: str) -> rx.Com
                     font_family=_MONO,
                 ),
             ),
+            rx.cond(
+                is_linked,
+                rx.icon("arrow-up-right", size=12, color="var(--green-a10)"),
+            ),
             spacing="2",
             align="center",
             width="100%",
             flex_wrap="wrap",
+            cursor=rx.cond(is_linked, "pointer", "default"),
+            on_click=rx.cond(
+                is_component_link,
+                State.jump_to_component_in_explorer(item["link_target_id"]),
+                rx.cond(
+                    is_knowledge_link,
+                    State.jump_to_knowledge_topic(item["link_target_id"]),
+                    rx.noop(),
+                ),
+            ),
         ),
         rx.cond(
             item["thought"] != "",
