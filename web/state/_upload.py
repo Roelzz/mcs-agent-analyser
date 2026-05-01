@@ -785,9 +785,6 @@ class UploadMixin(rx.State, mixin=True):
             if cat:
                 by_cat.setdefault(cat, []).append(comp)
 
-        user_topics = by_cat.get("user_topics", [])
-        tools = [c for c in profile.components if c.tool_type]
-
         # Quick wins
         quick_wins: list[dict] = []
         for comp in profile.components:

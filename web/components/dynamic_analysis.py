@@ -2544,16 +2544,29 @@ def _mcs_generative_trace_card(trace: dict) -> rx.Component:
                     padding="6px 0",
                 ),
             ),
-            # Citations
+            # Citations (inline summary — full audit table with answer
+            # state, completion state, moderation + provenance flags is
+            # in the Citation Verification panel below).
             rx.cond(
                 trace["citation_count"] != "0",
                 rx.box(
-                    rx.text(
-                        "Citations cited in answer",
-                        font_size="11px",
-                        color="var(--gray-a8)",
-                        font_weight="700",
+                    rx.hstack(
+                        rx.text(
+                            "Citations cited in answer",
+                            font_size="11px",
+                            color="var(--gray-a8)",
+                            font_weight="700",
+                        ),
+                        rx.spacer(),
+                        rx.text(
+                            "Detailed audit in Citation Verification panel ↓",
+                            font_size="10px",
+                            color="var(--gray-a7)",
+                            font_style="italic",
+                        ),
+                        align="center",
                         margin_bottom="4px",
+                        width="100%",
                     ),
                     rx.foreach(trace["citations"].to(list[dict]), _gen_trace_citation_row),
                     width="100%",
@@ -3465,7 +3478,10 @@ def _mcs_routing_panel() -> rx.Component:
                     align="center",
                 ),
                 rx.text(
-                    "How topics were triggered, executed, and completed during the conversation.",
+                    "Per-topic runtime view — answers \"which topics fired, "
+                    "what was their state, what did each contribute?\". For "
+                    "phase-level (recognition / planning / execution) timing, "
+                    "see Conversation → Phase Breakdown.",
                     font_size="12px",
                     color="var(--gray-a9)",
                     padding_bottom="8px",
@@ -3492,7 +3508,10 @@ def _mcs_routing_panel() -> rx.Component:
                     align="center",
                 ),
                 rx.text(
-                    "How user messages matched against topic trigger phrases.",
+                    "Answers \"for each user message, which trigger phrase did "
+                    "the orchestrator pick and how strong was the match?\". "
+                    "Pairs with Topic Coverage (below) which lists topics that "
+                    "didn't fire at all.",
                     font_size="12px",
                     color="var(--gray-a9)",
                     padding_bottom="8px",
@@ -3518,6 +3537,13 @@ def _mcs_routing_panel() -> rx.Component:
                     section_heading("Topic Coverage"),
                     spacing="2",
                     align="center",
+                ),
+                rx.text(
+                    "Answers \"which topics never fired in this conversation?\" — "
+                    "complement to Trigger Phrase Analysis above.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="6px",
                 ),
                 rx.text(
                     State.mcs_topics_coverage_summary,
@@ -5052,6 +5078,15 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                         section_heading("Phase Breakdown"),
                         spacing="2",
                         align="center",
+                    ),
+                    rx.text(
+                        "Answers \"how long did each conversation phase take?\" "
+                        "(recognition, planning, execution, delivery). For per-topic "
+                        "lifecycle detail see Routing → Topic Lifecycles.",
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_style="italic",
+                        padding_bottom="8px",
                     ),
                     rx.box(
                         _grid_header(
