@@ -1099,23 +1099,9 @@ class UploadMixin(rx.State, mixin=True):
             "FlowTool": "amber",
         }
 
-        def _build_tool_row(t) -> dict:
-            rows = _tool_settings_rows(t)
-            return {
-                "name": t.display_name,
-                "tool_type": t.tool_type or "—",
-                "connector": t.connector_display_name or "—",
-                "mode": t.connection_mode or "—",
-                "state": t.state,
-                "description": (t.description or t.model_description or "—")[:200],
-                "type_color": _type_colors.get(t.tool_type or "", "gray"),
-                "link_id": t.display_name,
-                "row_id": f"row-{t.display_name}",
-                "settings_rows": rows,
-                "has_settings": "true" if rows else "",
-            }
-
-        self.mcs_tools_rows = [_build_tool_row(t) for t in tools]  # type: ignore[attr-defined]
+        # (Tool Inventory card removed — tools live in the inline
+        # Component Explorer. The standalone `mcs_tools_rows` table is
+        # gone.)
 
         # External calls detail (per-action rows from action_details, deduplicated)
         from collections import Counter
@@ -1609,12 +1595,28 @@ class UploadMixin(rx.State, mixin=True):
             },
         ]
 
-        # Category summary
-        cat_order = [
+        # Category summary — `orchestrator_topics` is split by
+        # `tool_type` so each tool kind (MCP servers, connector tools,
+        # flow tools, child/connected agents) gets its own row instead
+        # of being lumped under the internal "Orchestrator Topics"
+        # bucket.
+        agent_tool_types = {"ChildAgent", "ConnectedAgent", "A2AAgent"}
+        # Friendly label + icon per tool_type. Anything we haven't
+        # explicitly mapped falls back to a generic "Tools" row.
+        tool_type_display: dict[str, tuple[str, str]] = {
+            "MCPServer": ("MCP Servers", "server"),
+            "ConnectorTool": ("Connector Tools", "plug"),
+            "FlowTool": ("Power Automate Flows", "workflow"),
+            "ChildAgent": ("Child Agents", "users"),
+            "ConnectedAgent": ("Connected Agents", "network"),
+            "A2AAgent": ("A2A Agents", "share-2"),
+        }
+        topic_cat_order = [
             "user_topics",
             "system_topics",
             "automation_topics",
-            "orchestrator_topics",
+        ]
+        misc_cat_order = [
             "skills",
             "custom_entities",
             "variables",
@@ -1624,14 +1626,64 @@ class UploadMixin(rx.State, mixin=True):
             "user_topics": ("User Topics", "user-round"),
             "system_topics": ("System Topics", "settings"),
             "automation_topics": ("Automation Topics", "bot"),
-            "orchestrator_topics": ("Orchestrator Topics", "network"),
             "skills": ("Skills & Connectors", "puzzle"),
             "custom_entities": ("Custom Entities", "database"),
             "variables": ("Variables", "variable"),
             "settings": ("Settings", "sliders"),
         }
         summary_rows: list[dict] = []
-        for cat in cat_order:
+        # Topic categories first
+        for cat in topic_cat_order:
+            comps = by_cat.get(cat, [])
+            if not comps:
+                continue
+            display, icon = cat_display.get(cat, (cat, "list"))
+            active = sum(1 for c in comps if c.state == "Active")
+            summary_rows.append(
+                {
+                    "category": display,
+                    "count": str(len(comps)),
+                    "active": str(active),
+                    "inactive": str(len(comps) - active),
+                    "icon": icon,
+                }
+            )
+        # Per-tool-type rows from orchestrator_topics, sorted: tools
+        # first (alphabetical by display), agents next.
+        orch_comps = by_cat.get("orchestrator_topics", [])
+        by_tool_type: dict[str, list] = {}
+        for c in orch_comps:
+            key = c.tool_type or "Other"
+            by_tool_type.setdefault(key, []).append(c)
+        # Order: known tool types in declared order, then any unknown
+        # types alphabetically. Agents grouped after non-agent tools.
+        non_agent_keys = [k for k in by_tool_type if k not in agent_tool_types]
+        agent_keys = [k for k in by_tool_type if k in agent_tool_types]
+
+        def _tool_row(key: str) -> dict | None:
+            comps = by_tool_type.get(key, [])
+            if not comps:
+                return None
+            display, icon = tool_type_display.get(key, (key or "Tools", "wrench"))
+            active = sum(1 for c in comps if c.state == "Active")
+            return {
+                "category": display,
+                "count": str(len(comps)),
+                "active": str(active),
+                "inactive": str(len(comps) - active),
+                "icon": icon,
+            }
+
+        for key in sorted(non_agent_keys, key=lambda k: tool_type_display.get(k, (k, ""))[0].lower()):
+            row = _tool_row(key)
+            if row:
+                summary_rows.append(row)
+        for key in sorted(agent_keys, key=lambda k: tool_type_display.get(k, (k, ""))[0].lower()):
+            row = _tool_row(key)
+            if row:
+                summary_rows.append(row)
+        # Misc (skills, entities, variables, settings) at the bottom
+        for cat in misc_cat_order:
             comps = by_cat.get(cat, [])
             if not comps:
                 continue
@@ -1667,56 +1719,11 @@ class UploadMixin(rx.State, mixin=True):
                 "has_settings": "true" if rows else "",
             }
 
-        # User topics detail (UI renders the structured settings panel inside
-        # a per-row accordion).
-        # `link_id` is the identity used by Conversation Flow → Topics deep
-        # links (matches `link_target_id` in flow rows). `row_id` is the
-        # DOM id used by the scroll-into-view JS — kept derived so the JS
-        # only needs to know the link_id with the `row-` prefix.
-        self.mcs_topics_user_rows = [  # type: ignore[attr-defined]
-            {
-                "name": c.display_name,
-                "schema": c.schema_name,
-                "state": c.state,
-                "triggers": ", ".join(c.trigger_queries[:3]) + ("..." if len(c.trigger_queries) > 3 else "")
-                if c.trigger_queries
-                else "—",
-                "description": (c.description or "—")[:150],
-                "link_id": c.schema_name,
-                "row_id": f"row-{c.schema_name}",
-                **_settings_fields(c),
-            }
-            for c in user_topics
-        ]
-
-        # Orchestrator topics detail
-        self.mcs_topics_orch_rows = [  # type: ignore[attr-defined]
-            {
-                "name": c.display_name,
-                "state": c.state,
-                "tool_type": c.tool_type or c.action_kind or "—",
-                "connector": c.connector_display_name or "—",
-                "mode": c.connection_mode or "—",
-                "link_id": c.display_name,
-                "row_id": f"row-{c.display_name}",
-                **_settings_fields(c),
-            }
-            for c in orch_topics
-        ]
-
-        # System/automation topics detail
-        self.mcs_topics_system_rows = [  # type: ignore[attr-defined]
-            {
-                "name": c.display_name,
-                "schema": c.schema_name,
-                "state": c.state,
-                "trigger": c.trigger_kind or "—",
-                "link_id": c.schema_name,
-                "row_id": f"row-{c.schema_name}",
-                **_settings_fields(c),
-            }
-            for c in system_topics
-        ]
+        # (Per-category topic detail tables — User / Orchestrator /
+        # System / Automation — were removed when the Topics tab was
+        # consolidated into the Tools tab. All topic browsing now goes
+        # through the inline Component Explorer
+        # (`mcs_topic_explorer_topics`).)
 
         # External calls (moved to Tools tab — just clear this legacy var)
         self.mcs_topics_external_calls = []  # type: ignore[attr-defined]
@@ -1779,25 +1786,50 @@ class UploadMixin(rx.State, mixin=True):
             },
         ]
 
-        # Topic Definition Explorer — flat list across every category so
-        # the modal can pick from a single unified surface. Each entry
+        # Component Explorer — flat list across every category so the
+        # inline picker can browse a single unified surface. Each entry
         # carries the pre-flattened `settings_rows` so the right pane
-        # only has to render the picked topic's rows. Sorted: user
-        # topics first, then orchestrator, then system, alphabetically
-        # within each.
-        category_order = {
-            "user_topics": (0, "User"),
-            "orchestrator_topics": (1, "Orchestrator"),
-            "automation_topics": (2, "Automation"),
-            "system_topics": (3, "System"),
-            "skills": (4, "Skill"),
+        # only has to render the picked component's rows. Includes both
+        # DialogComponent topics AND tools (TaskDialog / AgentDialog) —
+        # the picker is the canonical browse surface for the bot's
+        # static design.
+        # Sort buckets: topics first (alpha-grouped), then tools by
+        # tool_type (MCP / Connector / Flow / generic), then agents by
+        # their specific kind, then misc (skills).
+        category_order: dict[str, tuple[int, str]] = {
+            "user_topics": (0, "User Topic"),
+            "system_topics": (1, "System Topic"),
+            "automation_topics": (2, "Automation Topic"),
+            "skills": (8, "Skill"),
+        }
+        # Per-tool-type badge for components in `orchestrator_topics`
+        # (which contains all TaskDialog + AgentDialog components).
+        tool_type_label: dict[str, tuple[int, str]] = {
+            "MCPServer": (3, "MCP"),
+            "ConnectorTool": (4, "Connector"),
+            "FlowTool": (5, "Flow"),
+            "ChildAgent": (6, "Child Agent"),
+            "ConnectedAgent": (6, "Connected Agent"),
+            "A2AAgent": (6, "A2A Agent"),
         }
         explorer_entries: list[tuple[int, str, dict]] = []
         for cat, comps in by_cat.items():
-            sort_key, cat_label = category_order.get(cat, (9, cat.replace("_", " ").title()))
             for c in comps:
                 if c.kind != "DialogComponent":
                     continue
+                # Resolve the picker badge:
+                #   - orchestrator_topics → tool_type-specific label
+                #   - everything else → category-derived label
+                if cat == "orchestrator_topics":
+                    sort_key, cat_label = tool_type_label.get(
+                        c.tool_type or "",
+                        (7, "Tool"),
+                    )
+                else:
+                    sort_key, cat_label = category_order.get(
+                        cat,
+                        (9, cat.replace("_", " ").title()),
+                    )
                 rows = _cached_settings_rows(c)
                 action_count = sum(1 for r in rows if r.get("row_type") == "kind")
                 explorer_entries.append(
@@ -2330,7 +2362,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_profile_quick_wins = []  # type: ignore[attr-defined]
         self.mcs_profile_trigger_overlaps = []  # type: ignore[attr-defined]
         self.mcs_tools_kpis = []  # type: ignore[attr-defined]
-        self.mcs_tools_rows = []  # type: ignore[attr-defined]
         self.mcs_tools_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_tools_external_calls = []  # type: ignore[attr-defined]
         self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
@@ -2350,9 +2381,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_generative_topics = []  # type: ignore[attr-defined]
         self.mcs_topics_kpis = []  # type: ignore[attr-defined]
         self.mcs_topics_summary = []  # type: ignore[attr-defined]
-        self.mcs_topics_user_rows = []  # type: ignore[attr-defined]
-        self.mcs_topics_orch_rows = []  # type: ignore[attr-defined]
-        self.mcs_topics_system_rows = []  # type: ignore[attr-defined]
         self.mcs_topics_external_calls = []  # type: ignore[attr-defined]
         self.mcs_topics_coverage = []  # type: ignore[attr-defined]
         self.mcs_topics_coverage_summary = ""  # type: ignore[attr-defined]

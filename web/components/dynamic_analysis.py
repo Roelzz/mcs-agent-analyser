@@ -102,7 +102,6 @@ def _mcs_section_tab_bar() -> rx.Component:
         # Profile data exists: all tabs
         rx.hstack(
             _btn("profile", "user-round", "Profile"),
-            _btn("topics", "list", "Topics"),
             _btn("tools", "wrench", "Tools"),
             _btn("knowledge", "database", "Knowledge"),
             _btn("routing", "route", "Routing"),
@@ -1549,59 +1548,6 @@ def _mcs_profile_panel() -> rx.Component:
 # ── Tools panel ──────────────────────────────────────────────────────────
 
 
-def _mcs_tool_row(item: dict) -> rx.Component:
-    is_target = State.mcs_highlight_target_id == item["link_id"]
-    return rx.vstack(
-        rx.grid(
-            rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-            rx.badge(
-                item["tool_type"],
-                color_scheme=rx.match(
-                    item["type_color"],
-                    ("blue", "blue"),
-                    ("green", "green"),
-                    ("teal", "teal"),
-                    ("cyan", "cyan"),
-                    ("purple", "purple"),
-                    ("amber", "amber"),
-                    "gray",
-                ),
-                variant="soft",
-                size="1",
-            ),
-            rx.text(item["connector"], font_size="13px", color="var(--gray-a9)"),
-            rx.text(item["mode"], font_size="13px", color="var(--gray-11)"),
-            rx.badge(
-                item["state"],
-                color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
-                variant="soft",
-                size="1",
-            ),
-            rx.text(
-                item["description"],
-                font_size="12px",
-                color="var(--gray-a9)",
-                overflow="hidden",
-                text_overflow="ellipsis",
-                white_space="nowrap",
-            ),
-            columns="2fr 1fr 1fr 1fr 1fr 3fr",
-            gap="8px",
-            align="center",
-            padding_y="6px",
-            border_bottom=f"1px solid {SURFACE_BORDER}",
-            width="100%",
-        ),
-        _open_in_explorer_link(item),
-        spacing="0",
-        width="100%",
-        id=item["row_id"],
-        border_left=rx.cond(is_target, "3px solid var(--green-9)", "3px solid transparent"),
-        background=rx.cond(is_target, "var(--green-a2)", "transparent"),
-        transition="border-color 0.2s ease, background 0.2s ease",
-    )
-
-
 def _mcs_tools_ext_detail_row(item: dict) -> rx.Component:
     return _grid_row(
         [
@@ -1636,36 +1582,63 @@ def _mcs_tools_stats_row(item: dict) -> rx.Component:
 
 
 def _mcs_tools_panel() -> rx.Component:
+    """Consolidated Tools tab — absorbs the former Topics tab.
+
+    Layout: agent-wide KPIs → category breakdown → anomalies →
+    inline Component Explorer (browse topics + tools) → integration
+    map → topic connection graph → external calls → runtime tool-call
+    analysis → multi-agent delegation.
+
+    The standalone Tool Inventory card and the per-category topic
+    tables (User / Orchestrator / System / Automation) are gone —
+    the Component Explorer's picker subsumes both.
+    """
     return rx.vstack(
-        # KPI grid
+        # ── KPI grids (Tools + Topics) — both surfaces fit on one tab now ──
         rx.grid(
             rx.foreach(State.mcs_tools_kpis, _mcs_kpi_card),
             columns="4",
             gap="10px",
             width="100%",
         ),
-        # Tool table (static — from YAML)
+        rx.grid(
+            rx.foreach(State.mcs_topics_kpis, _mcs_kpi_card),
+            columns="4",
+            gap="10px",
+            width="100%",
+        ),
+        # Category Summary (formerly on Topics tab)
         rx.cond(
-            State.mcs_tools_rows.length() > 0,  # type: ignore[union-attr]
+            State.mcs_topics_summary.length() > 0,  # type: ignore[union-attr]
             card(
-                section_heading("Tool Inventory"),
-                rx.box(
-                    _grid_header(
-                        "Tool", "Type", "Connector", "Mode", "State", "Description", template="2fr 1fr 1fr 1fr 1fr 3fr"
-                    ),
-                    rx.foreach(State.mcs_tools_rows, _mcs_tool_row),
-                    width="100%",
-                    border=f"1px solid {SURFACE_BORDER}",
-                    border_radius="8px",
-                    padding_x="12px",
-                    background="var(--gray-a2)",
-                    overflow_x="auto",
+                section_heading("Category Summary"),
+                _data_table(
+                    ["Category", "Count", "Active", "Inactive"],
+                    "3fr 1fr 1fr 1fr",
+                    State.mcs_topics_summary,
+                    _mcs_topics_summary_row,
                 ),
                 width="100%",
             ),
         ),
-        # Integration map
+        # Anomaly chips (formerly on Topics tab)
+        rx.cond(
+            State.mcs_topics_anomalies.length() > 0,  # type: ignore[union-attr]
+            rx.hstack(
+                rx.foreach(State.mcs_topics_anomalies, _mcs_highlight_chip),
+                spacing="2",
+                width="100%",
+                flex_wrap="wrap",
+            ),
+        ),
+        # ── Inline Component Explorer — replaces User / Orchestrator /
+        # System / Automation topic tables AND the standalone Tool
+        # Inventory card. One unified browse surface.
+        _mcs_component_explorer_panel(),
+        # Integration map (Mermaid)
         _mermaid_block(State.mcs_tools_mermaid),
+        # Topic Connection Graph (formerly on Topics tab)
+        _mermaid_block(State.mcs_topics_mermaid),
         # External calls detail
         rx.cond(
             State.mcs_tools_external_calls.length() > 0,  # type: ignore[union-attr]
@@ -3682,34 +3655,6 @@ def _settings_prop_row(row: dict) -> rx.Component:
     )
 
 
-def _open_in_explorer_link(item: dict) -> rx.Component:
-    """Compact 'Open in Explorer' link replacing the per-row inline
-    settings accordion. The Topic Definition Explorer modal is the
-    canonical full-tree view; per-row tables on the Topics tab now
-    show summary columns only."""
-    return rx.cond(
-        item["has_settings"] != "",
-        rx.box(
-            rx.link(
-                rx.hstack(
-                    rx.icon("compass", size=10, color="var(--green-11)"),
-                    rx.text(
-                        "Open in Topic Explorer",
-                        font_size="10px",
-                        color="var(--green-11)",
-                        font_weight="600",
-                    ),
-                    spacing="1",
-                    align="center",
-                ),
-                cursor="pointer",
-                on_click=State.open_topic_in_explorer(item["link_id"]),
-            ),
-            padding="2px 8px",
-        ),
-    )
-
-
 def _highlight_row_style(item: dict) -> dict:
     """Return highlight style props when this row is the current deep-link
     target. The Conversation Flow → tab linker sets
@@ -3722,108 +3667,6 @@ def _highlight_row_style(item: dict) -> dict:
         "background": rx.cond(is_target, "var(--green-a2)", "transparent"),
         "transition": "border-color 0.2s ease, background 0.2s ease",
     }
-
-
-def _mcs_topics_user_row(item: dict) -> rx.Component:
-    return rx.vstack(
-        _grid_row(
-            [
-                rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-                rx.text(item["schema"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
-                rx.badge(
-                    item["state"],
-                    color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
-                    variant="soft",
-                    size="1",
-                ),
-                rx.text(
-                    item["triggers"],
-                    font_size="12px",
-                    color="var(--gray-a9)",
-                    overflow="hidden",
-                    text_overflow="ellipsis",
-                    white_space="nowrap",
-                ),
-                rx.text(
-                    item["description"],
-                    font_size="12px",
-                    color="var(--gray-a9)",
-                    overflow="hidden",
-                    text_overflow="ellipsis",
-                    white_space="nowrap",
-                ),
-            ],
-            template="2fr 2fr 1fr 2fr 2fr",
-        ),
-        _open_in_explorer_link(item),
-        spacing="0",
-        width="100%",
-        id=item["row_id"],
-        **_highlight_row_style(item),
-    )
-
-
-def _mcs_topics_orch_row(item: dict) -> rx.Component:
-    return rx.vstack(
-        _grid_row(
-            [
-                rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-                rx.badge(
-                    item["state"],
-                    color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
-                    variant="soft",
-                    size="1",
-                ),
-                rx.text(item["tool_type"], font_size="13px", color="var(--gray-a9)"),
-                rx.text(item["connector"], font_size="13px", color="var(--gray-a9)"),
-                rx.text(item["mode"], font_size="13px", color="var(--gray-11)"),
-            ],
-            template="2fr 1fr 1fr 1fr 1fr",
-        ),
-        _open_in_explorer_link(item),
-        spacing="0",
-        width="100%",
-        id=item["row_id"],
-        **_highlight_row_style(item),
-    )
-
-
-def _mcs_topics_system_row(item: dict) -> rx.Component:
-    return rx.vstack(
-        _grid_row(
-            [
-                rx.text(item["name"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-                rx.text(item["schema"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
-                rx.badge(
-                    item["state"],
-                    color_scheme=rx.cond(item["state"] == "Active", "green", "gray"),
-                    variant="soft",
-                    size="1",
-                ),
-                rx.text(item["trigger"], font_size="13px", color="var(--gray-a9)"),
-            ],
-            template="2fr 2fr 1fr 1fr",
-        ),
-        _open_in_explorer_link(item),
-        spacing="0",
-        width="100%",
-        id=item["row_id"],
-        **_highlight_row_style(item),
-    )
-
-
-def _mcs_topics_ext_row(item: dict) -> rx.Component:
-    return _grid_row(
-        [
-            rx.text(item["name"], font_size="13px", color="var(--gray-12)"),
-            rx.text(item["connector"], font_size="13px", color="var(--gray-11)", text_align="right"),
-            rx.text(item["flow"], font_size="13px", color="var(--gray-11)", text_align="right"),
-            rx.text(item["ai_builder"], font_size="13px", color="var(--gray-11)", text_align="right"),
-            rx.text(item["http"], font_size="13px", color="var(--gray-11)", text_align="right"),
-            rx.text(item["total"], font_size="13px", color="var(--gray-12)", font_weight="600", text_align="right"),
-        ],
-        template="3fr 1fr 1fr 1fr 1fr 1fr",
-    )
 
 
 def _mcs_topics_coverage_row(item: dict) -> rx.Component:
@@ -3982,25 +3825,47 @@ def _mcs_topic_explorer_settings_row(row: dict) -> rx.Component:
     )
 
 
-def _mcs_topic_explorer_modal() -> rx.Component:
-    """Dialog modal — searchable topic picker (left) + step-by-step
-    settings rows (right). Opens via the call-to-action at the top of
-    the Topics tab."""
-    return rx.dialog.root(
-        rx.dialog.content(
-            rx.dialog.title("Topic Definition Explorer"),
-            rx.dialog.description(
-                "Browse every topic in the agent. Search by name or category, "
-                "click a row to see its full step-by-step action tree (with "
-                "branching) on the right.",
-                size="2",
-                margin_bottom="12px",
+def _mcs_component_explorer_panel() -> rx.Component:
+    """Inline two-pane Component Explorer: searchable picker (left) +
+    step-by-step settings rows for the selected component (right).
+
+    Browses every DialogComponent topic AND every TaskDialog /
+    AgentDialog tool — one canonical surface for the bot's static
+    design. Replaces the per-category topic tables (User / Orch /
+    System / Automation) that used to live as standalone cards, plus
+    the standalone Tool Inventory card.
+
+    Always rendered (gated only on `mcs_topic_explorer_topics.length() > 0`)
+    — no modal, no launcher button."""
+    return rx.cond(
+        State.mcs_topic_explorer_topics.length() > 0,  # type: ignore[union-attr]
+        card(
+            rx.hstack(
+                rx.icon("compass", size=18, color=PRIMARY),
+                section_heading("Component Explorer"),
+                rx.spacer(),
+                rx.badge(
+                    State.mcs_topic_explorer_topics.length().to(str),  # type: ignore[union-attr]
+                    color_scheme="green",
+                    variant="soft",
+                    size="1",
+                ),
+                align="center",
+                width="100%",
+            ),
+            rx.text(
+                "Browse every topic and tool in the agent. Search by name or "
+                "category; click an entry to see its full step-by-step action "
+                "tree (with branching) in the right pane.",
+                font_size="11px",
+                color="var(--gray-a8)",
+                font_style="italic",
             ),
             rx.hstack(
                 # Left pane — picker
                 rx.vstack(
                     rx.input(
-                        placeholder="Search topics…",
+                        placeholder="Search components…",
                         value=State.mcs_topic_explorer_search,
                         on_change=State.set_topic_explorer_search,
                         size="2",
@@ -4010,7 +3875,7 @@ def _mcs_topic_explorer_modal() -> rx.Component:
                         State.mcs_topic_explorer_filtered.length().to(str),  # type: ignore[union-attr]
                         rx.text.span(" / "),
                         State.mcs_topic_explorer_topics.length().to(str),  # type: ignore[union-attr]
-                        rx.text.span(" topics"),
+                        rx.text.span(" components"),
                         font_size="10px",
                         color="var(--gray-a8)",
                     ),
@@ -4020,7 +3885,7 @@ def _mcs_topic_explorer_modal() -> rx.Component:
                             _mcs_topic_explorer_picker_row,
                         ),
                         width="100%",
-                        max_height="60vh",
+                        max_height="520px",
                         overflow_y="auto",
                         border=f"1px solid {SURFACE_BORDER}",
                         border_radius="8px",
@@ -4028,10 +3893,10 @@ def _mcs_topic_explorer_modal() -> rx.Component:
                     ),
                     spacing="2",
                     align="start",
-                    width="40%",
+                    width="38%",
                     flex_shrink="0",
                 ),
-                # Right pane — selected topic detail
+                # Right pane — selected component detail
                 rx.box(
                     rx.cond(
                         State.mcs_topic_explorer_selected != "",
@@ -4077,12 +3942,12 @@ def _mcs_topic_explorer_modal() -> rx.Component:
                                         _mcs_topic_explorer_settings_row,
                                     ),
                                     width="100%",
-                                    max_height="60vh",
+                                    max_height="520px",
                                     overflow_y="auto",
                                     padding_right="6px",
                                 ),
                                 rx.text(
-                                    "This topic has no settings rows — its dialog "
+                                    "This component has no settings rows — its dialog "
                                     "tree is empty or wasn't captured during parse.",
                                     font_size="11px",
                                     color="var(--gray-a8)",
@@ -4095,7 +3960,7 @@ def _mcs_topic_explorer_modal() -> rx.Component:
                         ),
                         rx.center(
                             rx.text(
-                                "Pick a topic on the left to see its action tree.",
+                                "Pick a component on the left to see its action tree.",
                                 font_size="12px",
                                 color="var(--gray-a8)",
                                 font_style="italic",
@@ -4115,152 +3980,8 @@ def _mcs_topic_explorer_modal() -> rx.Component:
                 align="start",
                 width="100%",
             ),
-            rx.flex(
-                rx.dialog.close(
-                    rx.button("Close", size="2", variant="soft", color_scheme="gray"),
-                ),
-                spacing="2",
-                margin_top="14px",
-                justify="end",
-            ),
-            max_width="1100px",
-            width="92vw",
-        ),
-        open=State.mcs_topic_explorer_open,
-        on_open_change=State.set_topic_explorer_open,
-    )
-
-
-def _mcs_topic_explorer_card() -> rx.Component:
-    """Call-to-action card at the top of the Topics tab opening the
-    Topic Definition Explorer modal."""
-    return rx.cond(
-        State.mcs_topic_explorer_topics.length() > 0,  # type: ignore[union-attr]
-        card(
-            rx.hstack(
-                rx.icon("compass", size=20, color=PRIMARY),
-                rx.vstack(
-                    rx.text(
-                        "Topic Definition Explorer",
-                        font_size="14px",
-                        font_weight="700",
-                        color="var(--gray-12)",
-                    ),
-                    rx.text(
-                        "Browse every topic with a searchable picker + step-by-step "
-                        "action tree (incl. branching). Useful for understanding "
-                        "topic logic without leaving the analyser.",
-                        font_size="11px",
-                        color="var(--gray-a8)",
-                        line_height="1.5",
-                    ),
-                    spacing="1",
-                    align="start",
-                    flex_grow="1",
-                ),
-                rx.button(
-                    "Open Explorer",
-                    rx.icon("external-link", size=12),
-                    size="2",
-                    variant="soft",
-                    color_scheme="green",
-                    on_click=State.open_topic_explorer,
-                ),
-                spacing="3",
-                align="center",
-                width="100%",
-            ),
             width="100%",
         ),
-    )
-
-
-def _mcs_topics_panel() -> rx.Component:
-    return rx.vstack(
-        # Topic Definition Explorer launcher
-        _mcs_topic_explorer_card(),
-        # Explorer modal
-        _mcs_topic_explorer_modal(),
-        # KPI grid
-        rx.grid(
-            rx.foreach(State.mcs_topics_kpis, _mcs_kpi_card),
-            columns="4",
-            gap="10px",
-            width="100%",
-        ),
-        # Category summary
-        rx.cond(
-            State.mcs_topics_summary.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Category Summary"),
-                _data_table(
-                    ["Category", "Count", "Active", "Inactive"],
-                    "3fr 1fr 1fr 1fr",
-                    State.mcs_topics_summary,
-                    _mcs_topics_summary_row,
-                ),
-                width="100%",
-            ),
-        ),
-        # Anomaly chips
-        rx.hstack(
-            rx.foreach(State.mcs_topics_anomalies, _mcs_highlight_chip),
-            spacing="2",
-            width="100%",
-            flex_wrap="wrap",
-        ),
-        # User Topics detail
-        rx.cond(
-            State.mcs_topics_user_rows.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("User Topics"),
-                rx.box(
-                    _grid_header("Name", "Schema", "State", "Triggers", "Description", template="2fr 2fr 1fr 2fr 2fr"),
-                    rx.foreach(State.mcs_topics_user_rows, _mcs_topics_user_row),
-                    width="100%",
-                    border=f"1px solid {SURFACE_BORDER}",
-                    border_radius="8px",
-                    padding_x="12px",
-                    background="var(--gray-a2)",
-                    overflow_x="auto",
-                ),
-                width="100%",
-            ),
-        ),
-        # (Trigger Overlaps moved to Profile tab — it's static-design
-        # analysis at the agent level, not topic-specific.)
-        # Orchestrator Topics detail
-        rx.cond(
-            State.mcs_topics_orch_rows.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("Orchestrator Topics"),
-                _data_table(
-                    ["Name", "State", "Tool Type", "Connector", "Mode"],
-                    "2fr 1fr 1fr 1fr 1fr",
-                    State.mcs_topics_orch_rows,
-                    _mcs_topics_orch_row,
-                ),
-                width="100%",
-            ),
-        ),
-        # System/Automation Topics
-        rx.cond(
-            State.mcs_topics_system_rows.length() > 0,  # type: ignore[union-attr]
-            card(
-                section_heading("System & Automation Topics"),
-                _data_table(
-                    ["Name", "Schema", "State", "Trigger"],
-                    "2fr 2fr 1fr 1fr",
-                    State.mcs_topics_system_rows,
-                    _mcs_topics_system_row,
-                ),
-                width="100%",
-            ),
-        ),
-        # Topic graph
-        _mermaid_block(State.mcs_topics_mermaid),
-        spacing="4",
-        width="100%",
     )
 
 
@@ -5988,7 +5709,6 @@ def dynamic_analysis_viewer() -> rx.Component:
                 rx.match(
                     State.mcs_analyse_tab,
                     ("profile", _mcs_profile_panel()),
-                    ("topics", _mcs_topics_panel()),
                     ("tools", _mcs_tools_panel()),
                     ("knowledge", _mcs_knowledge_panel()),
                     ("routing", _mcs_routing_panel()),
