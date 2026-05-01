@@ -3336,9 +3336,13 @@ def _mcs_routing_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Section 2: Plan Evolution (only when >1 plan)
+        # Section 2: Plan Evolution (merged — KPIs + per-replan diffs +
+        # full plan-evolution cards). Previously rendered as two separate
+        # cards ("Plan Evolution" and "Plan Evolution Diffs"); merged
+        # here so all plan-replanning information lives in one place.
         rx.cond(
-            State.mcs_routing_plan_evolution.length() > 0,  # type: ignore[union-attr]
+            (State.mcs_routing_plan_evolution.length() > 0)  # type: ignore[union-attr]
+            | (State.mcs_ins_plan_diffs.length() > 0),  # type: ignore[union-attr]
             card(
                 rx.hstack(
                     rx.icon("git-compare", size=16, color="var(--amber-9)"),
@@ -3347,18 +3351,63 @@ def _mcs_routing_panel() -> rx.Component:
                     align="center",
                 ),
                 rx.text(
-                    "How the orchestrator's plan changed across replanning attempts.",
+                    "How the orchestrator's plan changed across replanning attempts — "
+                    "summary KPIs, per-turn diffs, and the full plan-by-plan timeline.",
                     font_size="12px",
                     color="var(--gray-a9)",
                     padding_bottom="8px",
                 ),
-                rx.box(
-                    rx.foreach(State.mcs_routing_plan_evolution, _mcs_plan_evolution_card),
-                    width="100%",
-                    border=f"1px solid {SURFACE_BORDER}",
-                    border_radius="8px",
-                    background="var(--gray-a2)",
-                    overflow="hidden",
+                # KPIs (formerly under "Plan Evolution Diffs")
+                rx.cond(
+                    State.mcs_ins_plan_kpis.length() > 0,  # type: ignore[union-attr]
+                    rx.hstack(
+                        rx.foreach(State.mcs_ins_plan_kpis, _ins_kpi),
+                        spacing="3",
+                        width="100%",
+                        overflow_x="auto",
+                        padding_y="12px",
+                    ),
+                ),
+                # Per-turn replan diffs (formerly under "Plan Evolution Diffs")
+                rx.cond(
+                    State.mcs_ins_plan_diffs.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Per-turn replan diffs",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_y="8px",
+                        ),
+                        rx.foreach(State.mcs_ins_plan_diffs, _ins_plan_diff_item),
+                        width="100%",
+                    ),
+                ),
+                # Full plan-by-plan timeline (formerly the standalone "Plan Evolution" card)
+                rx.cond(
+                    State.mcs_routing_plan_evolution.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.text(
+                            "Plan-by-plan timeline",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="700",
+                            text_transform="uppercase",
+                            letter_spacing="0.04em",
+                            padding_y="8px",
+                        ),
+                        rx.box(
+                            rx.foreach(State.mcs_routing_plan_evolution, _mcs_plan_evolution_card),
+                            width="100%",
+                            border=f"1px solid {SURFACE_BORDER}",
+                            border_radius="8px",
+                            background="var(--gray-a2)",
+                            overflow="hidden",
+                        ),
+                        width="100%",
+                    ),
                 ),
                 width="100%",
             ),
@@ -3417,30 +3466,7 @@ def _mcs_routing_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Section 5: Plan Evolution Diffs (moved from Insights)
-        rx.cond(
-            State.mcs_ins_plan_diffs.length() > 0,  # type: ignore[union-attr]
-            card(
-                _ins_card_header(
-                    "git-compare",
-                    "var(--violet-9)",
-                    "Plan Evolution Diffs",
-                    "How the orchestrator changed its plan within a single turn.",
-                ),
-                rx.cond(
-                    State.mcs_ins_plan_kpis.length() > 0,  # type: ignore[union-attr]
-                    rx.hstack(
-                        rx.foreach(State.mcs_ins_plan_kpis, _ins_kpi),
-                        spacing="3",
-                        width="100%",
-                        overflow_x="auto",
-                        padding_y="12px",
-                    ),
-                ),
-                rx.foreach(State.mcs_ins_plan_diffs, _ins_plan_diff_item),
-                width="100%",
-            ),
-        ),
+        # (Plan Evolution Diffs merged into Section 2 above.)
         # Section 6: Topic Coverage (moved from Topics)
         rx.cond(
             State.mcs_topics_coverage.length() > 0,  # type: ignore[union-attr]
