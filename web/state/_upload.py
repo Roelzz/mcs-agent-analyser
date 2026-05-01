@@ -447,6 +447,7 @@ class UploadMixin(rx.State, mixin=True):
                     self.report_source = "upload"  # type: ignore[attr-defined]
                     self.lint_report_markdown = ""  # type: ignore[attr-defined]
                     self.bot_profile_json = ""  # type: ignore[attr-defined]
+                    self.timeline_json = ""  # type: ignore[attr-defined]
                     self.report_custom_findings = []  # type: ignore[attr-defined]
                     _clear_bot_profile()
 
@@ -475,6 +476,10 @@ class UploadMixin(rx.State, mixin=True):
         self.report_title = profile.display_name  # type: ignore[attr-defined]
         self.report_source = "upload"  # type: ignore[attr-defined]
         self.bot_profile_json = profile.model_dump_json()  # type: ignore[attr-defined]
+        # Persist the parsed timeline so transcript-based audit modes
+        # (sentiment, PII, accuracy, routing quality) can rehydrate it
+        # without re-parsing the dialog.json.
+        self.timeline_json = timeline.model_dump_json() if timeline is not None else ""  # type: ignore[attr-defined]
         _save_bot_profile(self.bot_profile_json)  # type: ignore[attr-defined]
         self._evaluate_custom_rules(profile)  # type: ignore[attr-defined]
 
@@ -593,6 +598,7 @@ class UploadMixin(rx.State, mixin=True):
             self.report_title = title  # type: ignore[attr-defined]
             self.report_source = "upload"  # type: ignore[attr-defined]
             self.bot_profile_json = ""  # type: ignore[attr-defined]
+            self.timeline_json = ""  # type: ignore[attr-defined]
             self.report_custom_findings = []  # type: ignore[attr-defined]
             _clear_bot_profile()
 
@@ -2431,6 +2437,7 @@ class UploadMixin(rx.State, mixin=True):
         self.upload_error = ""
         self.paste_json = ""
         self.bot_profile_json = ""  # type: ignore[attr-defined]
+        self.timeline_json = ""  # type: ignore[attr-defined]
         self.report_custom_findings = []  # type: ignore[attr-defined]
         _clear_bot_profile()
         self.lint_report_markdown = ""  # type: ignore[attr-defined]

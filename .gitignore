@@ -43,6 +43,7 @@ Transcripts/
 data/*
 !data/default_rules.yaml
 !data/topic_explainer.yaml
+!data/default_lint_modes.yaml
 
 # Local docs / plans (keep screenshots for README)
 docs/*
