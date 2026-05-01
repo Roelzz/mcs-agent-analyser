@@ -45,15 +45,14 @@ def _build_component_name_map(profile: BotProfile) -> dict[str, str]:
 def _build_dialog_link_resolver(profile: "BotProfile | None"):
     """Returns a function `topic_name -> (link_target_tab, link_target_id)`.
 
-    Used by Conversation Flow rows to deep-link to the Topics or Tools tab.
-    Resolution rules:
-      - `dialog_kind == "TaskDialog"` or `"AgentDialog"` → Tools tab, keyed
-        by display_name (matches `mcs_tools_rows[].name`).
-      - any other DialogComponent → Topics tab, keyed by schema_name
-        (matches `mcs_topics_*_rows[].schema`).
-      - non-dialog or unmatched → empty target.
+    Used by Conversation Flow rows (and other linked surfaces) to
+    deep-link into the Tools tab. After PR #18 collapsed the Topics tab
+    into Tools, every DialogComponent target lives on the same tab and
+    is keyed by `schema_name` — the picker key used by the Component
+    Explorer's `select_topic_in_explorer(schema_name)` event.
 
-    Returns `("", "")` when profile is None or the name can't be resolved.
+    Returns `("", "")` when profile is None or the name can't be
+    resolved.
     """
     if profile is None:
         return lambda _name: ("", "")
@@ -77,11 +76,9 @@ def _build_dialog_link_resolver(profile: "BotProfile | None"):
         comp = by_key.get(topic_name.lower().strip())
         if comp is None:
             return ("", "")
-        if comp.dialog_kind in ("TaskDialog", "AgentDialog"):
-            # Tools tab keys by display_name (see _populate_tools_data).
-            return ("tools", comp.display_name or "")
-        # Topics tab keys by schema_name (see _populate_topics_data).
-        return ("topics", comp.schema_name or comp.display_name or "")
+        # Always Tools tab (post-#18), always keyed by schema_name to
+        # match the Component Explorer picker.
+        return ("tools", comp.schema_name or comp.display_name or "")
 
     return resolve
 
@@ -1274,7 +1271,10 @@ def _format_gap(ms: float) -> str:
     return f"{ms / 60_000:.1f} m"
 
 
-def build_performance_waterfall(timeline: ConversationTimeline) -> list[dict]:
+def build_performance_waterfall(
+    timeline: ConversationTimeline,
+    profile: BotProfile | None = None,
+) -> list[dict]:
     """Build a one-row-per-timed-activity waterfall view exposing the gap
     between each consecutive event so the user can spot bottlenecks.
 
@@ -1287,7 +1287,14 @@ def build_performance_waterfall(timeline: ConversationTimeline) -> list[dict]:
     Bar widths are proportional to gap_ms / max_gap so the worst
     offender is easiest to spot. Idle gaps (`_is_genuine_idle`) are
     excluded so the user's own delay doesn't drown out the signal.
+
+    When `profile` is provided, rows that name a known component get
+    a `link_target_id` (schema_name) so the UI can hyperlink them to
+    the Tools tab Component Explorer. Knowledge events get a
+    `link_target_kind="knowledge"` so they jump to the Knowledge tab.
     """
+    dialog_link = _build_dialog_link_resolver(profile)
+
     timed: list[tuple[int, TimelineEvent]] = []
     for ev in timeline.events:
         ms = _parse_timestamp_to_epoch_ms(ev.timestamp or "")
@@ -1316,6 +1323,22 @@ def build_performance_waterfall(timeline: ConversationTimeline) -> list[dict]:
         # Trim long summaries so the row stays readable.
         if len(label) > 80:
             label = label[:77] + "…"
+
+        # Resolve link target. Knowledge / generative-answer events
+        # always link to the Knowledge tab. Step / dialog events link
+        # to Tools tab Component Explorer when the topic_name resolves
+        # to a profile component.
+        link_kind = ""
+        link_id = ""
+        if ev.event_type in (EventType.KNOWLEDGE_SEARCH, EventType.GENERATIVE_ANSWER):
+            link_kind = "knowledge"
+            link_id = ev.topic_name or ""
+        elif ev.topic_name:
+            link_tab, link_target = dialog_link(ev.topic_name)
+            if link_tab == "tools" and link_target:
+                link_kind = "component"
+                link_id = link_target
+
         rows.append(
             {
                 "label": label,
@@ -1326,6 +1349,8 @@ def build_performance_waterfall(timeline: ConversationTimeline) -> list[dict]:
                 "is_idle": "true" if is_idle else "",
                 "topic_name": ev.topic_name or "",
                 "timestamp": _format_clock(ev.timestamp),
+                "link_target_kind": link_kind,
+                "link_target_id": link_id,
             }
         )
     # Convert gap_ms to width_pct against the max so the widest bar is
@@ -1886,7 +1911,10 @@ def render_variable_tracker_md(timeline: ConversationTimeline, profile: BotProfi
 # ---------------------------------------------------------------------------
 
 
-def render_performance_waterfall_md(timeline: ConversationTimeline) -> str:
+def render_performance_waterfall_md(
+    timeline: ConversationTimeline,
+    profile: BotProfile | None = None,
+) -> str:
     """Markdown equivalent of the dynamic page's Performance Waterfall.
 
     Renders a table with timestamp, category, activity label, gap to
@@ -1894,7 +1922,7 @@ def render_performance_waterfall_md(timeline: ConversationTimeline) -> str:
     output still hints at proportions. Idle gaps (user-think time, HITL
     waits) are suppressed via `_is_genuine_idle`, matching the UI.
     """
-    rows = build_performance_waterfall(timeline)
+    rows = build_performance_waterfall(timeline, profile)
     if not rows:
         return ""
 

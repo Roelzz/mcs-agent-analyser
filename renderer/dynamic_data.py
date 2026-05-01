@@ -57,6 +57,12 @@ def _empty_var_row() -> dict:
         "ga_summary": "",
         "ga_citation_count": "0",
         "ga_output_variable": "",
+        # Deep-link target — populated when the row references a
+        # tool / agent / topic ("component") or a topic-level
+        # generative answer ("knowledge"). Empty otherwise so the UI
+        # can branch on `link_target_kind != ""`.
+        "link_target_kind": "",
+        "link_target_id": "",
     }
 
 
@@ -101,7 +107,35 @@ def _resolve_topic_search_summarize_variables(profile) -> dict[str, str]:
     return sink
 
 
-def _tool_call_var_row(tc) -> dict:
+def _build_component_lookup(profile) -> dict[str, str]:
+    """Build a `name_lower → schema_name` lookup for resolving free-form
+    component references (display_name, schema_name, partial schema)
+    back to the canonical schema_name. Used to populate Variable
+    Tracker / Performance Waterfall / Phase Breakdown link targets."""
+    lookup: dict[str, str] = {}
+    if profile is None:
+        return lookup
+    for c in profile.components:
+        if c.kind != "DialogComponent" or not c.schema_name:
+            continue
+        if c.display_name:
+            lookup.setdefault(c.display_name.lower().strip(), c.schema_name)
+        lookup.setdefault(c.schema_name.lower(), c.schema_name)
+        suffix = c.schema_name.rsplit(".", 1)[-1].lower()
+        lookup.setdefault(suffix, c.schema_name)
+    return lookup
+
+
+def _resolve_component_schema(name: str, lookup: dict[str, str]) -> str:
+    """Look up a component's schema_name by free-form name. Returns
+    empty string when nothing matches — caller should treat that as
+    'no link target'."""
+    if not name or not lookup:
+        return ""
+    return lookup.get(name.lower().strip(), "")
+
+
+def _tool_call_var_row(tc, component_lookup: dict[str, str]) -> dict:
     """Variable Tracker row for one orchestrator-invoked tool call."""
     arg_rows = [
         {
@@ -128,6 +162,15 @@ def _tool_call_var_row(tc) -> dict:
                 output_preview = (first.get("text") or first.get("content") or "")[:120]
             elif first is not None:
                 output_preview = str(first)[:120]
+    # Resolve the canonical Component Explorer key (schema_name) from
+    # the tool's free-form names. Tries display_name first, then
+    # task_dialog_id (which is sometimes the schema, sometimes a
+    # `P:...` runtime id). When nothing resolves, leave the link
+    # target empty.
+    schema = (
+        _resolve_component_schema(tc.display_name or "", component_lookup)
+        or _resolve_component_schema(tc.task_dialog_id or "", component_lookup)
+    )
     row = _empty_var_row()
     row.update(
         {
@@ -146,6 +189,8 @@ def _tool_call_var_row(tc) -> dict:
             "output_full": output_full,
             "has_output": "true" if (output_preview or output_full) else "",
             "error": tc.error or "",
+            "link_target_kind": "component" if schema else "",
+            "link_target_id": schema,
         }
     )
     return row
@@ -189,23 +234,29 @@ def _generative_answer_var_row(trace, idx: int, topic_to_var: dict[str, str]) ->
     Cross-resolves the topic's SearchAndSummarizeContent output variable so
     the user can see which Topic/Global slot the generated answer fills."""
     output_var = topic_to_var.get(trace.topic_name or "", "")
+    topic_name = trace.topic_name or ""
     row = _empty_var_row()
     row.update(
         {
             "card_kind": "generative_answer",
             "row_id": f"var-row-ga-{idx}",
-            "display_name": trace.topic_name or "Generative Answer",
+            "display_name": topic_name or "Generative Answer",
             "step_type": "Topic Generative Answer",
             "state": trace.gpt_answer_state or "—",
             "state_tone": _VAR_TRACKER_STATE_TONE.get(trace.gpt_answer_state or "", "info"),
             "timestamp": _format_clock(trace.timestamp),
-            "topic_name": trace.topic_name or "",
+            "topic_name": topic_name,
             "ga_original": trace.original_message or "",
             "ga_rewritten": trace.rewritten_message or "",
             "ga_keywords": trace.rewritten_keywords or "",
             "ga_summary": trace.summary_text or trace.text_summary or "",
             "ga_citation_count": str(len(trace.citations)),
             "ga_output_variable": output_var,
+            # Link target: jump to the matching generative-answer card on
+            # the Knowledge tab. The card sets `id="row-gen-<sanitized
+            # topic_name>"` so the click handler can scroll to it.
+            "link_target_kind": "knowledge" if topic_name else "",
+            "link_target_id": topic_name,
         }
     )
     return row
@@ -268,11 +319,12 @@ def build_variable_tracker_rows(timeline, profile=None) -> list[dict]:
     from models import EventType
 
     topic_to_var = _resolve_topic_search_summarize_variables(profile)
+    component_lookup = _build_component_lookup(profile)
     rows: list[dict] = []
     for tc in timeline.tool_calls:
         if tc.task_dialog_id == "P:UniversalSearchTool":
             continue
-        rows.append(_tool_call_var_row(tc))
+        rows.append(_tool_call_var_row(tc, component_lookup))
     for idx, ev in enumerate(timeline.events):
         if ev.event_type == EventType.VARIABLE_ASSIGNMENT:
             rows.append(_variable_assignment_var_row(ev, idx))
