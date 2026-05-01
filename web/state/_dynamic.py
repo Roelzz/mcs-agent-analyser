@@ -55,6 +55,12 @@ class DynamicMixin(rx.State, mixin=True):
 
     # Conversation flow
     mcs_conversation_flow: list[dict] = []
+    # Conversation flow grouped into plan cards + loose-message groups.
+    # Built from `mcs_conversation_flow` via `renderer.sections.group_flow_items`.
+    mcs_conversation_flow_groups: list[dict] = []
+    # Conversation Flow filter state. Empty values = no filter applied.
+    mcs_flow_filter_text: str = ""
+    mcs_flow_filter_types: list[str] = []
     mcs_conversation_flow_source: str = ""  # "snapshot" | "transcript" | ""
 
     # Custom rule findings for dynamic view
@@ -99,6 +105,11 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_knowledge_searches: list[dict] = []
     mcs_knowledge_custom_steps: list[dict] = []
     mcs_knowledge_general_enabled: bool = False
+    # Citation Verification panel — flat list of every (trace, citation)
+    # pair across the conversation with answer_state, completion_state,
+    # moderation/provenance flags. Lets the user audit grounding at a
+    # glance without expanding each generative-answer card.
+    mcs_knowledge_citation_panel: list[dict] = []
     # Topic-level Search & Summarize diagnostic traces (one row per call,
     # plus expandable child rows for results and citations).
     mcs_generative_traces: list[dict] = []
@@ -147,9 +158,17 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_conv_phases: list[dict] = []
     mcs_conv_event_log: list[dict] = []
     mcs_conv_errors: list[str] = []
+    # Error/exception banner — one row per ERROR-toned flow item with the
+    # `flow_id` deep-link target so the user can jump straight to the row.
+    mcs_conv_error_banner: list[dict] = []
     mcs_conv_reasoning: list[dict] = []
     mcs_conv_sequence_mermaid: str = ""
     mcs_conv_gantt_mermaid: str = ""
+    # Variable Tracker — per-tool-call arguments + outputs surfaced as
+    # cards on the Conversation tab. Each row corresponds to one
+    # `ToolCall` from the timeline; arguments are rendered with
+    # AUTO/MANUAL badges when the orchestrator auto-filled them.
+    mcs_conv_variables: list[dict] = []
 
     # ── Insights tab (conversation analysis features) ──────────────────────
     # Turn Efficiency
@@ -232,6 +251,138 @@ class DynamicMixin(rx.State, mixin=True):
     @rx.event
     def set_mcs_analyse_tab(self, tab: str):
         self.mcs_analyse_tab = tab
+
+    @rx.event
+    def copy_flow_row_json(self, raw_json: str):
+        """Copy a Conversation Flow row's serialized TimelineEvent to the
+        clipboard. Wired to the per-row copy button — small but valued
+        when filing bugs against Microsoft about a specific activity."""
+        yield rx.set_clipboard(raw_json)
+        yield rx.toast("Activity JSON copied", duration=2000)
+
+    @rx.event
+    def conv_expand_all(self):
+        """Expand every accordion under the Conversation tab. Targets
+        Radix accordion triggers (those with both `data-state` and
+        `aria-expanded` attributes) so unrelated `data-state` consumers
+        elsewhere in the tree are unaffected."""
+        return rx.call_script(
+            "var root = document.getElementById('mcs-conv-tab-root');"
+            "if (!root) return;"
+            "root.querySelectorAll('button[data-state=\"closed\"][aria-expanded]').forEach(function(t){ t.click(); });"
+        )
+
+    @rx.event
+    def conv_collapse_all(self):
+        """Collapse every open accordion under the Conversation tab."""
+        return rx.call_script(
+            "var root = document.getElementById('mcs-conv-tab-root');"
+            "if (!root) return;"
+            "root.querySelectorAll('button[data-state=\"open\"][aria-expanded]').forEach(function(t){ t.click(); });"
+        )
+
+    # ── Conversation Flow filter wiring ─────────────────────────────────────
+
+    # User-facing filter chip → set of EventType values it covers. Coarser
+    # than the raw event types so the UI stays readable; lets a single click
+    # filter on "all message events" rather than asking the user to know
+    # the difference between USER_MESSAGE and BOT_MESSAGE.
+    _FLOW_FILTER_CHIP_TO_TYPES: dict[str, list[str]] = {
+        "Messages": ["UserMessage", "BotMessage"],
+        "Plans": ["PlanReceived", "PlanFinished"],
+        "Actions": ["StepTriggered", "StepFinished", "ActionBeginDialog", "ActionSendActivity", "ActionHttpRequest", "ActionQA"],
+        "Knowledge": ["KnowledgeSearch", "GenerativeAnswer"],
+        "Traces": ["DialogTracing", "DialogRedirect", "ActionTriggerEval", "OrchestratorThinking", "IntentRecognition", "VariableAssignment"],
+        "Errors": ["Error"],
+    }
+
+    @rx.event
+    def set_mcs_flow_filter_text(self, value: str):
+        self.mcs_flow_filter_text = value
+
+    @rx.event
+    def toggle_mcs_flow_filter_chip(self, chip: str):
+        """Toggle a user-facing filter chip on/off."""
+        current = list(self.mcs_flow_filter_types)
+        if chip in current:
+            current.remove(chip)
+        else:
+            current.append(chip)
+        self.mcs_flow_filter_types = current
+
+    @rx.event
+    def clear_mcs_flow_filters(self):
+        self.mcs_flow_filter_text = ""
+        self.mcs_flow_filter_types = []
+
+    @rx.var
+    def mcs_conversation_flow_groups_filtered(self) -> list[dict]:
+        """Apply the active text + type filters to the grouped flow.
+
+        Filter logic:
+          - When both filters are empty, returns the groups unchanged.
+          - Otherwise iterates each group, keeps only items that match
+            BOTH the text filter (substring across summary / text /
+            thought / topic_name, case-insensitive) AND the type
+            filter (item.kind == "message" matches the "Messages" chip;
+            event types match via the chip→types lookup).
+          - Drops groups whose filtered item list is empty.
+        """
+        text = (self.mcs_flow_filter_text or "").lower().strip()
+        chips = list(self.mcs_flow_filter_types or [])
+        if not text and not chips:
+            return list(self.mcs_conversation_flow_groups)
+
+        # Resolve chips → set of event_type strings + a special "message" flag
+        wanted_types: set[str] = set()
+        wants_messages = False
+        for chip in chips:
+            if chip == "Messages":
+                wants_messages = True
+            for t in self._FLOW_FILTER_CHIP_TO_TYPES.get(chip, []):
+                wanted_types.add(t)
+
+        out: list[dict] = []
+        for group in self.mcs_conversation_flow_groups:
+            filtered_items: list[dict] = []
+            for item in group["items"]:
+                # Type filter
+                if chips:
+                    is_message = item.get("kind") == "message"
+                    et = item.get("event_type") or ""
+                    if not ((wants_messages and is_message) or et in wanted_types):
+                        continue
+                # Text filter
+                if text:
+                    hay = " ".join(
+                        [
+                            item.get("summary", "") or "",
+                            item.get("text", "") or "",
+                            item.get("thought", "") or "",
+                            item.get("topic_name", "") or "",
+                            item.get("title", "") or "",
+                        ]
+                    ).lower()
+                    if text not in hay:
+                        continue
+                filtered_items.append(item)
+            if filtered_items:
+                out.append({**group, "items": filtered_items})
+        return out
+
+    @rx.var
+    def mcs_conversation_flow_match_count(self) -> int:
+        """Total number of flow items after filter is applied."""
+        return sum(len(g["items"]) for g in self.mcs_conversation_flow_groups_filtered)
+
+    @rx.var
+    def mcs_conversation_flow_total_count(self) -> int:
+        """Total number of flow items pre-filter."""
+        return sum(len(g["items"]) for g in self.mcs_conversation_flow_groups)
+
+    @rx.var
+    def mcs_flow_filter_active(self) -> bool:
+        return bool(self.mcs_flow_filter_text) or bool(self.mcs_flow_filter_types)
 
     @rx.event
     def set_dynamic_link_target(self, tab: str, target_id: str):

@@ -195,8 +195,13 @@ def _best_trigger_phrase(user_text: str, topic_name: str, components: list) -> s
     return ""
 
 
-from .knowledge import render_knowledge_search_section
-from .profile import (
+# Deferred imports — `renderer/report.py` and `renderer/timeline_render.py`
+# both import from this module, so importing them at the top here would
+# create a circular dependency. They sit below the trigger-score helpers
+# above (which both `report` and `timeline_render` consume). The
+# `noqa` markers below acknowledge the deliberate ordering.
+from .knowledge import render_knowledge_search_section  # noqa: E402
+from .profile import (  # noqa: E402
     render_ai_config,
     render_bot_metadata,
     render_bot_profile,
@@ -212,9 +217,9 @@ from .profile import (
     render_topic_inventory,
     render_trigger_overlaps,
 )
-from ._helpers import _compute_idle_gaps, _format_duration, _parse_timestamp_to_epoch_ms
-from .report import render_credit_estimate
-from .timeline_render import render_orchestrator_reasoning, render_timeline
+from ._helpers import _compute_idle_gaps, _format_duration, _parse_timestamp_to_epoch_ms  # noqa: E402
+from .report import render_credit_estimate  # noqa: E402
+from .timeline_render import render_orchestrator_reasoning, render_timeline  # noqa: E402
 
 
 def render_report_sections(
@@ -344,6 +349,109 @@ def _strip_prefix(text: str, prefix: str) -> str:
     return text
 
 
+def group_flow_items(items: list[dict]) -> list[dict]:
+    """Group conversation flow items into plan cards + loose groups.
+
+    The orchestrator emits a `PlanReceived` event at the start of every
+    plan and a `PlanFinished` at the end. Everything between them is
+    part of that plan's execution. Grouping makes long, multi-plan
+    conversations dramatically more readable in the UI — each plan
+    becomes a collapsible card with a status pill (running / completed
+    / cancelled), instead of a flat undifferentiated stream.
+
+    Returns a list of group dicts. Two shapes:
+
+    - **Plan group** (`is_plan == "true"`): header + items list. Status
+      derives from `PlanFinished.summary` ("cancelled=True/False"); a
+      plan that never gets a `PlanFinished` is reported as `running`.
+
+    - **Loose group** (`is_plan == ""`): items not enclosed in any plan
+      (typically `UserMessage` / `BotMessage` / standalone errors).
+      No header rendered.
+
+    Group-row dict keys (uniform across both shapes for ``rx.foreach``):
+      ``is_plan``, ``plan_identifier``, ``status``, ``status_tone``,
+      ``header_summary``, ``first_timestamp``, ``items`` (list of flow
+      row dicts).
+    """
+
+    groups: list[dict] = []
+    current_plan: dict | None = None
+    loose: dict | None = None
+
+    def _empty_loose() -> dict:
+        return {
+            "is_plan": "",
+            "plan_identifier": "",
+            "status": "",
+            "status_tone": "neutral",
+            "header_summary": "",
+            "first_timestamp": "",
+            "items": [],
+        }
+
+    def _close_loose() -> None:
+        nonlocal loose
+        if loose is not None and loose["items"]:
+            groups.append(loose)
+        loose = None
+
+    def _close_plan(status: str, status_tone: str) -> None:
+        nonlocal current_plan
+        if current_plan is None:
+            return
+        current_plan["status"] = status
+        current_plan["status_tone"] = status_tone
+        n = len(current_plan["items"])
+        pid = current_plan["plan_identifier"]
+        short_pid = pid[:8] if pid else "<unknown>"
+        current_plan["header_summary"] = f"Plan {short_pid} — {n} event{'s' if n != 1 else ''}"
+        groups.append(current_plan)
+        current_plan = None
+
+    for item in items:
+        et = item.get("event_type", "")
+        if et == "PlanReceived":
+            _close_loose()
+            current_plan = {
+                "is_plan": "true",
+                "plan_identifier": item.get("plan_identifier") or "",
+                "status": "running",
+                "status_tone": "info",
+                "header_summary": "",  # filled when closed
+                "first_timestamp": item.get("timestamp", ""),
+                "items": [item],
+            }
+            continue
+        if et == "PlanFinished" and current_plan is not None:
+            current_plan["items"].append(item)
+            summary_text = (item.get("summary") or "").lower()
+            cancelled = "cancelled=true" in summary_text
+            _close_plan(
+                "cancelled" if cancelled else "completed",
+                "bad" if cancelled else "good",
+            )
+            continue
+        if current_plan is not None:
+            current_plan["items"].append(item)
+        else:
+            if loose is None:
+                loose = _empty_loose()
+            loose["items"].append(item)
+
+    # Flush — a plan that never received PlanFinished stays as "running".
+    if current_plan is not None:
+        n = len(current_plan["items"])
+        pid = current_plan["plan_identifier"]
+        short_pid = pid[:8] if pid else "<unknown>"
+        current_plan["status"] = "running"
+        current_plan["status_tone"] = "info"
+        current_plan["header_summary"] = f"Plan {short_pid} — {n} event{'s' if n != 1 else ''} (running)"
+        groups.append(current_plan)
+    _close_loose()
+    return groups
+
+
 def build_conversation_flow_items(
     timeline: ConversationTimeline,
     profile: BotProfile | None = None,
@@ -358,6 +466,10 @@ def build_conversation_flow_items(
         score_lookup = _build_trigger_score_lookup(timeline, profile)
         name_map = _build_component_name_map(profile)
     dialog_link = _build_dialog_link_resolver(profile)
+
+    # Per-step tool-call lookup so STEP_TRIGGERED / STEP_FINISHED flow
+    # rows can render AUTO/MANUAL binding counts.
+    tool_call_by_step: dict[str, object] = {tc.step_id: tc for tc in timeline.tool_calls if tc.step_id}
 
     # Extra detail keys required by rx.foreach (must be uniform across all dicts)
     _detail_defaults = {
@@ -376,6 +488,23 @@ def build_conversation_flow_items(
         # the Conversation Flow row can hyperlink into the relevant tab.
         "link_target_tab": "",
         "link_target_id": "",
+        # Stable per-row id (set after the loop). The banner / error summary
+        # uses `flow_id` as the deep-link target_id so clicks scroll to the
+        # exact row. `flow_row_id` is the pre-built DOM id (`row-<flow_id>`)
+        # so component code doesn't have to concat at render time.
+        "flow_id": "",
+        "flow_row_id": "",
+        # Pretty-printed JSON of the underlying TimelineEvent — surfaced via
+        # the per-row copy button + raw-JSON accordion so the user can
+        # quickly grab the activity payload (helpful when filing bugs
+        # against Microsoft).
+        "raw_json": "",
+        # AUTO/MANUAL binding counts for STEP_TRIGGERED / STEP_FINISHED
+        # rows — sourced from the correlated `ToolCall.arguments` and
+        # `ToolCall.auto_filled_argument_names`. Empty string when the
+        # row isn't a step or has no matching tool call.
+        "auto_filled_count": "",
+        "manual_filled_count": "",
     }
 
     latest_user_idx: int | None = None
@@ -403,6 +532,7 @@ def build_conversation_flow_items(
                     **_detail_defaults,
                 }
             )
+            items[-1]["raw_json"] = _flow_event_raw_json(ev)
             continue
 
         if ev.event_type == EventType.BOT_MESSAGE:
@@ -423,6 +553,7 @@ def build_conversation_flow_items(
                     **_detail_defaults,
                 }
             )
+            items[-1]["raw_json"] = _flow_event_raw_json(ev)
             continue
 
         if ev.event_type in {
@@ -487,6 +618,26 @@ def build_conversation_flow_items(
                             resolved_name = name_map.get(topic.lower().strip(), topic)
                             trigger_phrase_str = _best_trigger_phrase(user_text, resolved_name, profile.components)
 
+            # AUTO/MANUAL binding counts — only meaningful for step rows
+            # that have a correlated tool call.
+            auto_count_str = ""
+            manual_count_str = ""
+            if (
+                ev.event_type in (EventType.STEP_TRIGGERED, EventType.STEP_FINISHED)
+                and ev.step_id
+                and ev.step_id in tool_call_by_step
+            ):
+                tc = tool_call_by_step[ev.step_id]
+                args = getattr(tc, "arguments", {}) or {}
+                auto_names = set(getattr(tc, "auto_filled_argument_names", []) or [])
+                if args:
+                    auto_count = sum(1 for k in args if k in auto_names)
+                    manual_count = len(args) - auto_count
+                    if auto_count > 0:
+                        auto_count_str = str(auto_count)
+                    if manual_count > 0:
+                        manual_count_str = str(manual_count)
+
             # Deep-link target for events that point at a concrete artifact:
             # - dialog-name-bearing events (step trigger/finish, topic
             #   trace/redirect, condition eval) resolve to topics or tools.
@@ -534,10 +685,28 @@ def build_conversation_flow_items(
                     "trigger_score_color": trigger_color,
                     "link_target_tab": link_tab,
                     "link_target_id": link_id,
+                    "auto_filled_count": auto_count_str,
+                    "manual_filled_count": manual_count_str,
                 }
             )
+            items[-1]["raw_json"] = _flow_event_raw_json(ev)
+
+    for idx, item in enumerate(items):
+        item["flow_id"] = f"flow-{idx}"
+        item["flow_row_id"] = f"row-flow-{idx}"
 
     return items
+
+
+def _flow_event_raw_json(ev) -> str:
+    """Pretty-print the TimelineEvent for the per-row 'Raw JSON' accordion
+    + copy button. Pydantic v2 carries `model_dump_json` which respects
+    the model schema. Stripped of trailing whitespace so the accordion
+    doesn't leave dangling lines."""
+    try:
+        return ev.model_dump_json(indent=2, exclude_none=True).strip()
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -650,15 +819,15 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
         if d > 0
     ]
     orchestrator_durations = [p.duration_ms for p in timeline.phases if p.duration_ms > 0 and _is_orchestrator_phase(p)]
-    step_durations = [
-        d
-        for d in (
-            _active_duration(p, idle_gaps)
-            for p in timeline.phases
-            if p.duration_ms > 0 and not _is_search_phase(p) and not _is_orchestrator_phase(p)
-        )
-        if d > 0
+    # Per-step (phase, active-duration) so we can identify the slowest one
+    # by name. User wait/idle gaps are already subtracted by `_active_duration`.
+    step_phase_durations: list[tuple[str, float]] = [
+        (p.label, _active_duration(p, idle_gaps))
+        for p in timeline.phases
+        if p.duration_ms > 0 and not _is_search_phase(p) and not _is_orchestrator_phase(p)
     ]
+    step_phase_durations = [(label, d) for label, d in step_phase_durations if d > 0]
+    step_durations = [d for _, d in step_phase_durations]
 
     # KPI values
     avg_latency_str = f"{avg_latency:.0f} ms" if latencies else "—"
@@ -681,6 +850,54 @@ def build_conversation_visual_summary(timeline: ConversationTimeline) -> dict[st
             "tone": "warn" if latencies and p95_latency >= 6000 else "neutral",
         },
     ]
+
+    # Slowest step (excluding user wait/idle) — points to the single most
+    # expensive non-search, non-orchestrator phase. Surface the phase label
+    # in the hint so the user knows where to look.
+    if step_phase_durations:
+        slowest_label, slowest_ms = max(step_phase_durations, key=lambda lbl_d: lbl_d[1])
+        slowest_value = f"{slowest_ms / 1000:.1f}s" if slowest_ms >= 1000 else f"{slowest_ms:.0f} ms"
+        kpis.append(
+            {
+                "label": "Slowest Step",
+                "value": slowest_value,
+                "hint": f"{slowest_label} (excl. user wait)",
+                "tone": "warn" if slowest_ms >= 4000 else "neutral",
+            }
+        )
+
+    # Plans completed vs cancelled — `PLAN_FINISHED.summary` carries
+    # `(cancelled=True|False)` from timeline.py:676. Surface as a single
+    # KPI ("3 / 4 completed") so the user sees both numbers at once.
+    plan_finished_events = [e for e in timeline.events if e.event_type == EventType.PLAN_FINISHED]
+    if plan_finished_events:
+        cancelled_plans = sum(1 for e in plan_finished_events if "cancelled=True" in (e.summary or ""))
+        total_plans = len(plan_finished_events)
+        completed_plans = total_plans - cancelled_plans
+        kpis.append(
+            {
+                "label": "Plans Completed",
+                "value": f"{completed_plans} / {total_plans}",
+                "hint": f"{cancelled_plans} cancelled" if cancelled_plans else "all completed",
+                "tone": "warn" if cancelled_plans > 0 else "neutral",
+            }
+        )
+
+    # Tool-call success rate — fraction of orchestrator-invoked tool calls
+    # that finished with state == "completed". Hidden when there are no
+    # tool calls (transcripts without orchestrator activity).
+    if timeline.tool_calls:
+        total_calls = len(timeline.tool_calls)
+        success_calls = sum(1 for tc in timeline.tool_calls if tc.state == "completed")
+        success_pct = (success_calls / total_calls) * 100
+        kpis.append(
+            {
+                "label": "Tool Success Rate",
+                "value": f"{success_pct:.0f}%",
+                "hint": f"{success_calls} / {total_calls} succeeded",
+                "tone": "warn" if success_pct < 95 else "neutral",
+            }
+        )
 
     # Event mix
     mix_raw = [

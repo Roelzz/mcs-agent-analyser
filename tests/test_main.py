@@ -206,7 +206,16 @@ def test_timeline_greeting_only():
     timeline = build_timeline(activities, lookup)
 
     assert timeline.user_query == "Hi"
-    assert len(timeline.phases) == 0  # No DynamicPlanStepFinished for simple greeting
+    # No DynamicPlanStepFinished for a simple greeting, so no per-step
+    # ExecutionPhase records — but the orchestrator's "Planning response"
+    # phase (OrchestratorThinking) IS legitimately captured today, since
+    # the runtime emits a DynamicPlanReceived/Finished pair even for a
+    # trivial greeting. Allow at most one phase, and if present, require
+    # that it's the orchestrator-thinking summary phase rather than a
+    # genuine action step.
+    assert len(timeline.phases) <= 1
+    if timeline.phases:
+        assert timeline.phases[0].phase_type == "OrchestratorThinking"
     assert len(timeline.errors) == 0
 
 
@@ -444,15 +453,33 @@ def test_report_order():
 
 
 def test_system_instructions_visible():
-    """System instructions should be shown directly, not in a collapsible block."""
+    """System instructions should be shown directly, not buried in a
+    collapsible `<details>` block.
+
+    The report contains other legitimate `<details>` blocks elsewhere
+    (raw JSON for failed tool observations, the topic-explainer's
+    rewrite/summarisation prompts), so we narrow the assertion to the
+    System Instructions section specifically — from `**System
+    Instructions**` to the next blank-line-then-heading boundary.
+    """
     profile, lookup = parse_yaml(BASE_DIR / "botContent (1)" / "botContent.yml")
     activities = parse_dialog_json(BASE_DIR / "botContent (1)" / "dialog.json")
     timeline = build_timeline(activities, lookup)
     report = render_report(profile, timeline)
 
     assert "**System Instructions**" in report
-    assert "<details>" not in report
-    assert "</details>" not in report
+
+    # Slice from the System Instructions header to the next H2/H3 heading
+    start = report.index("**System Instructions**")
+    rest = report[start:]
+    # Look for the next section break: a blank line followed by a heading.
+    import re
+
+    next_section = re.search(r"\n\n#{1,3} ", rest)
+    section = rest[: next_section.start()] if next_section else rest
+    assert "<details>" not in section, (
+        "System Instructions section should render inline, not collapsed"
+    )
 
 
 # --- Newline sanitization tests ---
@@ -5704,6 +5731,148 @@ def test_build_timeline_extracts_conversation_id_from_bot_debug_reply():
     assert tl.conversation_id == "ed082483-aa8e-47c7-a8fd-a7225d26c37b"
 
 
+def test_group_flow_items_buckets_plans_separate_from_loose_messages():
+    """Plan-bracketed events form a plan group; user/bot messages outside
+    any plan form a separate `loose` group rendered without a header."""
+    from renderer.sections import group_flow_items
+
+    flat = [
+        {"kind": "message", "event_type": "", "summary": 'User: "hi"'},
+        {
+            "kind": "event",
+            "event_type": "PlanReceived",
+            "plan_identifier": "plan-aaa-1234",
+            "summary": "Plan received",
+            "timestamp": "00:01:00",
+        },
+        {"kind": "event", "event_type": "StepTriggered", "summary": "Step 1"},
+        {"kind": "event", "event_type": "StepFinished", "summary": "Step 1 done"},
+        {
+            "kind": "event",
+            "event_type": "PlanFinished",
+            "plan_identifier": "plan-aaa-1234",
+            "summary": "Plan finished (cancelled=False)",
+        },
+        {"kind": "message", "event_type": "", "summary": "Bot: hello"},
+    ]
+    groups = group_flow_items(flat)
+    # Three groups expected: leading user message (loose) → plan → trailing bot message (loose).
+    assert len(groups) == 3
+    assert groups[0]["is_plan"] == ""
+    assert groups[1]["is_plan"] == "true"
+    assert groups[1]["status"] == "completed"
+    assert groups[1]["status_tone"] == "good"
+    assert "Plan plan-aaa" in groups[1]["header_summary"]
+    assert len(groups[1]["items"]) == 4  # received + step trig + step fin + finished
+    assert groups[2]["is_plan"] == ""
+    assert groups[2]["items"][0]["summary"].startswith("Bot:")
+
+
+def test_group_flow_items_marks_cancelled_plan():
+    from renderer.sections import group_flow_items
+
+    flat = [
+        {
+            "kind": "event",
+            "event_type": "PlanReceived",
+            "plan_identifier": "p1",
+            "summary": "Plan",
+            "timestamp": "",
+        },
+        {
+            "kind": "event",
+            "event_type": "PlanFinished",
+            "plan_identifier": "p1",
+            "summary": "Plan finished (cancelled=True)",
+        },
+    ]
+    groups = group_flow_items(flat)
+    assert len(groups) == 1
+    assert groups[0]["status"] == "cancelled"
+    assert groups[0]["status_tone"] == "bad"
+
+
+def test_group_flow_items_preserves_other_keys_per_group():
+    """Each group dict carries the standard keys uniformly (so rx.foreach
+    on the result has a stable shape)."""
+    from renderer.sections import group_flow_items
+
+    flat = [{"kind": "message", "event_type": "", "summary": 'User: "hi"'}]
+    groups = group_flow_items(flat)
+    assert groups
+    keys = set(groups[0].keys())
+    assert {"is_plan", "plan_identifier", "status", "status_tone", "header_summary", "first_timestamp", "items"} <= keys
+
+
+def test_group_flow_items_marks_running_plan_when_no_finish():
+    from renderer.sections import group_flow_items
+
+    flat = [
+        {
+            "kind": "event",
+            "event_type": "PlanReceived",
+            "plan_identifier": "p1",
+            "summary": "Plan",
+            "timestamp": "",
+        },
+        {"kind": "event", "event_type": "StepTriggered", "summary": "step"},
+    ]
+    groups = group_flow_items(flat)
+    assert len(groups) == 1
+    assert groups[0]["status"] == "running"
+    assert "running" in groups[0]["header_summary"]
+
+
+def test_tool_call_captures_auto_filled_argument_names():
+    """`DynamicPlanStepBindUpdate.value.autoFilledArguments` is the runtime
+    signal for AUTO vs MANUAL bindings — the parser must capture it onto
+    the ToolCall so the Variable Tracker can render the badges."""
+    activities = [
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepTriggered",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:00Z",
+            "value": {
+                "stepId": "s1",
+                "taskDialogId": "tool.X",
+                "type": "Agent",
+                "thought": "trying X",
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepBindUpdate",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:01Z",
+            "value": {
+                "stepId": "s1",
+                "taskDialogId": "tool.X",
+                "arguments": {"a": "auto-val", "b": "manual-val"},
+                "autoFilledArguments": ["a"],
+            },
+        },
+        {
+            "type": "event",
+            "valueType": "DynamicPlanStepFinished",
+            "from": {"role": "bot"},
+            "timestamp": "2024-01-01T00:00:02Z",
+            "value": {
+                "stepId": "s1",
+                "taskDialogId": "tool.X",
+                "state": "completed",
+                "executionTime": "00:00:01",
+                "observation": {"content": [{"text": "ok"}]},
+            },
+        },
+    ]
+    timeline = build_timeline(activities, schema_lookup={})
+    assert len(timeline.tool_calls) == 1
+    tc = timeline.tool_calls[0]
+    assert tc.arguments == {"a": "auto-val", "b": "manual-val"}
+    assert tc.auto_filled_argument_names == ["a"]
+
+
 def test_build_timeline_no_conversation_id_when_not_present():
     """When no shape carries the id, leave it empty rather than emitting a
     bogus value."""
@@ -5734,3 +5903,476 @@ def test_flow_unknown_topic_falls_back_to_no_link():
     triggered = next(i for i in items if i.get("event_type") == "StepTriggered")
     assert triggered["link_target_tab"] == ""
     assert triggered["link_target_id"] == ""
+
+
+def test_variable_tracker_includes_tool_call_rows():
+    """Tool calls remain a card_kind in the unified Variable Tracker, with
+    AUTO/MANUAL bindings preserved."""
+    from models import ToolCall
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        tool_calls=[
+            ToolCall(
+                step_id="s1",
+                task_dialog_id="tool.X",
+                display_name="Tool X",
+                step_type="Agent",
+                state="completed",
+                arguments={"a": "auto-val", "b": "manual-val"},
+                auto_filled_argument_names=["a"],
+                trigger_timestamp="2024-01-01T00:00:00Z",
+                finish_timestamp="2024-01-01T00:00:01Z",
+                duration_ms=1000.0,
+            ),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["card_kind"] == "tool_call"
+    assert row["display_name"] == "Tool X"
+    assert row["state"] == "completed"
+    assert row["state_tone"] == "good"
+    auto_flags = {arg["name"]: arg["auto_filled"] for arg in row["arguments"]}
+    assert auto_flags == {"a": "true", "b": ""}
+
+
+def test_variable_tracker_includes_variable_assignment_rows():
+    """Topic / Global SetVariable timeline events become card_kind
+    `variable_assignment` rows so non-orchestrator topic logic is visible."""
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT,
+                summary="Topic Topic.MyVar = hello world",
+                timestamp="2024-01-01T00:00:05Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT,
+                summary="Global Global.UserName = alice",
+                timestamp="2024-01-01T00:00:06Z",
+            ),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert [r["card_kind"] for r in rows] == ["variable_assignment", "variable_assignment"]
+    first = rows[0]
+    assert first["var_scope"] == "Topic"
+    assert first["var_name"] == "Topic.MyVar"
+    assert first["var_value"] == "hello world"
+
+
+def test_variable_tracker_includes_generative_answer_rows():
+    """Topic-level generative-answer traces become rows even when there are
+    no orchestrator tool calls — closes the previous gap where the tracker
+    silently disappeared on bots that only run topic-level GA."""
+    from models import BotProfile, ComponentSummary, GenerativeAnswerTrace
+    from web.state._upload import build_variable_tracker_rows
+
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Ai assistant Knowledge",
+                schema_name="aiAssistantKnowledge",
+                raw_dialog={
+                    "actions": [
+                        {"kind": "SearchAndSummarizeContent", "variable": "Topic.Var1"}
+                    ],
+                },
+            ),
+        ],
+    )
+    timeline = ConversationTimeline(
+        generative_answer_traces=[
+            GenerativeAnswerTrace(
+                topic_name="Ai assistant Knowledge",
+                gpt_answer_state="Answered",
+                original_message="how do I reset?",
+                rewritten_message="password reset procedure",
+                summary_text="Click forgot password.",
+                timestamp="2024-01-01T00:00:10Z",
+            ),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=profile)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["card_kind"] == "generative_answer"
+    assert row["display_name"] == "Ai assistant Knowledge"
+    assert row["ga_output_variable"] == "Topic.Var1"
+    assert row["state"] == "Answered"
+    assert row["state_tone"] == "good"
+
+
+def test_variable_tracker_empty_when_no_data():
+    """Empty timeline produces an empty row list — the UI is responsible
+    for the empty-state branch."""
+    from web.state._upload import build_variable_tracker_rows
+
+    rows = build_variable_tracker_rows(ConversationTimeline(), profile=None)
+    assert rows == []
+
+
+def test_variable_tracker_rows_share_uniform_keys():
+    """rx.foreach requires all rows in the mixed list to share the exact
+    same keys; otherwise the React reconciler crashes when rendering."""
+    from models import GenerativeAnswerTrace, ToolCall
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        tool_calls=[ToolCall(step_id="s1", task_dialog_id="tool.X", state="completed")],
+        events=[
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT,
+                summary="Topic Topic.X = 1",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+        ],
+        generative_answer_traces=[
+            GenerativeAnswerTrace(topic_name="T", gpt_answer_state="Answered"),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert len(rows) == 3
+    key_sets = [set(r.keys()) for r in rows]
+    assert key_sets[0] == key_sets[1] == key_sets[2]
+
+
+def test_variable_tracker_rows_sorted_by_timestamp():
+    """Rows from different sources interleave correctly when sorted."""
+    from models import GenerativeAnswerTrace, ToolCall
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        tool_calls=[
+            ToolCall(
+                step_id="s1",
+                task_dialog_id="tool.X",
+                state="completed",
+                trigger_timestamp="2024-01-01T00:00:05Z",
+                finish_timestamp="2024-01-01T00:00:05Z",
+            ),
+        ],
+        events=[
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT,
+                summary="Topic Topic.X = 1",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+        generative_answer_traces=[
+            GenerativeAnswerTrace(
+                topic_name="T",
+                gpt_answer_state="Answered",
+                timestamp="2024-01-01T00:00:03Z",
+            ),
+        ],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert [r["card_kind"] for r in rows] == [
+        "variable_assignment",
+        "generative_answer",
+        "tool_call",
+    ]
+
+
+def test_variable_tracker_excludes_universal_search_tool():
+    """`UniversalSearchTool` is the orchestrator's wrapper around
+    SearchAndSummarizeContent — its tool-call shape duplicates info already
+    surfaced by the Knowledge tab, so we hide it from the tracker."""
+    from models import ToolCall
+    from web.state._upload import build_variable_tracker_rows
+
+    timeline = ConversationTimeline(
+        tool_calls=[ToolCall(step_id="s1", task_dialog_id="P:UniversalSearchTool", state="completed")],
+    )
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert rows == []
+
+
+def test_citation_panel_rows_aggregate_across_traces():
+    """Citation Verification panel emits one row per (trace, citation)
+    pair with the trace's answer/completion state and safety flags
+    propagated to each citation."""
+    from models import GenerativeAnswerCitation, GenerativeAnswerTrace
+    from web.state._upload import build_citation_panel_rows
+
+    traces = [
+        GenerativeAnswerTrace(
+            topic_name="Onboarding",
+            gpt_answer_state="Answered",
+            completion_state="Complete",
+            performed_content_moderation=True,
+            performed_content_provenance=True,
+            citations=[
+                GenerativeAnswerCitation(title="Doc A", url="https://x/a", snippet="alpha"),
+                GenerativeAnswerCitation(title="Doc B", url="https://x/b", snippet="beta"),
+            ],
+        ),
+        GenerativeAnswerTrace(
+            topic_name="Returns",
+            gpt_answer_state="Answer not Found in Search Results",
+            performed_content_moderation=False,
+            performed_content_provenance=False,
+            citations=[],  # no citations -> no rows
+        ),
+        GenerativeAnswerTrace(
+            topic_name="Pricing",
+            gpt_answer_state="GPT Fallback",
+            performed_content_moderation=True,
+            performed_content_provenance=False,
+            citations=[GenerativeAnswerCitation(title="Doc C", url="https://x/c", snippet="gamma")],
+        ),
+    ]
+    rows = build_citation_panel_rows(traces)
+    assert len(rows) == 3
+    assert [r["citation_id"] for r in rows] == ["T1·C1", "T1·C2", "T3·C1"]
+    assert rows[0]["trace_topic"] == "Onboarding"
+    assert rows[0]["answer_state"] == "Answered"
+    assert rows[0]["answer_state_tone"] == "good"
+    assert rows[0]["moderation"] == "Yes"
+    assert rows[2]["answer_state_tone"] == "warn"  # GPT Fallback
+    assert rows[2]["provenance"] == "No"
+
+
+def test_citation_panel_empty_when_no_traces():
+    """No traces → no rows; the panel hides itself in the UI."""
+    from web.state._upload import build_citation_panel_rows
+
+    assert build_citation_panel_rows([]) == []
+
+
+def test_flow_items_have_unique_flow_ids():
+    """Every flow item carries a stable `flow_id` and matching `flow_row_id`
+    (`row-<flow_id>`) — required for the error-banner deep-link plumbing."""
+    from renderer.sections import build_conversation_flow_items
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "hi"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: hello",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ERROR,
+                summary="Action failed",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    assert len(items) == 3
+    flow_ids = [it["flow_id"] for it in items]
+    assert flow_ids == ["flow-0", "flow-1", "flow-2"]
+    for it in items:
+        assert it["flow_row_id"] == f"row-{it['flow_id']}"
+
+
+def test_visual_summary_slowest_step_kpi():
+    """Slowest step KPI surfaces the phase with the longest active duration
+    excluding search and orchestrator phases."""
+    from models import ExecutionPhase
+
+    timeline = ConversationTimeline(
+        phases=[
+            ExecutionPhase(
+                label="OrchestratorThinking",
+                phase_type="OrchestratorThinking",
+                duration_ms=2000.0,
+            ),
+            ExecutionPhase(label="FastTopic", phase_type="Topic", duration_ms=500.0),
+            ExecutionPhase(label="SlowTopic", phase_type="Topic", duration_ms=7500.0),
+            ExecutionPhase(label="MyKnowledge", phase_type="KnowledgeSource", duration_ms=12000.0),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    slowest = next(k for k in result["kpis"] if k["label"] == "Slowest Step")
+    assert slowest["value"] == "7.5s"
+    assert "SlowTopic" in slowest["hint"]
+    assert slowest["tone"] == "warn"
+
+
+def test_visual_summary_plans_completed_kpi():
+    """Plans Completed KPI counts PLAN_FINISHED events and detects
+    cancellation via the summary's `cancelled=True/False` marker."""
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.PLAN_FINISHED,
+                summary="Plan finished (cancelled=False)",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_FINISHED,
+                summary="Plan finished (cancelled=True)",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_FINISHED,
+                summary="Plan finished (cancelled=False)",
+                timestamp="2024-01-01T00:00:03Z",
+            ),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    plans = next(k for k in result["kpis"] if k["label"] == "Plans Completed")
+    assert plans["value"] == "2 / 3"
+    assert "1 cancelled" in plans["hint"]
+    assert plans["tone"] == "warn"
+
+
+def test_visual_summary_tool_success_kpi():
+    """Tool Success Rate KPI is the fraction of tool_calls with
+    state == 'completed'."""
+    from models import ToolCall
+
+    timeline = ConversationTimeline(
+        tool_calls=[
+            ToolCall(step_id="s1", task_dialog_id="t1", state="completed"),
+            ToolCall(step_id="s2", task_dialog_id="t2", state="completed"),
+            ToolCall(step_id="s3", task_dialog_id="t3", state="failed"),
+            ToolCall(step_id="s4", task_dialog_id="t4", state="completed"),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    tool_kpi = next(k for k in result["kpis"] if k["label"] == "Tool Success Rate")
+    assert tool_kpi["value"] == "75%"
+    assert "3 / 4" in tool_kpi["hint"]
+    assert tool_kpi["tone"] == "warn"
+
+
+def test_visual_summary_optional_kpis_hidden_when_empty():
+    """The new KPIs are skipped (not rendered as zero) when there's no
+    underlying data — keeps the grid tight on transcript-only uploads."""
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(event_type=EventType.USER_MESSAGE, summary='User: "hi"', timestamp="2024-01-01T00:00:00Z"),
+        ],
+    )
+    result = build_conversation_visual_summary(timeline)
+    labels = {k["label"] for k in result["kpis"]}
+    assert "Slowest Step" not in labels
+    assert "Plans Completed" not in labels
+    assert "Tool Success Rate" not in labels
+
+
+def test_flow_items_attach_auto_manual_counts_to_step_rows():
+    """STEP_TRIGGERED / STEP_FINISHED rows pick up AUTO/MANUAL counts
+    from the correlated `ToolCall.arguments` +
+    `auto_filled_argument_names` so the Conversation Flow can render
+    binding badges directly on the row."""
+    from models import ToolCall
+    from renderer.sections import build_conversation_flow_items
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Action Started",
+                step_id="abc",
+                topic_name="MyTool",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                summary="Action Finished",
+                step_id="def",
+                topic_name="OtherTool",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+        tool_calls=[
+            ToolCall(
+                step_id="abc",
+                task_dialog_id="MyTool",
+                arguments={"a": "auto-val", "b": "auto-val", "c": "manual-val"},
+                auto_filled_argument_names=["a", "b"],
+            ),
+            ToolCall(
+                step_id="def",
+                task_dialog_id="OtherTool",
+                arguments={"x": "manual-val"},
+                auto_filled_argument_names=[],
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    triggered = next(it for it in items if it["event_type"] == "StepTriggered")
+    finished = next(it for it in items if it["event_type"] == "StepFinished")
+    assert triggered["auto_filled_count"] == "2"
+    assert triggered["manual_filled_count"] == "1"
+    assert finished["auto_filled_count"] == ""
+    assert finished["manual_filled_count"] == "1"
+
+
+def test_flow_items_carry_raw_json_payload():
+    """Each flow item exposes a pretty-printed `raw_json` of its source
+    TimelineEvent — wired to the per-row copy button + Raw JSON
+    accordion. Required so users can grab activity payloads when filing
+    bugs against Microsoft."""
+    import json
+
+    from renderer.sections import build_conversation_flow_items
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Action Started: MyTopic",
+                topic_name="MyTopic",
+                step_id="abc",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    assert len(items) == 1
+    raw = items[0]["raw_json"]
+    assert raw  # non-empty
+    parsed = json.loads(raw)
+    assert parsed["step_id"] == "abc"
+    assert parsed["topic_name"] == "MyTopic"
+
+
+def test_error_banner_rows_filter_to_error_flow_items():
+    """The Conversation tab error banner is built from flow items whose
+    `tone == 'error'`, carrying their `flow_id` for click-to-jump."""
+    from renderer.sections import build_conversation_flow_items
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "go"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.ERROR,
+                summary="Action failed: connector unreachable",
+                topic_name="MyTopic",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.BOT_MESSAGE,
+                summary="Bot: sorry",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    error_rows = [it for it in items if it.get("tone") == "error"]
+    assert len(error_rows) == 1
+    err = error_rows[0]
+    assert err["flow_id"] == "flow-1"
+    assert err["topic_name"] == "MyTopic"
+    assert "connector unreachable" in err["summary"]

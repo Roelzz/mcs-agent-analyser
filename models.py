@@ -286,6 +286,11 @@ class ToolCall(BaseModel):
     step_type: str = ""  # LlmSkill, CustomTopic, Agent, KnowledgeSource
     thought: str | None = None
     arguments: dict[str, str] = Field(default_factory=dict)
+    # Names of arguments that were filled automatically by the orchestrator
+    # (vs. manually authored bindings). Surfaced in the Variable Tracker
+    # panel as AUTO/MANUAL badges. Sourced from
+    # `DynamicPlanStepBindUpdate.value.autoFilledArguments`.
+    auto_filled_argument_names: list[str] = Field(default_factory=list)
     observation: ToolCallObservation | None = None
     state: str = ""  # completed, failed, inProgress
     error: str | None = None

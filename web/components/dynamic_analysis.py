@@ -330,6 +330,7 @@ def _mcs_flow_message(item: dict) -> rx.Component:
         spacing="2",
         width="100%",
         align="stretch",
+        id=item["flow_row_id"],
     )
 
 
@@ -440,6 +441,76 @@ def _has_flow_details(item: dict) -> rx.Var:
     )
 
 
+def _flow_row_actions(item: dict) -> rx.Component:
+    """Per-row copy-JSON button + collapsible Raw JSON viewer. Renders
+    only when `raw_json` is non-empty. Click handlers use
+    `stop_propagation` so they don't trigger the parent card's
+    deep-link navigation."""
+    return rx.cond(
+        item["raw_json"] != "",
+        rx.vstack(
+            rx.hstack(
+                rx.spacer(),
+                rx.tooltip(
+                    rx.icon_button(
+                        rx.icon("copy", size=12),
+                        size="1",
+                        variant="ghost",
+                        color_scheme="green",
+                        on_click=State.copy_flow_row_json(item["raw_json"]).stop_propagation,  # type: ignore[attr-defined]
+                    ),
+                    content="Copy activity JSON",
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            rx.box(
+                rx.accordion.root(
+                    rx.accordion.item(
+                        header=rx.text(
+                            "Raw activity JSON",
+                            font_size="10px",
+                            color="var(--gray-a8)",
+                            font_weight="700",
+                        ),
+                        content=rx.box(
+                            rx.el.pre(
+                                item["raw_json"],
+                                style={
+                                    "fontSize": "10px",
+                                    "color": "var(--gray-12)",
+                                    "lineHeight": "1.5",
+                                    "whiteSpace": "pre-wrap",
+                                    "wordBreak": "break-word",
+                                    "margin": 0,
+                                },
+                            ),
+                            background="var(--gray-a3)",
+                            border_radius="6px",
+                            padding="8px 10px",
+                            max_height="280px",
+                            overflow_y="auto",
+                            width="100%",
+                        ),
+                        value="raw",
+                    ),
+                    type="single",
+                    collapsible=True,
+                    variant="ghost",
+                    width="100%",
+                ),
+                # Stop click bubbling so opening the accordion doesn't
+                # also fire the card's deep-link navigation.
+                on_click=rx.stop_propagation,
+                width="100%",
+            ),
+            spacing="0",
+            width="100%",
+        ),
+    )
+
+
 def _mcs_flow_event(item: dict) -> rx.Component:
     is_error = item["tone"] == "error"
     is_trace = item["tone"] == "trace"
@@ -471,6 +542,7 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 on_click=State.set_dynamic_link_target(item["link_target_tab"], item["link_target_id"]),
             ),
             width="100%",
+            id=item["flow_row_id"],
         ),
         # Standard event card (info / error)
         rx.center(
@@ -501,6 +573,32 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                             ),
                             _trigger_score_badge(item["trigger_score"], item["trigger_score_color"]),
                             rx.cond(
+                                item["auto_filled_count"] != "",
+                                rx.tooltip(
+                                    rx.badge(
+                                        "AUTO ",
+                                        rx.text.span(item["auto_filled_count"]),
+                                        color_scheme="amber",
+                                        variant="soft",
+                                        size="1",
+                                    ),
+                                    content="Arguments auto-filled by the orchestrator",
+                                ),
+                            ),
+                            rx.cond(
+                                item["manual_filled_count"] != "",
+                                rx.tooltip(
+                                    rx.badge(
+                                        "MANUAL ",
+                                        rx.text.span(item["manual_filled_count"]),
+                                        color_scheme="gray",
+                                        variant="soft",
+                                        size="1",
+                                    ),
+                                    content="Arguments bound manually in the topic YAML",
+                                ),
+                            ),
+                            rx.cond(
                                 is_linked,
                                 rx.icon("arrow-up-right", size=12, color="var(--green-a10)"),
                             ),
@@ -520,8 +618,11 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                             _flow_event_detail_accordion(item),
                             rx.box(),
                         ),
+                        # Per-row copy + raw JSON
+                        _flow_row_actions(item),
                         align="start",
                         spacing="1",
+                        width="100%",
                     ),
                     spacing="2",
                     align="start",
@@ -542,12 +643,100 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 transition="border-color 0.15s ease, background 0.15s ease",
             ),
             width="100%",
+            id=item["flow_row_id"],
         ),
     )
 
 
 def _mcs_flow_item(item: dict) -> rx.Component:
     return rx.cond(item["kind"] == "message", _mcs_flow_message(item), _mcs_flow_event(item))
+
+
+def _mcs_flow_group(group: dict) -> rx.Component:
+    """Render one Conversation Flow group: either a collapsible plan card
+    (with status pill + step count) or a flat run of loose items
+    (messages, standalone errors)."""
+    return rx.cond(
+        group["is_plan"] != "",
+        # Plan card — collapsible accordion with header
+        rx.box(
+            rx.accordion.root(
+                rx.accordion.item(
+                    header=rx.hstack(
+                        rx.icon("git-branch", size=14, color=PRIMARY),
+                        rx.text(
+                            group["header_summary"],
+                            font_size="12px",
+                            font_weight="700",
+                            color="var(--gray-12)",
+                        ),
+                        rx.spacer(),
+                        _status_badge(group["status"], group["status_tone"]),
+                        rx.cond(
+                            group["first_timestamp"] != "",
+                            rx.text(
+                                group["first_timestamp"],
+                                font_size="11px",
+                                color="var(--gray-a8)",
+                                font_family=_MONO,
+                            ),
+                        ),
+                        spacing="2",
+                        align="center",
+                        width="100%",
+                    ),
+                    content=rx.box(
+                        rx.vstack(
+                            rx.foreach(
+                                group["items"].to(list[dict]),  # type: ignore[union-attr]
+                                _mcs_flow_item,
+                            ),
+                            spacing="3",
+                            width="100%",
+                            align="stretch",
+                        ),
+                        padding="10px 4px 0 4px",
+                    ),
+                    value="plan_open",
+                ),
+                type="single",
+                collapsible=True,
+                default_value="plan_open",  # plans default to open
+                width="100%",
+                variant="ghost",
+            ),
+            background="var(--green-a2)",
+            border="1px solid var(--green-a4)",
+            border_radius="10px",
+            padding="8px 10px",
+            width="100%",
+        ),
+        # Loose group — render items inline, no header
+        rx.vstack(
+            rx.foreach(
+                group["items"].to(list[dict]),  # type: ignore[union-attr]
+                _mcs_flow_item,
+            ),
+            spacing="3",
+            width="100%",
+            align="stretch",
+        ),
+    )
+
+
+def _flow_filter_chip(label: str) -> rx.Component:
+    """One toggle chip for the Conversation Flow type filter. Selected chips
+    have a green background; clicking toggles via
+    `State.toggle_mcs_flow_filter_chip(label)`."""
+    is_active = State.mcs_flow_filter_types.contains(label)
+    return rx.button(
+        label,
+        on_click=State.toggle_mcs_flow_filter_chip(label),
+        size="1",
+        variant=rx.cond(is_active, "solid", "soft"),
+        color_scheme=rx.cond(is_active, "green", "gray"),
+        cursor="pointer",
+    )
 
 
 def _mcs_conversation_flow_panel() -> rx.Component:
@@ -574,9 +763,66 @@ def _mcs_conversation_flow_panel() -> rx.Component:
             width="100%",
             margin_bottom="10px",
         ),
+        # Filter bar — text search across summary/text/thought/topic
+        # + clickable type chips. Match-count chip on the right.
+        rx.vstack(
+            rx.hstack(
+                rx.icon("search", size=14, color="var(--gray-a8)"),
+                rx.input(
+                    placeholder="Search messages, topics, thoughts…",
+                    value=State.mcs_flow_filter_text,
+                    on_change=State.set_mcs_flow_filter_text,
+                    size="2",
+                    width="100%",
+                ),
+                rx.cond(
+                    State.mcs_flow_filter_active,
+                    rx.button(
+                        rx.icon("x", size=12),
+                        rx.text("Clear", font_size="11px"),
+                        on_click=State.clear_mcs_flow_filters,
+                        size="1",
+                        variant="soft",
+                        color_scheme="gray",
+                        cursor="pointer",
+                    ),
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            rx.hstack(
+                _flow_filter_chip("Messages"),
+                _flow_filter_chip("Plans"),
+                _flow_filter_chip("Actions"),
+                _flow_filter_chip("Knowledge"),
+                _flow_filter_chip("Traces"),
+                _flow_filter_chip("Errors"),
+                rx.spacer(),
+                rx.cond(
+                    State.mcs_flow_filter_active,
+                    rx.text(
+                        State.mcs_conversation_flow_match_count.to(str)
+                        + " of "
+                        + State.mcs_conversation_flow_total_count.to(str)
+                        + " events",
+                        font_size="11px",
+                        color="var(--gray-a9)",
+                        font_family=_MONO,
+                    ),
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+                flex_wrap="wrap",
+            ),
+            spacing="2",
+            width="100%",
+            margin_bottom="10px",
+        ),
         rx.box(
             rx.vstack(
-                rx.foreach(State.mcs_conversation_flow, _mcs_flow_item),
+                rx.foreach(State.mcs_conversation_flow_groups_filtered, _mcs_flow_group),
                 spacing="4",
                 width="100%",
                 align="stretch",
@@ -1999,6 +2245,94 @@ def _gen_trace_prompt_block(text) -> rx.Component:
     )
 
 
+def _mcs_citation_panel_row(item: dict) -> rx.Component:
+    """One row of the Citation Verification panel: citation id + title +
+    answer/completion state + moderation/provenance flags. Wraps the URL
+    snippet so the user can audit grounding inline."""
+    return rx.box(
+        rx.vstack(
+            rx.hstack(
+                rx.badge(
+                    item["citation_id"],
+                    color_scheme="green",
+                    variant="solid",
+                    size="1",
+                ),
+                rx.cond(
+                    item["url"] != "",
+                    rx.link(
+                        item["title"],
+                        href=item["url"],
+                        is_external=True,
+                        font_size="12px",
+                        font_weight="700",
+                        color="var(--green-11)",
+                    ),
+                    rx.text(item["title"], font_size="12px", font_weight="700", color="var(--gray-12)"),
+                ),
+                rx.cond(
+                    item["trace_topic"] != "—",
+                    rx.badge(item["trace_topic"], color_scheme="teal", variant="soft", size="1"),
+                    rx.box(),
+                ),
+                rx.spacer(),
+                _status_badge(item["answer_state"], item["answer_state_tone"]),
+                rx.cond(
+                    item["completion_state"] != "—",
+                    rx.badge(
+                        item["completion_state"],
+                        color_scheme="gray",
+                        variant="soft",
+                        size="1",
+                    ),
+                    rx.box(),
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+                flex_wrap="wrap",
+            ),
+            rx.cond(
+                item["snippet"] != "",
+                rx.text(
+                    item["snippet"],
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    line_height="1.5",
+                    style={"wordBreak": "break-word"},
+                ),
+            ),
+            rx.hstack(
+                rx.text(
+                    "Moderation:",
+                    font_size="10px",
+                    color="var(--gray-a8)",
+                    font_weight="700",
+                ),
+                _status_badge(item["moderation"], item["moderation_tone"]),
+                rx.text(
+                    "Provenance:",
+                    font_size="10px",
+                    color="var(--gray-a8)",
+                    font_weight="700",
+                ),
+                _status_badge(item["provenance"], item["provenance_tone"]),
+                spacing="2",
+                align="center",
+                flex_wrap="wrap",
+            ),
+            spacing="2",
+            align="start",
+            width="100%",
+        ),
+        background="var(--gray-a2)",
+        border=f"1px solid {SURFACE_BORDER}",
+        border_radius="10px",
+        padding="10px 12px",
+        width="100%",
+    )
+
+
 def _mcs_generative_trace_card(trace: dict) -> rx.Component:
     """Card surfacing one topic-level SearchAndSummarizeContent diagnostic record."""
     return card(
@@ -2607,6 +2941,42 @@ def _mcs_knowledge_panel() -> rx.Component:
                 ),
                 rx.foreach(State.mcs_generative_traces, _mcs_generative_trace_card),
                 spacing="3",
+                width="100%",
+            ),
+        ),
+        # Citation Verification panel — flat audit table of every citation
+        # across all generative-answer traces with answer/completion state
+        # and safety flags. Hidden when no citations exist.
+        rx.cond(
+            State.mcs_knowledge_citation_panel.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("badge-check", size=16, color=PRIMARY),
+                    section_heading("Citation Verification"),
+                    rx.spacer(),
+                    rx.badge(
+                        State.mcs_knowledge_citation_panel.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="green",
+                        variant="soft",
+                        size="1",
+                    ),
+                    align="center",
+                    width="100%",
+                ),
+                rx.text(
+                    "Every citation referenced in the conversation, with the trace's "
+                    "gptAnswerState / completionState and content moderation + provenance "
+                    "flags. Click a row to open the source.",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
+                ),
+                rx.vstack(
+                    rx.foreach(State.mcs_knowledge_citation_panel, _mcs_citation_panel_row),
+                    spacing="2",
+                    width="100%",
+                    padding_top="8px",
+                ),
                 width="100%",
             ),
         ),
@@ -4015,10 +4385,480 @@ def _mcs_conv_reasoning_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_var_argument_row(arg: dict) -> rx.Component:
+    """One argument inside a Variable Tracker card. Shows the binding key,
+    its value, and an AUTO/MANUAL badge."""
+    return rx.hstack(
+        rx.text(
+            arg["name"],
+            font_size="11px",
+            color="var(--gray-a9)",
+            font_family=_MONO,
+            min_width="140px",
+        ),
+        rx.code(arg["value"], font_size="11px", color="var(--gray-12)"),
+        rx.spacer(),
+        rx.cond(
+            arg["auto_filled"] != "",
+            rx.badge("AUTO", color_scheme="amber", variant="soft", size="1"),
+            rx.badge("MANUAL", color_scheme="gray", variant="soft", size="1"),
+        ),
+        spacing="2",
+        align="center",
+        width="100%",
+        padding="3px 0",
+    )
+
+
+def _mcs_var_card_header(item: dict, icon_name: str, badge_color: str) -> rx.Component:
+    """Header row shared across the three Variable Tracker card kinds."""
+    return rx.vstack(
+        rx.hstack(
+            rx.icon(icon_name, size=14, color=PRIMARY),
+            rx.text(
+                item["display_name"],
+                font_size="13px",
+                font_weight="700",
+                color="var(--gray-12)",
+            ),
+            rx.badge(
+                item["step_type"],
+                color_scheme=badge_color,
+                variant="soft",
+                size="1",
+            ),
+            _status_badge(item["state"], item["state_tone"]),
+            rx.cond(
+                (item["duration"] != "—") & (item["duration"] != ""),
+                rx.text(
+                    item["duration"],
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_family=_MONO,
+                ),
+            ),
+            rx.cond(
+                item["timestamp"] != "",
+                rx.text(
+                    item["timestamp"],
+                    font_size="11px",
+                    color="var(--gray-a7)",
+                    font_family=_MONO,
+                ),
+            ),
+            spacing="2",
+            align="center",
+            width="100%",
+            flex_wrap="wrap",
+        ),
+        rx.cond(
+            item["thought"] != "",
+            rx.text(
+                item["thought"],
+                font_size="11px",
+                font_style="italic",
+                color="var(--gray-a9)",
+                line_height="1.4",
+            ),
+        ),
+        spacing="2",
+        align="start",
+        width="100%",
+    )
+
+
+def _mcs_var_kv_row(label: str, value, mono: bool = False, italic: bool = False) -> rx.Component:
+    """Generic 'label: value' row used by the variable_assignment and
+    generative_answer card kinds."""
+    return rx.cond(
+        value != "",
+        rx.hstack(
+            rx.text(
+                label,
+                font_size="11px",
+                color="var(--gray-a8)",
+                font_weight="700",
+                min_width="120px",
+            ),
+            rx.text(
+                value,
+                font_size="11px",
+                color="var(--gray-12)",
+                font_family=_MONO if mono else None,
+                font_style="italic" if italic else "normal",
+                line_height="1.5",
+                style={"wordBreak": "break-word"},
+            ),
+            spacing="2",
+            align="start",
+            width="100%",
+            padding="2px 0",
+        ),
+    )
+
+
+def _mcs_var_card_tool_call(item: dict) -> rx.Component:
+    return rx.vstack(
+        _mcs_var_card_header(item, "wrench", "teal"),
+        rx.cond(
+            item["has_arguments"] != "",
+            rx.box(
+                rx.text(
+                    "Arguments",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_weight="700",
+                    margin_bottom="4px",
+                ),
+                rx.foreach(
+                    item["arguments"].to(list[dict]),  # type: ignore[union-attr]
+                    _mcs_var_argument_row,
+                ),
+                width="100%",
+            ),
+        ),
+        rx.cond(
+            item["has_output"] != "",
+            rx.vstack(
+                rx.cond(
+                    item["output_preview"] != "",
+                    rx.hstack(
+                        rx.text(
+                            "Output:",
+                            font_size="11px",
+                            color="var(--gray-a8)",
+                            font_weight="700",
+                        ),
+                        rx.code(
+                            item["output_preview"],
+                            font_size="11px",
+                            color="var(--gray-12)",
+                        ),
+                        spacing="2",
+                        align="center",
+                    ),
+                ),
+                rx.cond(
+                    item["output_full"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.text(
+                                "Raw output JSON",
+                                font_size="11px",
+                                color="var(--gray-a9)",
+                                font_weight="700",
+                            ),
+                            content=rx.box(
+                                rx.el.pre(
+                                    item["output_full"],
+                                    style={
+                                        "fontSize": "10px",
+                                        "color": "var(--gray-12)",
+                                        "lineHeight": "1.5",
+                                        "whiteSpace": "pre-wrap",
+                                        "wordBreak": "break-word",
+                                    },
+                                ),
+                                background="var(--gray-a3)",
+                                border_radius="6px",
+                                padding="8px 10px",
+                                max_height="320px",
+                                overflow_y="auto",
+                                width="100%",
+                            ),
+                            value="raw_json",
+                        ),
+                        type="single",
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                spacing="2",
+                align="start",
+                width="100%",
+            ),
+        ),
+        rx.cond(
+            item["error"] != "",
+            rx.box(
+                rx.hstack(
+                    rx.icon("triangle-alert", size=12, color="var(--red-9)"),
+                    rx.text(
+                        item["error"],
+                        font_size="11px",
+                        color="var(--red-11)",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                background="var(--red-a2)",
+                border="1px solid var(--red-a4)",
+                border_radius="6px",
+                padding="6px 10px",
+                width="100%",
+            ),
+        ),
+        spacing="3",
+        align="start",
+        width="100%",
+    )
+
+
+def _mcs_var_card_variable_assignment(item: dict) -> rx.Component:
+    return rx.vstack(
+        _mcs_var_card_header(item, "variable", "purple"),
+        rx.hstack(
+            rx.cond(
+                item["var_scope"] != "",
+                rx.badge(
+                    item["var_scope"],
+                    color_scheme="gray",
+                    variant="soft",
+                    size="1",
+                ),
+            ),
+            rx.code(
+                item["var_name"],
+                font_size="11px",
+                color="var(--gray-12)",
+            ),
+            rx.text("=", font_size="11px", color="var(--gray-a8)"),
+            rx.code(
+                item["var_value"],
+                font_size="11px",
+                color="var(--green-11)",
+                style={"wordBreak": "break-word"},
+            ),
+            spacing="2",
+            align="center",
+            width="100%",
+            flex_wrap="wrap",
+        ),
+        spacing="3",
+        align="start",
+        width="100%",
+    )
+
+
+def _mcs_var_card_generative_answer(item: dict) -> rx.Component:
+    return rx.vstack(
+        _mcs_var_card_header(item, "sparkles", "amber"),
+        rx.cond(
+            item["ga_output_variable"] != "",
+            rx.hstack(
+                rx.text(
+                    "Writes to:",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_weight="700",
+                ),
+                rx.code(
+                    item["ga_output_variable"],
+                    font_size="11px",
+                    color="var(--green-11)",
+                ),
+                rx.spacer(),
+                rx.cond(
+                    item["ga_citation_count"] != "0",
+                    rx.badge(
+                        item["ga_citation_count"].to(str),  # type: ignore[union-attr]
+                        rx.text.span(" citations"),
+                        color_scheme="blue",
+                        variant="soft",
+                        size="1",
+                    ),
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+        ),
+        _mcs_var_kv_row("User asked", item["ga_original"], italic=True),
+        _mcs_var_kv_row("Rewritten", item["ga_rewritten"], italic=True),
+        _mcs_var_kv_row("Keywords", item["ga_keywords"], mono=True),
+        rx.cond(
+            item["ga_summary"] != "",
+            rx.box(
+                rx.text(
+                    "Summary",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_weight="700",
+                    margin_bottom="4px",
+                ),
+                rx.text(
+                    item["ga_summary"],
+                    font_size="11px",
+                    color="var(--gray-12)",
+                    line_height="1.5",
+                    style={"wordBreak": "break-word"},
+                ),
+                background="var(--gray-a3)",
+                border_radius="6px",
+                padding="8px 10px",
+                width="100%",
+            ),
+        ),
+        spacing="3",
+        align="start",
+        width="100%",
+    )
+
+
+def _mcs_var_card(item: dict) -> rx.Component:
+    """Variable Tracker card. Dispatches on `card_kind` to render the
+    right shape per row (tool_call / variable_assignment / generative_answer)."""
+    return rx.box(
+        rx.match(
+            item["card_kind"],
+            ("tool_call", _mcs_var_card_tool_call(item)),
+            ("variable_assignment", _mcs_var_card_variable_assignment(item)),
+            ("generative_answer", _mcs_var_card_generative_answer(item)),
+            rx.fragment(),
+        ),
+        id=item["row_id"],
+        padding="14px 16px",
+        background="var(--gray-a2)",
+        border=f"1px solid {SURFACE_BORDER}",
+        border_radius="10px",
+        width="100%",
+    )
+
+
+def _mcs_error_banner_row(item: dict) -> rx.Component:
+    """One row inside the error banner — clickable, jumps to the offending
+    Conversation Flow event via `set_dynamic_link_target`."""
+    return rx.hstack(
+        rx.icon("triangle-alert", size=14, color="var(--red-9)"),
+        rx.vstack(
+            rx.hstack(
+                rx.text(
+                    item["title"],
+                    font_size="12px",
+                    font_weight="700",
+                    color="var(--red-11)",
+                ),
+                rx.cond(
+                    item["topic_name"] != "",
+                    rx.badge(item["topic_name"], color_scheme="red", variant="soft", size="1"),
+                    rx.box(),
+                ),
+                rx.cond(
+                    item["timestamp"] != "",
+                    rx.text(
+                        item["timestamp"],
+                        font_size="10px",
+                        color="var(--red-a9)",
+                        font_family=_MONO,
+                    ),
+                    rx.box(),
+                ),
+                spacing="2",
+                align="center",
+                flex_wrap="wrap",
+            ),
+            rx.text(
+                item["summary"],
+                font_size="11px",
+                color="var(--red-11)",
+                line_height="1.4",
+                style={"wordBreak": "break-word"},
+            ),
+            spacing="1",
+            align="start",
+            width="100%",
+        ),
+        rx.spacer(),
+        rx.icon("arrow-up-right", size=12, color="var(--red-a10)"),
+        spacing="2",
+        align="start",
+        width="100%",
+        padding="8px 10px",
+        border_radius="6px",
+        cursor="pointer",
+        on_click=State.set_dynamic_link_target("conversation", item["flow_id"]),
+        _hover={"background": "var(--red-a3)"},
+        transition="background 0.15s ease",
+    )
+
+
+def _mcs_error_banner() -> rx.Component:
+    """Banner at the top of the Conversation tab summarising every
+    error-toned event with click-to-jump to the offending row.
+    Hidden when there are no errors."""
+    return rx.cond(
+        State.mcs_conv_error_banner.length() > 0,  # type: ignore[union-attr]
+        rx.box(
+            rx.hstack(
+                rx.icon("triangle-alert", size=18, color="var(--red-9)"),
+                rx.text(
+                    "Errors detected — click to jump to the failing step",
+                    font_size="13px",
+                    font_weight="700",
+                    color="var(--red-11)",
+                ),
+                rx.spacer(),
+                rx.badge(
+                    State.mcs_conv_error_banner.length().to(str),  # type: ignore[union-attr]
+                    color_scheme="red",
+                    variant="solid",
+                    size="1",
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            rx.vstack(
+                rx.foreach(State.mcs_conv_error_banner, _mcs_error_banner_row),
+                spacing="1",
+                width="100%",
+                padding_top="6px",
+            ),
+            background="var(--red-a2)",
+            border="1px solid var(--red-a5)",
+            border_radius="10px",
+            padding="12px 14px",
+            width="100%",
+        ),
+    )
+
+
+def _mcs_conv_expand_collapse_bar() -> rx.Component:
+    """Compact button row toggling every accordion under the Conversation
+    tab open or closed. Click handlers walk the DOM via call_script."""
+    return rx.hstack(
+        rx.spacer(),
+        rx.button(
+            rx.icon("chevrons-down", size=12),
+            "Expand all",
+            size="1",
+            variant="soft",
+            color_scheme="gray",
+            on_click=State.conv_expand_all,
+        ),
+        rx.button(
+            rx.icon("chevrons-up", size=12),
+            "Collapse all",
+            size="1",
+            variant="soft",
+            color_scheme="gray",
+            on_click=State.conv_collapse_all,
+        ),
+        spacing="2",
+        align="center",
+        width="100%",
+    )
+
+
 def _mcs_conversation_detail_panel() -> rx.Component:
     return rx.cond(
         State.has_mcs_conv_detail,
         rx.vstack(
+            # Expand/collapse-all toolbar (Conv tab scope)
+            _mcs_conv_expand_collapse_bar(),
+            # Error banner (hidden when no errors)
+            _mcs_error_banner(),
             # Metadata card
             card(
                 rx.hstack(
@@ -4063,6 +4903,65 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                     ),
                     width="100%",
                 ),
+            ),
+            # Variable Tracker — unified surface across orchestrator tool
+            # calls, topic-level variable assignments, and topic-level
+            # generative-answer traces. Always rendered so the section
+            # never silently disappears for bots without tool calls.
+            card(
+                rx.hstack(
+                    rx.icon("variable", size=16, color=PRIMARY),
+                    section_heading("Variable Tracker"),
+                    rx.spacer(),
+                    rx.badge(
+                        State.mcs_conv_variables.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="green",
+                        variant="soft",
+                        size="1",
+                    ),
+                    align="center",
+                    width="100%",
+                ),
+                rx.text(
+                    "Inputs, outputs, and harvested values across the conversation: "
+                    "orchestrator tool calls (AUTO/MANUAL bindings), Topic / Global "
+                    "variable assignments, and topic-level Generative Answer traces.",
+                    font_size="11px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
+                ),
+                rx.cond(
+                    State.mcs_conv_variables.length() > 0,  # type: ignore[union-attr]
+                    rx.vstack(
+                        rx.foreach(State.mcs_conv_variables, _mcs_var_card),
+                        spacing="3",
+                        width="100%",
+                        padding_top="8px",
+                    ),
+                    rx.box(
+                        rx.hstack(
+                            rx.icon("info", size=14, color="var(--gray-a8)"),
+                            rx.text(
+                                "No variable activity captured for this conversation. "
+                                "This bot didn't trigger orchestrator tool calls, set "
+                                "Topic / Global variables, or run a topic-level "
+                                "generative answer.",
+                                font_size="11px",
+                                color="var(--gray-a9)",
+                                font_style="italic",
+                                line_height="1.5",
+                            ),
+                            spacing="2",
+                            align="start",
+                        ),
+                        background="var(--gray-a3)",
+                        border_radius="6px",
+                        padding="10px 12px",
+                        width="100%",
+                        margin_top="8px",
+                    ),
+                ),
+                width="100%",
             ),
             # Event log
             rx.cond(
@@ -4145,6 +5044,7 @@ def _mcs_conversation_detail_panel() -> rx.Component:
             ),
             spacing="4",
             width="100%",
+            id="mcs-conv-tab-root",
         ),
     )
 
