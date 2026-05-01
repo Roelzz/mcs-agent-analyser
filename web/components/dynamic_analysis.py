@@ -573,6 +573,32 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                             ),
                             _trigger_score_badge(item["trigger_score"], item["trigger_score_color"]),
                             rx.cond(
+                                item["auto_filled_count"] != "",
+                                rx.tooltip(
+                                    rx.badge(
+                                        "AUTO ",
+                                        rx.text.span(item["auto_filled_count"]),
+                                        color_scheme="amber",
+                                        variant="soft",
+                                        size="1",
+                                    ),
+                                    content="Arguments auto-filled by the orchestrator",
+                                ),
+                            ),
+                            rx.cond(
+                                item["manual_filled_count"] != "",
+                                rx.tooltip(
+                                    rx.badge(
+                                        "MANUAL ",
+                                        rx.text.span(item["manual_filled_count"]),
+                                        color_scheme="gray",
+                                        variant="soft",
+                                        size="1",
+                                    ),
+                                    content="Arguments bound manually in the topic YAML",
+                                ),
+                            ),
+                            rx.cond(
                                 is_linked,
                                 rx.icon("arrow-up-right", size=12, color="var(--green-a10)"),
                             ),

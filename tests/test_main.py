@@ -6266,6 +6266,55 @@ def test_visual_summary_optional_kpis_hidden_when_empty():
     assert "Tool Success Rate" not in labels
 
 
+def test_flow_items_attach_auto_manual_counts_to_step_rows():
+    """STEP_TRIGGERED / STEP_FINISHED rows pick up AUTO/MANUAL counts
+    from the correlated `ToolCall.arguments` +
+    `auto_filled_argument_names` so the Conversation Flow can render
+    binding badges directly on the row."""
+    from models import ToolCall
+    from renderer.sections import build_conversation_flow_items
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Action Started",
+                step_id="abc",
+                topic_name="MyTool",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_FINISHED,
+                summary="Action Finished",
+                step_id="def",
+                topic_name="OtherTool",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+        tool_calls=[
+            ToolCall(
+                step_id="abc",
+                task_dialog_id="MyTool",
+                arguments={"a": "auto-val", "b": "auto-val", "c": "manual-val"},
+                auto_filled_argument_names=["a", "b"],
+            ),
+            ToolCall(
+                step_id="def",
+                task_dialog_id="OtherTool",
+                arguments={"x": "manual-val"},
+                auto_filled_argument_names=[],
+            ),
+        ],
+    )
+    items = build_conversation_flow_items(timeline)
+    triggered = next(it for it in items if it["event_type"] == "StepTriggered")
+    finished = next(it for it in items if it["event_type"] == "StepFinished")
+    assert triggered["auto_filled_count"] == "2"
+    assert triggered["manual_filled_count"] == "1"
+    assert finished["auto_filled_count"] == ""
+    assert finished["manual_filled_count"] == "1"
+
+
 def test_flow_items_carry_raw_json_payload():
     """Each flow item exposes a pretty-printed `raw_json` of its source
     TimelineEvent — wired to the per-row copy button + Raw JSON

@@ -467,6 +467,10 @@ def build_conversation_flow_items(
         name_map = _build_component_name_map(profile)
     dialog_link = _build_dialog_link_resolver(profile)
 
+    # Per-step tool-call lookup so STEP_TRIGGERED / STEP_FINISHED flow
+    # rows can render AUTO/MANUAL binding counts.
+    tool_call_by_step: dict[str, object] = {tc.step_id: tc for tc in timeline.tool_calls if tc.step_id}
+
     # Extra detail keys required by rx.foreach (must be uniform across all dicts)
     _detail_defaults = {
         "has_recommendations": "",
@@ -495,6 +499,12 @@ def build_conversation_flow_items(
         # quickly grab the activity payload (helpful when filing bugs
         # against Microsoft).
         "raw_json": "",
+        # AUTO/MANUAL binding counts for STEP_TRIGGERED / STEP_FINISHED
+        # rows — sourced from the correlated `ToolCall.arguments` and
+        # `ToolCall.auto_filled_argument_names`. Empty string when the
+        # row isn't a step or has no matching tool call.
+        "auto_filled_count": "",
+        "manual_filled_count": "",
     }
 
     latest_user_idx: int | None = None
@@ -608,6 +618,26 @@ def build_conversation_flow_items(
                             resolved_name = name_map.get(topic.lower().strip(), topic)
                             trigger_phrase_str = _best_trigger_phrase(user_text, resolved_name, profile.components)
 
+            # AUTO/MANUAL binding counts — only meaningful for step rows
+            # that have a correlated tool call.
+            auto_count_str = ""
+            manual_count_str = ""
+            if (
+                ev.event_type in (EventType.STEP_TRIGGERED, EventType.STEP_FINISHED)
+                and ev.step_id
+                and ev.step_id in tool_call_by_step
+            ):
+                tc = tool_call_by_step[ev.step_id]
+                args = getattr(tc, "arguments", {}) or {}
+                auto_names = set(getattr(tc, "auto_filled_argument_names", []) or [])
+                if args:
+                    auto_count = sum(1 for k in args if k in auto_names)
+                    manual_count = len(args) - auto_count
+                    if auto_count > 0:
+                        auto_count_str = str(auto_count)
+                    if manual_count > 0:
+                        manual_count_str = str(manual_count)
+
             # Deep-link target for events that point at a concrete artifact:
             # - dialog-name-bearing events (step trigger/finish, topic
             #   trace/redirect, condition eval) resolve to topics or tools.
@@ -655,6 +685,8 @@ def build_conversation_flow_items(
                     "trigger_score_color": trigger_color,
                     "link_target_tab": link_tab,
                     "link_target_id": link_id,
+                    "auto_filled_count": auto_count_str,
+                    "manual_filled_count": manual_count_str,
                 }
             )
             items[-1]["raw_json"] = _flow_event_raw_json(ev)
