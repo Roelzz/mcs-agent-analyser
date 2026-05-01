@@ -2,15 +2,6 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-
-# Standard UUID v4 pattern — used as a last-resort fallback to pull the
-# conversation id out of a bot text reply (e.g. "Conversation ID:
-# ed082483-aa8e-47c7-a8fd-a7225d26c37b") when the export shape doesn't
-# carry it as a structured field.
-_UUID_IN_TEXT_RE = re.compile(
-    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
-)
-
 from models import (
     BotProfile,
     ConversationTimeline,
@@ -26,6 +17,15 @@ from models import (
     TimelineEvent,
     ToolCall,
     ToolCallObservation,
+)
+
+
+# Standard UUID v4 pattern — used as a last-resort fallback to pull the
+# conversation id out of a bot text reply (e.g. "Conversation ID:
+# ed082483-aa8e-47c7-a8fd-a7225d26c37b") when the export shape doesn't
+# carry it as a structured field.
+_UUID_IN_TEXT_RE = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
 
 

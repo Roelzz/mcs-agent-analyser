@@ -622,6 +622,21 @@ def _mcs_flow_group(group: dict) -> rx.Component:
     )
 
 
+def _flow_filter_chip(label: str) -> rx.Component:
+    """One toggle chip for the Conversation Flow type filter. Selected chips
+    have a green background; clicking toggles via
+    `State.toggle_mcs_flow_filter_chip(label)`."""
+    is_active = State.mcs_flow_filter_types.contains(label)
+    return rx.button(
+        label,
+        on_click=State.toggle_mcs_flow_filter_chip(label),
+        size="1",
+        variant=rx.cond(is_active, "solid", "soft"),
+        color_scheme=rx.cond(is_active, "green", "gray"),
+        cursor="pointer",
+    )
+
+
 def _mcs_conversation_flow_panel() -> rx.Component:
     return card(
         rx.hstack(
@@ -646,9 +661,66 @@ def _mcs_conversation_flow_panel() -> rx.Component:
             width="100%",
             margin_bottom="10px",
         ),
+        # Filter bar — text search across summary/text/thought/topic
+        # + clickable type chips. Match-count chip on the right.
+        rx.vstack(
+            rx.hstack(
+                rx.icon("search", size=14, color="var(--gray-a8)"),
+                rx.input(
+                    placeholder="Search messages, topics, thoughts…",
+                    value=State.mcs_flow_filter_text,
+                    on_change=State.set_mcs_flow_filter_text,
+                    size="2",
+                    width="100%",
+                ),
+                rx.cond(
+                    State.mcs_flow_filter_active,
+                    rx.button(
+                        rx.icon("x", size=12),
+                        rx.text("Clear", font_size="11px"),
+                        on_click=State.clear_mcs_flow_filters,
+                        size="1",
+                        variant="soft",
+                        color_scheme="gray",
+                        cursor="pointer",
+                    ),
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            rx.hstack(
+                _flow_filter_chip("Messages"),
+                _flow_filter_chip("Plans"),
+                _flow_filter_chip("Actions"),
+                _flow_filter_chip("Knowledge"),
+                _flow_filter_chip("Traces"),
+                _flow_filter_chip("Errors"),
+                rx.spacer(),
+                rx.cond(
+                    State.mcs_flow_filter_active,
+                    rx.text(
+                        State.mcs_conversation_flow_match_count.to(str)
+                        + " of "
+                        + State.mcs_conversation_flow_total_count.to(str)
+                        + " events",
+                        font_size="11px",
+                        color="var(--gray-a9)",
+                        font_family=_MONO,
+                    ),
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+                flex_wrap="wrap",
+            ),
+            spacing="2",
+            width="100%",
+            margin_bottom="10px",
+        ),
         rx.box(
             rx.vstack(
-                rx.foreach(State.mcs_conversation_flow_groups, _mcs_flow_group),
+                rx.foreach(State.mcs_conversation_flow_groups_filtered, _mcs_flow_group),
                 spacing="4",
                 width="100%",
                 align="stretch",

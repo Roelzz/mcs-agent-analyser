@@ -5792,6 +5792,18 @@ def test_group_flow_items_marks_cancelled_plan():
     assert groups[0]["status_tone"] == "bad"
 
 
+def test_group_flow_items_preserves_other_keys_per_group():
+    """Each group dict carries the standard keys uniformly (so rx.foreach
+    on the result has a stable shape)."""
+    from renderer.sections import group_flow_items
+
+    flat = [{"kind": "message", "event_type": "", "summary": 'User: "hi"'}]
+    groups = group_flow_items(flat)
+    assert groups
+    keys = set(groups[0].keys())
+    assert {"is_plan", "plan_identifier", "status", "status_tone", "header_summary", "first_timestamp", "items"} <= keys
+
+
 def test_group_flow_items_marks_running_plan_when_no_finish():
     from renderer.sections import group_flow_items
 
