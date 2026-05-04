@@ -301,6 +301,48 @@ class DynamicMixin(rx.State, mixin=True):
     def select_topic_in_explorer(self, schema_name: str):
         self.mcs_topic_explorer_selected = schema_name
 
+    @rx.event
+    def jump_to_component_in_explorer(self, schema_name: str):
+        """One-shot navigation handler for hyperlinks on the Conversation
+        tab pointing at a tool / topic / agent: switches to the Tools
+        tab, pre-selects the component in the inline Component Explorer,
+        and scrolls the explorer card into view.
+
+        Used by Variable Tracker tool_call cards, Performance Waterfall
+        rows, Phase Breakdown rows, Orchestrator Reasoning rows, and
+        Conversation Flow rows that resolve to a TaskDialog / AgentDialog /
+        DialogComponent target."""
+        self.mcs_analyse_tab = "tools"
+        if schema_name:
+            self.mcs_topic_explorer_selected = schema_name
+        return rx.call_script(
+            "setTimeout(function(){"
+            "  var el = document.getElementById('row-component-explorer');"
+            "  if (el) { el.scrollIntoView({block:'start', behavior:'smooth'}); }"
+            "}, 120);"
+        )
+
+    @rx.event
+    def jump_to_knowledge_topic(self, topic_name: str):
+        """One-shot navigation handler for hyperlinks pointing at a
+        topic-level knowledge / generative-answer artifact: switches to
+        the Knowledge tab and scrolls the matching generative-answer
+        card into view."""
+        self.mcs_analyse_tab = "knowledge"
+        if not topic_name:
+            return None
+        # Sanitize topic_name for DOM id: spaces / quotes / special chars
+        # become hyphens. The destination card uses the same sanitizer
+        # so the ids match.
+        safe = "".join(c if c.isalnum() else "-" for c in topic_name)
+        return rx.call_script(
+            "setTimeout(function(){"
+            f"  var el = document.getElementById('row-gen-{safe}');"
+            "  if (!el) { return; }"
+            "  el.scrollIntoView({block:'center', behavior:'smooth'});"
+            "}, 120);"
+        )
+
     @rx.var
     def mcs_topic_explorer_filtered(self) -> list[dict]:
         """Topics matching the search box (case-insensitive substring on

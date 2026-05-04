@@ -5575,21 +5575,22 @@ def test_build_timeline_classifies_int_role_dialog_json():
 # --- Conversation Flow → tab deep-link metadata ---
 
 
-def test_flow_topic_step_resolves_to_topics_tab():
-    """STEP_TRIGGERED on an AdaptiveDialog topic should carry a deep-link
-    target pointing at the Topics tab, keyed by schema_name."""
+def test_flow_topic_step_resolves_to_tools_tab():
+    """STEP_TRIGGERED on a DialogComponent topic should carry a deep-link
+    target pointing at the Tools tab (post-PR #18 consolidation), keyed
+    by schema_name (matches the Component Explorer picker)."""
     profile = _make_profile_with_triggers()
     timeline = _make_timeline_with_steps()
     items = build_conversation_flow_items(timeline, profile=profile)
     triggered = next(i for i in items if i.get("event_type") == "StepTriggered")
-    assert triggered["link_target_tab"] == "topics"
+    assert triggered["link_target_tab"] == "tools"
     assert triggered["link_target_id"] == "cr123_billing"  # schema_name
 
 
 def test_flow_tool_step_resolves_to_tools_tab():
-    """STEP_TRIGGERED on a TaskDialog tool should carry a deep-link target
-    pointing at the Tools tab, keyed by display_name (which is what
-    `mcs_tools_rows[].name` uses)."""
+    """STEP_TRIGGERED on a TaskDialog tool should carry a deep-link
+    target on the Tools tab keyed by schema_name (matches the
+    Component Explorer's `select_topic_in_explorer(schema_name)` event)."""
     profile = BotProfile(
         display_name="ToolBot",
         components=[
@@ -5621,7 +5622,7 @@ def test_flow_tool_step_resolves_to_tools_tab():
     items = build_conversation_flow_items(timeline, profile=profile)
     triggered = next(i for i in items if i.get("event_type") == "StepTriggered")
     assert triggered["link_target_tab"] == "tools"
-    assert triggered["link_target_id"] == "Equippy"
+    assert triggered["link_target_id"] == "rrs.tool.Equippy"
 
 
 def test_flow_knowledge_search_resolves_to_knowledge_tab():
@@ -5654,7 +5655,7 @@ def test_flow_generative_answer_resolves_to_knowledge_with_topic_id():
     items = build_conversation_flow_items(timeline)
     gen = next(i for i in items if i.get("event_type") == "GenerativeAnswer")
     assert gen["link_target_tab"] == "knowledge"
-    assert gen["link_target_id"] == "gen:CT 7500"
+    assert gen["link_target_id"] == "CT 7500"
 
 
 def test_flow_messages_have_no_link_target():
@@ -6646,3 +6647,137 @@ def test_render_conversation_flow_md_includes_auto_manual():
     md = render_conversation_flow_md(timeline)
     assert "AUTO=2" in md
     assert "MANUAL=1" in md
+
+
+# --- Conversation tab → deep-link target population ---
+
+
+def test_variable_tracker_tool_call_carries_component_link():
+    """Tool-call rows in the Variable Tracker resolve their tool's
+    schema_name into a deep-link target so the UI can hyperlink to the
+    Tools tab Component Explorer."""
+    from models import ToolCall
+
+    profile = BotProfile(
+        display_name="Bot",
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="My Tool",
+                schema_name="my.tool.schema",
+                dialog_kind="TaskDialog",
+                tool_type="ConnectorTool",
+            ),
+        ],
+    )
+    timeline = ConversationTimeline(
+        tool_calls=[
+            ToolCall(
+                step_id="s1",
+                task_dialog_id="my.tool.schema",
+                display_name="My Tool",
+                state="completed",
+            ),
+        ],
+    )
+    from renderer.dynamic_data import build_variable_tracker_rows
+
+    rows = build_variable_tracker_rows(timeline, profile=profile)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["card_kind"] == "tool_call"
+    assert row["link_target_kind"] == "component"
+    assert row["link_target_id"] == "my.tool.schema"
+
+
+def test_variable_tracker_generative_answer_carries_knowledge_link():
+    """Generative-answer rows link to the Knowledge tab via topic_name."""
+    from models import GenerativeAnswerTrace
+
+    timeline = ConversationTimeline(
+        generative_answer_traces=[
+            GenerativeAnswerTrace(
+                topic_name="Onboarding",
+                gpt_answer_state="Answered",
+                summary_text="hi",
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+        ],
+    )
+    from renderer.dynamic_data import build_variable_tracker_rows
+
+    rows = build_variable_tracker_rows(timeline, profile=None)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["card_kind"] == "generative_answer"
+    assert row["link_target_kind"] == "knowledge"
+    assert row["link_target_id"] == "Onboarding"
+
+
+def test_performance_waterfall_rows_carry_link_targets():
+    """Waterfall rows resolve their topic_name into Tools-tab links;
+    knowledge events surface a knowledge-tab link."""
+    from renderer.sections import build_performance_waterfall
+
+    profile = BotProfile(
+        display_name="Bot",
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Greeting",
+                schema_name="cr_greeting",
+            ),
+        ],
+    )
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "hi"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Action Started",
+                topic_name="Greeting",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.KNOWLEDGE_SEARCH,
+                summary="Knowledge search",
+                topic_name="MyKB",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+    )
+    rows = build_performance_waterfall(timeline, profile=profile)
+    by_label = {r["label"]: r for r in rows}
+    assert by_label["Action Started"]["link_target_kind"] == "component"
+    assert by_label["Action Started"]["link_target_id"] == "cr_greeting"
+    assert by_label["Knowledge search"]["link_target_kind"] == "knowledge"
+
+
+def test_dialog_link_resolver_uses_schema_name_for_tools():
+    """Post-PR #18: every DialogComponent (topic OR tool) deep-links to
+    the Tools tab keyed by schema_name (matches Component Explorer)."""
+    from renderer.sections import _build_dialog_link_resolver
+
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Tool A",
+                schema_name="tools.A",
+                dialog_kind="TaskDialog",
+                tool_type="MCPServer",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Topic B",
+                schema_name="topics.B",
+            ),
+        ],
+    )
+    resolve = _build_dialog_link_resolver(profile)
+    assert resolve("Tool A") == ("tools", "tools.A")
+    assert resolve("Topic B") == ("tools", "topics.B")
