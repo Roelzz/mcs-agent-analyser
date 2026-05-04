@@ -37,12 +37,14 @@ class DynamicMixin(rx.State, mixin=True):
     # Active sub-tab
     mcs_analyse_tab: str = "profile"
 
-    # Section markdown (one per sub-tab)
+    # Section markdown (one per sub-tab). `mcs_section_topics` and
+    # `mcs_section_model_comparison` were dropped: the Topics tab was
+    # consolidated into Tools (PR #18) and the Model Comparison tab was
+    # absorbed into Profile. `mcs_section_credits` stays — read by the
+    # Quality tab's Credits sub-section via `mcs_current_section_segments`.
     mcs_section_profile: str = ""
     mcs_section_knowledge: str = ""
     mcs_section_tools: str = ""
-    mcs_section_topics: str = ""
-    mcs_section_model_comparison: str = ""
     mcs_section_conversation: str = ""
     mcs_section_credits: str = ""
 
@@ -90,7 +92,6 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_tools_call_count: int = 0
     mcs_tools_stats_rows: list[dict] = []
     mcs_tools_flow_mermaid: str = ""
-    mcs_tools_inventory_rows: list[dict] = []
 
     # ── Knowledge tab ────────────────────────────────────────────────────────
     mcs_knowledge_kpis: list[dict] = []
@@ -216,11 +217,12 @@ class DynamicMixin(rx.State, mixin=True):
     @rx.var
     def mcs_current_section_segments(self) -> list[dict]:
         """Segments for the currently active sub-tab."""
+        # Topics tab + Model Comparison tab are gone (PR #18); their
+        # entries here would reference deleted state vars.
         section_map = {
             "profile": self.mcs_section_profile,
             "knowledge": self.mcs_section_knowledge,
             "tools": self.mcs_section_tools,
-            "topics": self.mcs_section_topics,
             "conversation": self.mcs_section_conversation,
             "credits": self.mcs_section_credits,
         }
