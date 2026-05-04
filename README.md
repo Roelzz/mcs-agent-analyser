@@ -11,15 +11,13 @@ Everything you need to build with confidence and debug without guessing. If you'
 
 ## Why Agent Analyser
 
-- **Full visibility into bot architecture** — see every topic, skill, entity, knowledge source, and how they connect, in one report
+- **Full visibility into bot architecture** — see every topic, variable, knowledge source, MCP server, connector, and connected agent, and how they wire together, in one report
+- **Conversation debugging** — chat-style conversation flow with filter chips, error banner, deep-link hyperlinks, plan-tree grouping, and per-event raw-JSON viewer
+- **Performance insights** — per-turn efficiency metrics, latency bottleneck identification, between-activity gap waterfall, knowledge source effectiveness, and multi-agent delegation tracing
 - **Conversation quality analysis** — response groundedness scoring, hallucination risk detection, instruction compliance checking, and dead code detection
-- **Performance insights** — per-turn efficiency metrics, latency bottleneck identification, knowledge source effectiveness, and multi-agent delegation tracing
-- **Best-practice rules out of the box** — 18 configurable rules catch misconfigurations before they hit production, with custom YAML rules support
-- **Batch conversation analytics** — aggregate transcripts to surface success rates, topic usage, error patterns, and credit estimates
-- **Bot comparison** — diff two bot exports side by side to see what changed in components, instructions, settings, and connections
-- **Catch issues with AI-powered lint** — instruction audit checks guardrails, topic structure, and component health
-- **Your data stays yours** — runs locally or self-hosted in your own tenant. No data is sent externally (except to OpenAI/Anthropic if you opt into the Lint feature)
+- **Your data stays yours** — runs locally or self-hosted in your own tenant. No data is sent externally (except to OpenAI/Anthropic if you opt into the LLM Audit Runner)
 - **Works with exports and live Dataverse** — upload a `.zip` export, or connect directly to your environment and auto-analyse on login
+- **Catch issues with AI-powered linting of agent instructions** — multi-mode audit runner (Static Config + opt-in Conversation Summary / Sentiment / PII / Answer Accuracy / Topic Routing / Custom prompts) powered by OpenAI or Anthropic
 
 ## What You Can Do
 
@@ -232,70 +230,63 @@ When uploading a transcript without a bot export, a reduced tab bar shows: Conve
 
 ### Inside the tabs
 
-#### Profile
-Agent-level lens. AI configuration (model hint, knowledge sources,
-web browsing, code interpreter), full system instructions
-(collapsible), security chips (auth mode, access control, content
-moderation), bot metadata, environment variables, **Connections**
-(connector definitions + references + instances merged), model
-configuration + recommendation, **Trigger Overlaps** (topics with
->50% overlap in trigger phrases — flags ambiguous routing), Quick
-Wins, custom rule findings.
+#### Profile — agent-level lens
 
-#### Tools
-Component Explorer (inline two-pane: searchable picker on the left,
-step-by-step settings tree with KB-sourced explanations on the
-right) covering every topic + tool (User / System / Automation
-topics, MCP servers, connectors, flows, child / connected / A2A
-agents). Plus: Category Summary broken out by tool_type, anomaly
-chips (orphans / dead ends / cycles), integration map, topic
-connection graph, external calls, runtime tool-call statistics,
-multi-agent delegation analysis.
+- **AI configuration** — model hint, knowledge sources, web browsing, code interpreter
+- **System instructions** — full instructions in a collapsible block
+- **Security chips** — auth mode, access control, content moderation
+- **Bot metadata + environment variables**
+- **Connections** — connector definitions + references + instances merged
+- **Model configuration + recommendation**
+- **Trigger Overlaps** — topics with >50% overlap in trigger phrases, flags ambiguous routing
+- **Quick Wins + custom rule findings**
 
-#### Knowledge
-Configured knowledge sources merged with their runtime
-effectiveness (hit rate, contribution, errors, avg results),
-file attachments, knowledge search results per turn, topic-level
-generative answer traces (rewrite chain, token usage, ranked
-results, citations), and the **Citation Verification panel** —
-flat audit table of every (trace, citation) pair with answer
-state, completion state, moderation flags, and provenance.
+#### Tools — what it can do, did it work
 
-#### Routing
-Orchestrator decision timeline grouped by user-message turn,
-**Plan Evolution** (per-turn diffs + plan-by-plan timeline merged
-into one card), Topic Lifecycles, Trigger Phrase Analysis, Topic
-Coverage (which configured topics never fired).
+- **Component Explorer** — inline two-pane (searchable picker + step-by-step settings tree with KB-sourced explanations) over every topic + tool: User / System / Automation topics, MCP servers, connectors, flows, child / connected / A2A agents
+- **Category summary** — broken out by `tool_type`
+- **Anomaly chips** — orphans, dead ends, cycles
+- **Integration map + topic connection graph + external calls**
+- **Runtime tool-call statistics**
+- **Multi-agent delegation analysis**
 
-#### Conversation
-Visual summary KPIs (incl. Slowest Step, Plans Completed, Tool
-Success Rate), error banner with click-to-jump deep links into
-the flow, conversation metadata, sequence diagram, Gantt chart,
-phase breakdown, **Performance Waterfall** (between-activity
-gap-time view — distinct from the Gantt's phase totals),
-**Variable Tracker** (orchestrator tool calls with AUTO/MANUAL
-binding badges + Topic/Global variable assignments + topic-level
-generative answer harvesting), **Conversation Flow** (chat-style
-view with filter chips, plan-tree grouping, AUTO/MANUAL
-annotations, copy-JSON button, raw activity-JSON viewer per row),
-orchestrator reasoning, turn efficiency, latency bottlenecks.
+#### Knowledge — is the knowledge useful
 
-Every visualization on this tab that names a runtime entity is
-**clickable** — Variable Tracker cards / Waterfall rows / Phase
-Breakdown rows / Reasoning rows / Conversation Flow rows all
-deep-link to the canonical destination (Tools tab Component
-Explorer for tools / topics / agents; Knowledge tab for
-knowledge calls). An **Expand all / Collapse all** toolbar at
-the top toggles every accordion under the tab in one click.
+- **Source effectiveness** — configured sources merged with hit rate, contribution, errors, avg results
+- **File attachments**
+- **Search results per turn**
+- **Generative answer traces** — rewrite chain, token usage, ranked results, citations (per topic)
+- **Citation Verification panel** — flat audit of every (trace, citation) pair with answer state, completion state, moderation flags, provenance
 
-#### Quality
-**LLM Audit Runner** (default Static Config audit + opt-in
-Conversation Summary / User Sentiment / PII Detection / Answer
-Accuracy / Topic Routing Quality / Custom prompt — all run in
-parallel and stitched into one audit report). Also: credits
-estimate with per-step breakdown + Mermaid flow, quick wins,
-response quality scoring, dead code detection, instruction
-alignment.
+#### Routing — how orchestration worked
+
+- **Decision timeline** — grouped by user-message turn
+- **Plan Evolution** — per-turn diffs + plan-by-plan timeline in one card
+- **Topic Lifecycles**
+- **Trigger Phrase Analysis**
+- **Topic Coverage** — which configured topics never fired
+
+#### Conversation — what happened
+
+- **Visual summary KPIs** — Slowest Step, Plans Completed, Tool Success Rate
+- **Error banner** — click-to-jump deep links into the flow
+- **Conversation metadata**
+- **Sequence diagram + Gantt chart + phase breakdown**
+- **Performance Waterfall** — between-activity gap-time view (distinct from Gantt's phase totals)
+- **Variable Tracker** — orchestrator tool calls with AUTO/MANUAL binding badges, Topic/Global variable assignments, topic-level generative answer harvesting
+- **Conversation Flow** — chat-style view with filter chips, plan-tree grouping, AUTO/MANUAL annotations, copy-JSON button, raw activity-JSON viewer per row
+- **Orchestrator reasoning + turn efficiency + latency bottlenecks**
+
+> **Deep-linking:** every entity-naming visualization on this tab is clickable. Variable Tracker cards, Waterfall rows, Phase Breakdown rows, Reasoning rows, and Conversation Flow rows jump to the canonical destination (Tools tab Component Explorer for tools / topics / agents; Knowledge tab for knowledge calls). An **Expand all / Collapse all** toolbar at the top toggles every accordion in one click.
+
+#### Quality — how can I improve
+
+- **LLM Audit Runner** — default Static Config + opt-in Conversation Summary / User Sentiment / PII Detection / Answer Accuracy / Topic Routing Quality / Custom prompt; runs in parallel, stitched into one audit report
+- **Credits estimate** — per-step breakdown + Mermaid flow
+- **Quick wins**
+- **Response quality scoring**
+- **Dead code detection**
+- **Instruction alignment**
 
 ## Screenshots
 
