@@ -1272,10 +1272,14 @@ class UploadMixin(rx.State, mixin=True):
         # for the row schema.
         self.mcs_knowledge_citation_panel = build_citation_panel_rows(traces)  # type: ignore[attr-defined]
 
-    # ── Topics tab data extraction ───────────────────────────────────────────
+    # ── Tools tab data extraction (formerly Topics tab) ──────────────────────
 
     def _populate_topics_data(self, profile, timeline) -> None:
-        """Extract structured data for the Topics tab."""
+        """Extract structured data for the Tools tab — Component Explorer
+        topics list, KPIs, category summary, anomalies, topic graph,
+        and the per-tool-type breakdown. Function name kept for backward
+        compatibility; the Topics tab itself was consolidated into
+        Tools in PR #18."""
         from models import EventType
         from renderer.topic_explainer import load_kb, settings_rows_for_dialog_component
 
