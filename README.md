@@ -207,6 +207,72 @@ The dynamic analysis page presents bot and conversation data across 6 purpose-dr
 
 When uploading a transcript without a bot export, a reduced tab bar shows: Conversation, Tools, Routing, Quality.
 
+### Inside the tabs
+
+#### Profile
+Agent-level lens. AI configuration (model hint, knowledge sources,
+web browsing, code interpreter), full system instructions
+(collapsible), security chips (auth mode, access control, content
+moderation), bot metadata, environment variables, **Connections**
+(connector definitions + references + instances merged), model
+configuration + recommendation, **Trigger Overlaps** (topics with
+>50% overlap in trigger phrases — flags ambiguous routing), Quick
+Wins, custom rule findings.
+
+#### Tools
+Component Explorer (inline two-pane: searchable picker on the left,
+step-by-step settings tree with KB-sourced explanations on the
+right) covering every topic + tool (User / System / Automation
+topics, MCP servers, connectors, flows, child / connected / A2A
+agents). Plus: Category Summary broken out by tool_type, anomaly
+chips (orphans / dead ends / cycles), integration map, topic
+connection graph, external calls, runtime tool-call statistics,
+multi-agent delegation analysis.
+
+#### Knowledge
+Configured knowledge sources merged with their runtime
+effectiveness (hit rate, contribution, errors, avg results),
+file attachments, knowledge search results per turn, topic-level
+generative answer traces (rewrite chain, token usage, ranked
+results, citations), and the **Citation Verification panel** —
+flat audit table of every (trace, citation) pair with answer
+state, completion state, moderation flags, and provenance.
+
+#### Routing
+Orchestrator decision timeline grouped by user-message turn,
+**Plan Evolution** (per-turn diffs + plan-by-plan timeline merged
+into one card), Topic Lifecycles, Trigger Phrase Analysis, Topic
+Coverage (which configured topics never fired).
+
+#### Conversation
+Visual summary KPIs (incl. Slowest Step, Plans Completed, Tool
+Success Rate), error banner with click-to-jump deep links into
+the flow, conversation metadata, sequence diagram, Gantt chart,
+phase breakdown, **Performance Waterfall** (between-activity
+gap-time view — distinct from the Gantt's phase totals),
+**Variable Tracker** (orchestrator tool calls with AUTO/MANUAL
+binding badges + Topic/Global variable assignments + topic-level
+generative answer harvesting), **Conversation Flow** (chat-style
+view with filter chips, plan-tree grouping, AUTO/MANUAL
+annotations, copy-JSON button, raw activity-JSON viewer per row),
+orchestrator reasoning, turn efficiency, latency bottlenecks.
+
+Every visualization on this tab that names a runtime entity is
+**clickable** — Variable Tracker cards / Waterfall rows / Phase
+Breakdown rows / Reasoning rows / Conversation Flow rows all
+deep-link to the canonical destination (Tools tab Component
+Explorer for tools / topics / agents; Knowledge tab for
+knowledge calls).
+
+#### Quality
+**LLM Audit Runner** (default Static Config audit + opt-in
+Conversation Summary / User Sentiment / PII Detection / Answer
+Accuracy / Topic Routing Quality / Custom prompt — all run in
+parallel and stitched into one audit report). Also: credits
+estimate with per-step breakdown + Mermaid flow, quick wins,
+response quality scoring, dead code detection, instruction
+alignment.
+
 ## Screenshots
 
 ### Dynamic Analysis — Profile Tab
