@@ -192,6 +192,24 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 - **Analysis reports** — Quick Wins section with emoji severity indicators (🔴 fail, 🟡 warning, 🔵 info) and styled badges
 - **Rules page** (`/rules`) — view, edit, and manage rules in the web UI
 
+## LLM Audit Runner
+
+The Quality tab carries an audit runner that puts **`OPENAI_API_KEY`** or **`ANTHROPIC_API_KEY`** to work over your bot config and conversation transcript. Every audit mode is opt-in except the legacy default; clicking **Instruction Lint** with no other interaction reproduces the original behaviour.
+
+| Mode | Default | Inputs | What it answers |
+| --- | --- | --- | --- |
+| **Static Config** | ✅ on | bot profile | Are the system instructions clear? Guardrails, knowledge config, topic architecture, component health. |
+| **Conversation Summary** | ⬜ opt-in | transcript | 3-bullet recap + a single actionable insight. |
+| **User Sentiment** | ⬜ opt-in | transcript | Per-turn sentiment, escalation signals, final-state risk score. |
+| **PII Detection** | ⬜ opt-in | transcript | Categorised findings table + per-finding source + risk + recommendations. |
+| **Answer Accuracy** | ⬜ opt-in | transcript | Per user-question verdict (Answered / Partial / Avoided / Wrong) with evidence. |
+| **Topic Routing Quality** | ⬜ opt-in | profile + transcript | Did the orchestrator pick the right topic? Lists missed-better-fit cases. |
+| **Custom prompt** | ⬜ opt-in | available | Free-form prompt — useful one-off audits. |
+
+Modes shipped in **`data/default_lint_modes.yaml`** — extend or override by editing the file. Selected modes run in **parallel**; per-audit failures are isolated (one mode crashing doesn't take out the others). Transcript-only modes auto-disable when no `dialog.json` is uploaded.
+
+The audit results are appended to the markdown report (so `.md` / `.html` / PDF downloads include them) and downloadable on their own as a separate audit bundle.
+
 ## Dynamic Analysis Tabs
 
 The dynamic analysis page presents bot and conversation data across 6 purpose-driven tabs:
@@ -348,7 +366,7 @@ Each generated report contains:
 13. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log, errors
 14. **Routing Analysis** — orchestrator decision timeline with routing scores, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution with per-step confidence and diff detection, trigger phrase similarity analysis, condition evaluations
 
-The dynamic analysis view adds interactive versions of these sections across 7 tabs, plus conversation analysis features: turn efficiency, response quality scoring, dead code detection, knowledge source effectiveness, multi-agent delegation tracing, latency bottleneck analysis, and instruction-to-behavior alignment checking.
+The dynamic analysis view adds interactive versions of these sections across 6 tabs, plus conversation analysis features: turn efficiency, response quality scoring, dead code detection, knowledge source effectiveness, multi-agent delegation tracing, latency bottleneck analysis, and instruction-to-behavior alignment checking.
 
 Transcript reports contain:
 
@@ -371,6 +389,19 @@ When a conversation includes orchestrator-driven tool invocations (MCP servers, 
 - **Configured vs Called** — cross-reference tools defined in `botContent.yml` against tools actually invoked in `dialog.json`
 
 Tool call data is captured from `DynamicPlanStepTriggered`, `DynamicPlanStepBindUpdate`, and `DynamicPlanStepFinished` events in the conversation trace. Works with both full bot exports (ZIP) and transcript-only uploads.
+
+## Exports
+
+Every dynamic-page surface is reflected in the exports — what you see on screen is what lands in the file you download.
+
+| Format | Trigger | Content |
+| --- | --- | --- |
+| **Markdown (`.md`)** | Download → Markdown | Canonical text export. Drives every other format. |
+| **HTML (`.html`)** | Download → HTML | Self-contained HTML built from the markdown via `build_standalone_html`. Embedded Mermaid diagrams. |
+| **PDF (Print)** | Download → Print to PDF | Browser print of the HTML view. |
+| **Audit bundle (`.md`)** | Download Audit (Quality tab) | Audit-runner output on its own — every selected mode's result, model attribution, error per mode. |
+
+The markdown report includes: TL;DR, Quick Wins, AI configuration, security, bot metadata, sequence + Gantt diagrams, conversation flow with AUTO/MANUAL annotations, **Performance Waterfall**, **Variable Tracker**, orchestrator reasoning, decision timeline, plan evolution, topic lifecycles, topic + tool inventory (split by `tool_type`), **Component Settings Explained** (per-component action tree), integration map, model comparison, knowledge inventory + coverage + source details + search results, **Citation Verification** table, trigger phrase analysis, MCS credit estimate.
 
 ## Dataverse Connection
 
