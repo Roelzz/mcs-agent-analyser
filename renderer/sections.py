@@ -13,8 +13,7 @@ from models import (
     TimelineEvent,
 )
 
-from model_comparison import build_comparison_markdown
-from parser import detect_trigger_overlaps, match_query_to_triggers
+from parser import match_query_to_triggers
 
 # ---------------------------------------------------------------------------
 # Trigger score lookup (shared by multiple builders)
@@ -220,10 +219,6 @@ from .profile import (  # noqa: E402
     render_quick_wins,
     render_security_summary,
     render_tool_inventory,
-    render_topic_details,
-    render_topic_graph,
-    render_topic_inventory,
-    render_trigger_overlaps,
 )
 from ._helpers import _compute_idle_gaps, _format_duration, _is_genuine_idle, _parse_timestamp_to_epoch_ms  # noqa: E402
 from .report import render_credit_estimate  # noqa: E402
@@ -255,8 +250,6 @@ def render_report_sections(
     quick_wins = render_quick_wins(profile)
     if quick_wins:
         profile_parts.append(quick_wins)
-    overlaps = detect_trigger_overlaps(profile.components)
-    trigger_section = render_trigger_overlaps(overlaps)
 
     # Knowledge section
     knowledge_parts: list[str] = []
@@ -287,20 +280,6 @@ def render_report_sections(
         if tool_analysis:
             tools_parts.append(tool_analysis)
 
-    # Topics section (includes graph + trigger overlaps)
-    topics_parts = [render_topic_inventory(profile)]
-    if trigger_section:
-        topics_parts.append(trigger_section)
-    topic_details = render_topic_details(profile, timeline)
-    if topic_details:
-        topics_parts.append(topic_details)
-    topic_graph = render_topic_graph(profile)
-    if topic_graph:
-        topics_parts.append(topic_graph)
-
-    # Model comparison
-    model_parts = [build_comparison_markdown(profile)]
-
     # Conversation section
     conv_parts = [render_timeline(timeline)]
     reasoning = render_orchestrator_reasoning(timeline)
@@ -312,12 +291,15 @@ def render_report_sections(
     credit_md = render_credit_estimate(credit_estimate, timeline)
     credit_parts = [credit_md] if credit_md else []
 
+    # Note: the `topics` and `model_comparison` keys this function used
+    # to return were dropped after PR #18 consolidation — no UI tab
+    # consumed them. The underlying renderers (`render_topic_inventory`,
+    # `render_topic_graph`, `build_comparison_markdown`) are still
+    # called by the markdown report path in `renderer/report.py:render_report`.
     return {
         "profile": "\n".join(profile_parts),
         "knowledge": "\n".join(knowledge_parts),
         "tools": "\n".join(tools_parts),
-        "topics": "\n".join(topics_parts),
-        "model_comparison": "\n".join(model_parts),
         "conversation": "\n".join(conv_parts),
         "credits": "\n".join(credit_parts),
     }, credit_estimate
