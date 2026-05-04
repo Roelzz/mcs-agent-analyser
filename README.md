@@ -40,7 +40,9 @@ Everything you need to build with confidence and debug without guessing. If you'
 | **Batch analytics** | Aggregate multiple Dataverse transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
 | **Custom rules** | 18 default best-practice rules + user-defined YAML rules, evaluated during analysis |
 | **Tool call analysis** | Runtime tool call tracing — per-tool statistics, async chain detection, orchestrator reasoning, Mermaid flow diagrams. Supports MCP servers, connectors, child/connected agents, A2A, flows, CUA |
-| **Instruction lint** | AI-powered audit of bot instructions and architecture (supports OpenAI and Anthropic models) |
+| **Component Explorer** | Inline searchable picker over every topic and tool (User / System / Automation topics, MCP servers, connectors, flows, child / connected / A2A agents) with KB-sourced explanations per setting |
+| **LLM Audit Runner** | Multi-mode audit (default + opt-in: conversation summary / sentiment / PII / answer accuracy / topic routing / custom prompts) — runs in parallel via OpenAI or Anthropic |
+| **Exports** | Markdown / HTML / Print → PDF / Audit-bundle downloads — every dynamic-page surface (Variable Tracker, Performance Waterfall, Citation Verification, etc.) is reflected in the exports |
 | **Dark / Light mode** | Respects your OS preference, green accent theme throughout |
 | **Analysis counter** | Tracks how many analyses you've run, with cat-themed gamification milestones |
 
@@ -83,7 +85,7 @@ uv run reflex run
 
 Open http://localhost:3000, sign in with **`inspector`** / **`underthehood`**, and upload a `.zip` bot export or connect to Dataverse.
 
-> **Privacy note:** Deploy this locally or self-host in your own Azure tenant. Bot exports and Dataverse data never leave your machine. External API calls are made to OpenAI or Anthropic when you use the Instruction Lint or Model Comparison features.
+> **Privacy note:** Deploy this locally or self-host in your own Azure tenant. Bot exports and Dataverse data never leave your machine. External API calls are only made when you opt into the LLM Audit Runner (uses OpenAI or Anthropic).
 
 ### CLI
 
@@ -192,17 +194,16 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 
 ## Dynamic Analysis Tabs
 
-The dynamic analysis page presents bot and conversation data across 7 purpose-driven tabs:
+The dynamic analysis page presents bot and conversation data across 6 purpose-driven tabs:
 
 | Tab | Icon | What it answers |
 | --- | --- | --- |
 | **Profile** | `user-round` | What is this bot? Architecture, AI config, model, security, metadata, custom findings |
-| **Topics** | `list` | What topics exist? Inventory, trigger overlaps, anomalies, topic graph |
-| **Tools** | `wrench` | Did the tools work? Inventory, runtime stats, async chains, orchestrator reasoning, agent delegation |
-| **Knowledge** | `database` | Is the knowledge useful? Sources, search results, source effectiveness |
+| **Tools** | `wrench` | What can it do, and did it work? Component Explorer (topics + tools + agents), inventory, runtime stats, agent delegation, topic graph |
+| **Knowledge** | `database` | Is the knowledge useful? Sources, search results, source effectiveness, citation verification |
 | **Routing** | `route` | How did orchestration work? Decision timeline, plan evolution diffs, topic lifecycles, trigger analysis, topic coverage |
-| **Conversation** | `message-square` | What happened? Visual dashboard, chat replay, sequence/Gantt diagrams, turn efficiency, latency bottlenecks |
-| **Quality** | `shield-check` | How can I improve? Credits estimate, quick wins, response quality, dead code, instruction alignment |
+| **Conversation** | `message-square` | What happened? Visual dashboard, chat replay, sequence/Gantt diagrams, performance waterfall, variable tracker, turn efficiency, latency bottlenecks |
+| **Quality** | `shield-check` | How can I improve? LLM Audit Runner, credits estimate, quick wins, response quality, dead code, instruction alignment |
 
 When uploading a transcript without a bot export, a reduced tab bar shows: Conversation, Tools, Routing, Quality.
 
@@ -532,7 +533,7 @@ web/
     _lint.py             Instruction lint state
     _report.py           Report generation state
     _rules.py            Custom rules state
-    _dynamic.py          Dynamic analysis state (7 tabs: profile, topics, tools, knowledge, routing, conversation, quality)
+    _dynamic.py          Dynamic analysis state (6 tabs: profile, tools, knowledge, routing, conversation, quality)
     _upload.py           File upload state + conversation analysis population
 
   components/            UI components
@@ -540,7 +541,7 @@ web/
     dataverse.py         Dataverse import form
     report.py            Report viewer
     rules.py             Rules editor
-    dynamic_analysis.py  Dynamic analysis panels (profile, topics, tools, knowledge, routing, conversation, quality)
+    dynamic_analysis.py  Dynamic analysis panels (profile, tools, knowledge, routing, conversation, quality)
     upload.py            Upload form
 
 data/
