@@ -82,6 +82,15 @@ from renderer import render_instruction_drift
 
 BASE_DIR = Path(__file__).parent.parent
 
+# Many tests in this module load real bot exports from BASE_DIR/botContent*/
+# and BASE_DIR/Transcripts/ — both gitignored (client-specific data, not in repo).
+# Skip the whole module when the fixtures aren't checked out (CI / fresh clones).
+if not (BASE_DIR / "botContent" / "botContent.yml").exists():
+    pytest.skip(
+        "Bot export fixtures not present (gitignored) — skipping integration tests",
+        allow_module_level=True,
+    )
+
 
 # --- YAML parsing tests ---
 
