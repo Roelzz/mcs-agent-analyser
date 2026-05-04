@@ -6781,3 +6781,54 @@ def test_dialog_link_resolver_uses_schema_name_for_tools():
     resolve = _build_dialog_link_resolver(profile)
     assert resolve("Tool A") == ("tools", "tools.A")
     assert resolve("Topic B") == ("tools", "topics.B")
+
+
+def test_dialog_link_resolver_no_suffix_collisions():
+    """Two DialogComponents sharing a schema *suffix* (e.g.
+    `org.foo.Topic` and `org.bar.Topic` both ending in `Topic`) used to
+    silently mis-resolve under the old suffix-tier lookup. The fix
+    drops the suffix tier; partial-name lookups now fail cleanly
+    instead of routing to whichever component was inserted first."""
+    from renderer.sections import _build_dialog_link_resolver
+
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Foo Topic",
+                schema_name="org.foo.Topic",
+            ),
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Bar Topic",
+                schema_name="org.bar.Topic",
+            ),
+        ],
+    )
+    resolve = _build_dialog_link_resolver(profile)
+    # Full names + display_names still resolve correctly.
+    assert resolve("org.foo.Topic") == ("tools", "org.foo.Topic")
+    assert resolve("Bar Topic") == ("tools", "org.bar.Topic")
+    # Bare suffix used to mis-resolve to whichever was inserted first;
+    # now returns a clean empty link so the UI shows no hyperlink.
+    assert resolve("Topic") == ("", "")
+
+
+def test_dialog_link_resolver_skips_components_without_schema():
+    """A DialogComponent with no `schema_name` is unaddressable in the
+    Component Explorer (the picker is keyed by schema_name). Return
+    `("", "")` rather than an empty target_id that would switch the
+    tab without selecting anything."""
+    from renderer.sections import _build_dialog_link_resolver
+
+    profile = BotProfile(
+        components=[
+            ComponentSummary(
+                kind="DialogComponent",
+                display_name="Schema-less",
+                schema_name="",
+            ),
+        ],
+    )
+    resolve = _build_dialog_link_resolver(profile)
+    assert resolve("Schema-less") == ("", "")

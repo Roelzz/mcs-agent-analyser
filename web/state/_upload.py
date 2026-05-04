@@ -355,8 +355,6 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_section_profile = sections["profile"]  # type: ignore[attr-defined]
             self.mcs_section_knowledge = sections["knowledge"]  # type: ignore[attr-defined]
             self.mcs_section_tools = sections["tools"]  # type: ignore[attr-defined]
-            self.mcs_section_topics = sections["topics"]  # type: ignore[attr-defined]
-            self.mcs_section_model_comparison = sections["model_comparison"]  # type: ignore[attr-defined]
             self.mcs_section_conversation = sections["conversation"]  # type: ignore[attr-defined]
             self.mcs_section_credits = sections["credits"]  # type: ignore[attr-defined]
         else:
@@ -364,8 +362,6 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_section_profile = ""  # type: ignore[attr-defined]
             self.mcs_section_knowledge = ""  # type: ignore[attr-defined]
             self.mcs_section_tools = ""  # type: ignore[attr-defined]
-            self.mcs_section_topics = ""  # type: ignore[attr-defined]
-            self.mcs_section_model_comparison = ""  # type: ignore[attr-defined]
             self.mcs_section_conversation = ""  # type: ignore[attr-defined]
             self.mcs_section_credits = ""  # type: ignore[attr-defined]
 
@@ -900,14 +896,12 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_tools_call_count = len(timeline.tool_calls)  # type: ignore[attr-defined]
             self.mcs_tools_stats_rows = tool_data["stats_rows"]  # type: ignore[attr-defined]
             self.mcs_tools_flow_mermaid = tool_data["flow_mermaid"]  # type: ignore[attr-defined]
-            self.mcs_tools_inventory_rows = tool_data["inventory_rows"]  # type: ignore[attr-defined]
             # Extend KPIs with runtime data
             self.mcs_tools_kpis.extend(tool_data["kpis"])  # type: ignore[attr-defined]
         else:
             self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
             self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
             self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]
-            self.mcs_tools_inventory_rows = []  # type: ignore[attr-defined]
 
     # ── Knowledge tab data extraction ────────────────────────────────────────
 
@@ -1278,10 +1272,14 @@ class UploadMixin(rx.State, mixin=True):
         # for the row schema.
         self.mcs_knowledge_citation_panel = build_citation_panel_rows(traces)  # type: ignore[attr-defined]
 
-    # ── Topics tab data extraction ───────────────────────────────────────────
+    # ── Tools tab data extraction (formerly Topics tab) ──────────────────────
 
     def _populate_topics_data(self, profile, timeline) -> None:
-        """Extract structured data for the Topics tab."""
+        """Extract structured data for the Tools tab — Component Explorer
+        topics list, KPIs, category summary, anomalies, topic graph,
+        and the per-tool-type breakdown. Function name kept for backward
+        compatibility; the Topics tab itself was consolidated into
+        Tools in PR #18."""
         from models import EventType
         from renderer.topic_explainer import load_kb, settings_rows_for_dialog_component
 
@@ -2138,7 +2136,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
         self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
         self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]
-        self.mcs_tools_inventory_rows = []  # type: ignore[attr-defined]
         self.mcs_knowledge_kpis = []  # type: ignore[attr-defined]
         self.mcs_knowledge_sources = []  # type: ignore[attr-defined]
         self.mcs_knowledge_files = []  # type: ignore[attr-defined]
@@ -2221,8 +2218,6 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_section_profile = ""  # type: ignore[attr-defined]
         self.mcs_section_knowledge = ""  # type: ignore[attr-defined]
         self.mcs_section_tools = ""  # type: ignore[attr-defined]
-        self.mcs_section_topics = ""  # type: ignore[attr-defined]
-        self.mcs_section_model_comparison = ""  # type: ignore[attr-defined]
         self.mcs_section_conversation = ""  # type: ignore[attr-defined]
         self.mcs_section_credits = ""  # type: ignore[attr-defined]
         self.mcs_conversation_flow = []  # type: ignore[attr-defined]
