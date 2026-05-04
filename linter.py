@@ -275,11 +275,15 @@ async def _run_one_audit(
     try:
         if provider == "anthropic":
             if not anthropic_api_key:
-                raise ValueError(f"Audit '{mode.id}' resolved to Anthropic model '{model_id}' but ANTHROPIC_API_KEY is not set.")
+                raise ValueError(
+                    f"Audit '{mode.id}' resolved to Anthropic model '{model_id}' but ANTHROPIC_API_KEY is not set."
+                )
             markdown = await _audit_anthropic(anthropic_api_key, model_id, mode.system_prompt, user_content)
         else:
             if not openai_api_key:
-                raise ValueError(f"Audit '{mode.id}' resolved to OpenAI model '{model_id}' but OPENAI_API_KEY is not set.")
+                raise ValueError(
+                    f"Audit '{mode.id}' resolved to OpenAI model '{model_id}' but OPENAI_API_KEY is not set."
+                )
             markdown = await _audit_openai(openai_api_key, model_id, mode.system_prompt, user_content)
     except Exception as e:
         return AuditResult(mode_id=mode.id, mode_name=mode.name, error=str(e), model_used=model_id)

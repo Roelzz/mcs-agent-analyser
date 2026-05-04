@@ -455,5 +455,3 @@ class BatchAnalyticsSummary(BaseModel):
     failure_modes: list[FailureMode] = Field(default_factory=list)
     total_credits_estimated: float = 0.0
     avg_credits_per_conversation: float = 0.0
-
-

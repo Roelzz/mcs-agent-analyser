@@ -43,9 +43,7 @@ def detect_async_chains(tool_calls: list[ToolCall]) -> list[ToolCallChain]:
         # Find argument keys whose values are constant across all calls
         if calls[0].arguments:
             shared_keys = [
-                k
-                for k in calls[0].arguments
-                if all(c.arguments.get(k) == calls[0].arguments[k] for c in calls[1:])
+                k for k in calls[0].arguments if all(c.arguments.get(k) == calls[0].arguments[k] for c in calls[1:])
             ]
         else:
             shared_keys = []
@@ -114,9 +112,7 @@ def compute_tool_statistics(tool_calls: list[ToolCall]) -> list[ToolStatistics]:
     return stats
 
 
-def build_tool_inventory(
-    profile: BotProfile, tool_calls: list[ToolCall]
-) -> list[dict]:
+def build_tool_inventory(profile: BotProfile, tool_calls: list[ToolCall]) -> list[dict]:
     """Cross-reference configured tools (YAML) vs called tools (dialog.json)."""
     # Configured tools from profile
     configured: dict[str, dict] = {}
@@ -177,9 +173,7 @@ def build_tool_inventory(
 # ---------------------------------------------------------------------------
 
 
-def render_tool_call_flow(
-    tool_calls: list[ToolCall], chains: list[ToolCallChain]
-) -> str:
+def render_tool_call_flow(tool_calls: list[ToolCall], chains: list[ToolCallChain]) -> str:
     """Generate Mermaid sequence diagram for tool invocations."""
     if not tool_calls:
         return ""
@@ -234,9 +228,7 @@ def render_tool_call_flow(
     return "\n".join(lines)
 
 
-def render_tool_statistics_section(
-    stats: list[ToolStatistics], total_elapsed_ms: float
-) -> str:
+def render_tool_statistics_section(stats: list[ToolStatistics], total_elapsed_ms: float) -> str:
     """Render per-tool statistics as a markdown table."""
     if not stats:
         return ""
@@ -276,7 +268,9 @@ def render_async_chains_section(chains: list[ToolCallChain]) -> str:
     lines = ["### Async / Polling Chains", ""]
     for chain in chains:
         progression = " → ".join(chain.status_progression) if chain.status_progression else "—"
-        lines.append(f"**{_sanitize_table_cell(chain.display_name)}** — {len(chain.calls)} calls, {_format_duration(chain.total_duration_ms)}")
+        lines.append(
+            f"**{_sanitize_table_cell(chain.display_name)}** — {len(chain.calls)} calls, {_format_duration(chain.total_duration_ms)}"
+        )
         lines.append(f"- Status: {progression}")
         if chain.correlation_keys:
             lines.append(f"- Correlation keys: `{'`, `'.join(chain.correlation_keys)}`")
@@ -355,9 +349,7 @@ def render_tool_call_details(tool_calls: list[ToolCall]) -> str:
     return "\n".join(lines)
 
 
-def render_tool_analysis(
-    timeline: ConversationTimeline, profile: BotProfile | None = None
-) -> str:
+def render_tool_analysis(timeline: ConversationTimeline, profile: BotProfile | None = None) -> str:
     """Top-level tool call analysis rendering — returns complete markdown section."""
     if not timeline.tool_calls:
         return ""
@@ -416,9 +408,7 @@ def render_tool_analysis(
 # ---------------------------------------------------------------------------
 
 
-def build_tool_call_analysis_data(
-    timeline: ConversationTimeline, profile: BotProfile | None = None
-) -> dict:
+def build_tool_call_analysis_data(timeline: ConversationTimeline, profile: BotProfile | None = None) -> dict:
     """Build structured dicts for web UI state population."""
     if not timeline.tool_calls:
         return {
@@ -440,13 +430,20 @@ def build_tool_call_analysis_data(
     kpis = [
         {"label": "Tool Calls", "value": str(len(timeline.tool_calls)), "hint": "Total invocations", "tone": "neutral"},
         {"label": "Unique Tools", "value": str(len(stats)), "hint": "Distinct tools called", "tone": "neutral"},
-        {"label": "Tool Time", "value": _format_duration(total_tool_ms), "hint": _pct(total_tool_ms, timeline.total_elapsed_ms) + " of conversation", "tone": "neutral"},
+        {
+            "label": "Tool Time",
+            "value": _format_duration(total_tool_ms),
+            "hint": _pct(total_tool_ms, timeline.total_elapsed_ms) + " of conversation",
+            "tone": "neutral",
+        },
     ]
     failures = sum(1 for tc in timeline.tool_calls if tc.state == "failed")
     if failures:
         kpis.append({"label": "Failures", "value": str(failures), "hint": "Tool calls that failed", "tone": "negative"})
     if chains:
-        kpis.append({"label": "Async Chains", "value": str(len(chains)), "hint": "Polling/retry patterns", "tone": "neutral"})
+        kpis.append(
+            {"label": "Async Chains", "value": str(len(chains)), "hint": "Polling/retry patterns", "tone": "neutral"}
+        )
 
     # Stats rows
     stats_rows = [

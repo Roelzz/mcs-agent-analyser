@@ -361,13 +361,8 @@ def render_topic_inventory(profile: BotProfile) -> str:
     anomalies = detect_topic_graph_anomalies(profile)
     if any(anomalies.values()):
         lines.append("### Topic Architecture Anomalies\n")
-        lines.append(
-            f"- **Orphaned topics** (no inbound connections): {anomalies.get('orphaned', 0)}"
-        )
-        lines.append(
-            f"- **Dead ends** (no outbound connections + no resolution): "
-            f"{anomalies.get('dead_ends', 0)}"
-        )
+        lines.append(f"- **Orphaned topics** (no inbound connections): {anomalies.get('orphaned', 0)}")
+        lines.append(f"- **Dead ends** (no outbound connections + no resolution): {anomalies.get('dead_ends', 0)}")
         lines.append(f"- **Cycles** detected: {anomalies.get('cycles', 0)}")
         lines.append("")
 

@@ -142,12 +142,8 @@ class TestTurnEfficiency:
             _make_event(EventType.USER_MESSAGE, "2024-01-01T00:00:00Z", 'User: "complex query"'),
         ]
         for i in range(5):
-            events.append(
-                _make_event(EventType.PLAN_RECEIVED, f"2024-01-01T00:00:0{i + 1}Z", plan_steps=[f"step{i}"])
-            )
-            events.append(
-                _make_event(EventType.STEP_TRIGGERED, f"2024-01-01T00:00:0{i + 1}Z", step_id=f"s{i}")
-            )
+            events.append(_make_event(EventType.PLAN_RECEIVED, f"2024-01-01T00:00:0{i + 1}Z", plan_steps=[f"step{i}"]))
+            events.append(_make_event(EventType.STEP_TRIGGERED, f"2024-01-01T00:00:0{i + 1}Z", step_id=f"s{i}"))
             events.append(
                 _make_event(EventType.STEP_FINISHED, f"2024-01-01T00:00:0{i + 1}Z", step_id=f"s{i}", state="completed")
             )

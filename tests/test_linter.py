@@ -297,7 +297,9 @@ def test_build_audit_payload_filters_noisy_events():
         events=[
             TimelineEvent(event_type=EventType.USER_MESSAGE, summary="hi", timestamp="2024-01-01T00:00:00Z"),
             TimelineEvent(event_type=EventType.DIALOG_TRACING, summary="trace noise", timestamp="2024-01-01T00:00:01Z"),
-            TimelineEvent(event_type=EventType.VARIABLE_ASSIGNMENT, summary="set var", timestamp="2024-01-01T00:00:02Z"),
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT, summary="set var", timestamp="2024-01-01T00:00:02Z"
+            ),
             TimelineEvent(event_type=EventType.BOT_MESSAGE, summary="hello", timestamp="2024-01-01T00:00:03Z"),
         ],
     )

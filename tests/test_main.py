@@ -477,9 +477,7 @@ def test_system_instructions_visible():
 
     next_section = re.search(r"\n\n#{1,3} ", rest)
     section = rest[: next_section.start()] if next_section else rest
-    assert "<details>" not in section, (
-        "System Instructions section should render inline, not collapsed"
-    )
+    assert "<details>" not in section, "System Instructions section should render inline, not collapsed"
 
 
 # --- Newline sanitization tests ---
@@ -5980,9 +5978,7 @@ def test_variable_tracker_includes_generative_answer_rows():
                 display_name="Ai assistant Knowledge",
                 schema_name="aiAssistantKnowledge",
                 raw_dialog={
-                    "actions": [
-                        {"kind": "SearchAndSummarizeContent", "variable": "Topic.Var1"}
-                    ],
+                    "actions": [{"kind": "SearchAndSummarizeContent", "variable": "Topic.Var1"}],
                 },
             ),
         ],

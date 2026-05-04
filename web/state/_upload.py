@@ -619,7 +619,9 @@ class UploadMixin(rx.State, mixin=True):
             len(profile.gpt_info.instructions) if profile.gpt_info and profile.gpt_info.instructions else 0
         )
         starter_count = (
-            len(profile.gpt_info.conversation_starters) if profile.gpt_info and profile.gpt_info.conversation_starters else 0
+            len(profile.gpt_info.conversation_starters)
+            if profile.gpt_info and profile.gpt_info.conversation_starters
+            else 0
         )
         self.mcs_profile_kpis = [  # type: ignore[attr-defined]
             {"label": "Components", "value": str(total_comps), "hint": "Total config items", "tone": "neutral"},
@@ -1194,9 +1196,9 @@ class UploadMixin(rx.State, mixin=True):
             # topic_name; the click handler in `jump_to_knowledge_topic`
             # applies the same sanitizer.
             _topic_for_anchor = trace.topic_name or ""
-            gen_anchor_id = "row-gen-" + "".join(
-                c if c.isalnum() else "-" for c in _topic_for_anchor
-            ) if _topic_for_anchor else ""
+            gen_anchor_id = (
+                "row-gen-" + "".join(c if c.isalnum() else "-" for c in _topic_for_anchor) if _topic_for_anchor else ""
+            )
             gen_rows.append(
                 {
                     "index": str(idx),

@@ -1330,8 +1330,7 @@ def _mcs_profile_panel() -> rx.Component:
         card(
             section_heading("Trigger Overlaps"),
             rx.text(
-                "Topics with >50% token overlap in trigger phrases — risks "
-                "ambiguous routing.",
+                "Topics with >50% token overlap in trigger phrases — risks ambiguous routing.",
                 font_size="12px",
                 color="var(--gray-a9)",
                 padding_bottom="8px",
@@ -1594,7 +1593,6 @@ def _mcs_tools_stats_row(item: dict) -> rx.Component:
         ],
         template="2fr 1fr 0.5fr 1fr 1fr 1fr",
     )
-
 
 
 def _mcs_tools_panel() -> rx.Component:
@@ -3468,8 +3466,8 @@ def _mcs_routing_panel() -> rx.Component:
                     align="center",
                 ),
                 rx.text(
-                    "Per-topic runtime view — answers \"which topics fired, "
-                    "what was their state, what did each contribute?\". For "
+                    'Per-topic runtime view — answers "which topics fired, '
+                    'what was their state, what did each contribute?". For '
                     "phase-level (recognition / planning / execution) timing, "
                     "see Conversation → Phase Breakdown.",
                     font_size="12px",
@@ -3498,8 +3496,8 @@ def _mcs_routing_panel() -> rx.Component:
                     align="center",
                 ),
                 rx.text(
-                    "Answers \"for each user message, which trigger phrase did "
-                    "the orchestrator pick and how strong was the match?\". "
+                    'Answers "for each user message, which trigger phrase did '
+                    'the orchestrator pick and how strong was the match?". '
                     "Pairs with Topic Coverage (below) which lists topics that "
                     "didn't fire at all.",
                     font_size="12px",
@@ -3529,7 +3527,7 @@ def _mcs_routing_panel() -> rx.Component:
                     align="center",
                 ),
                 rx.text(
-                    "Answers \"which topics never fired in this conversation?\" — "
+                    'Answers "which topics never fired in this conversation?" — '
                     "complement to Trigger Phrase Analysis above.",
                     font_size="12px",
                     color="var(--gray-a9)",
@@ -4903,7 +4901,7 @@ def _mcs_conversation_detail_panel() -> rx.Component:
                         align="center",
                     ),
                     rx.text(
-                        "Answers \"how long did each conversation phase take?\" "
+                        'Answers "how long did each conversation phase take?" '
                         "(recognition, planning, execution, delivery). For per-topic "
                         "lifecycle detail see Routing → Topic Lifecycles.",
                         font_size="11px",

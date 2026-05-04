@@ -294,4 +294,3 @@ class LintMixin(rx.State, mixin=True):
         self.lint_audit_results = []
         self.lint_report_markdown = ""
         self.lint_error = ""
-

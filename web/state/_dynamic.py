@@ -355,10 +355,7 @@ class DynamicMixin(rx.State, mixin=True):
             return self.mcs_topic_explorer_topics
         out: list[dict] = []
         for t in self.mcs_topic_explorer_topics:
-            haystack = (
-                f"{t.get('display_name', '')} {t.get('schema_name', '')} "
-                f"{t.get('category', '')}"
-            ).lower()
+            haystack = (f"{t.get('display_name', '')} {t.get('schema_name', '')} {t.get('category', '')}").lower()
             if q in haystack:
                 out.append(t)
         return out
@@ -413,7 +410,14 @@ class DynamicMixin(rx.State, mixin=True):
             "ActionAIBuilder",
         ],
         "Knowledge": ["KnowledgeSearch", "GenerativeAnswer"],
-        "Traces": ["DialogTracing", "DialogRedirect", "ActionTriggerEval", "OrchestratorThinking", "IntentRecognition", "VariableAssignment"],
+        "Traces": [
+            "DialogTracing",
+            "DialogRedirect",
+            "ActionTriggerEval",
+            "OrchestratorThinking",
+            "IntentRecognition",
+            "VariableAssignment",
+        ],
         "Errors": ["Error"],
     }
 

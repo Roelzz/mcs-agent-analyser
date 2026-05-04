@@ -564,9 +564,7 @@ def analyze_response_quality(timeline: ConversationTimeline) -> ResponseQualityR
             continue
 
         # Check what preceded the bot message
-        has_knowledge = any(
-            e.event_type in (EventType.KNOWLEDGE_SEARCH, EventType.GENERATIVE_ANSWER) for e in events
-        )
+        has_knowledge = any(e.event_type in (EventType.KNOWLEDGE_SEARCH, EventType.GENERATIVE_ANSWER) for e in events)
         has_tool = any(e.event_type == EventType.STEP_TRIGGERED for e in events)
         failed_tools = [e for e in events if e.event_type == EventType.STEP_FINISHED and e.state == "failed"]
         zero_result_search = False
