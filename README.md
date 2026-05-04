@@ -174,10 +174,15 @@ rules:
 
 **Field paths** reference `BotProfile` attributes using dot notation. Use `[]` for array fields (e.g. `channels`, `knowledge_sources`).
 
-**Supported operators:**
-- `eq` — field equals the given value
+**Supported operators** (`custom_rules.py:_apply_operator`):
+- `exists` — field is not `None`
 - `not_exists` — field is `None` or missing
-- `not_contains` — string field does not contain the given substring
+- `eq` — field equals the given value
+- `ne` — field is not equal to the given value
+- `contains` — string field contains substring, or list contains element
+- `not_contains` — inverse of `contains`
+- `matches` — string field matches a regex (capped at 500 chars; nested-quantifier patterns rejected for safety)
+- `gt` / `gte` / `lt` / `lte` — numeric comparisons (returns `False` on type mismatch)
 
 ### Configuration
 
@@ -280,7 +285,8 @@ Every visualization on this tab that names a runtime entity is
 Breakdown rows / Reasoning rows / Conversation Flow rows all
 deep-link to the canonical destination (Tools tab Component
 Explorer for tools / topics / agents; Knowledge tab for
-knowledge calls).
+knowledge calls). An **Expand all / Collapse all** toolbar at
+the top toggles every accordion under the tab in one click.
 
 #### Quality
 **LLM Audit Runner** (default Static Config audit + opt-in
@@ -324,8 +330,7 @@ alignment.
 - Full conversation timeline (user messages, bot responses, plan steps, knowledge searches, errors)
 - Routing scores — per-step trigger match confidence shown in decision timeline, conversation flow, and plan evolution
 - Execution phases with duration and status
-- Mermaid sequence diagram of the conversation flow
-- Mermaid Gantt chart of execution timing
+- Mermaid diagrams: conversation **sequence**, execution **Gantt**, **topic connection graph**, **integration map** (connectors), **tool call flow**, **latency heatmap**, **credit flow** (sequence with per-turn credits)
 
 **From Dataverse (live connection):**
 - Bot config and all components fetched via Web API
@@ -585,7 +590,7 @@ Make sure `.env` contains at least `REFLEX_ENV=prod` and `PORT=2009`.
 ```bash
 cp .env.example .env          # edit credentials
 uv sync
-uv run pytest              # 340+ tests
+uv run pytest              # 445+ tests
 uv run ruff check .
 uv run ruff format .
 uv run reflex run          # dev server — frontend :3000, backend :8000
@@ -642,11 +647,13 @@ web/
     upload.py            Upload form
 
 data/
-  default_rules.yaml     18 default best-practice rules
+  default_rules.yaml         18 default best-practice rules (custom_rules YAML)
+  default_lint_modes.yaml    6 LLM Audit Runner mode definitions (system prompts + input declarations)
+  topic_explainer.yaml       Curated KB feeding the Component Explorer's hover-card explanations + per-component settings tree
 
 best_practices/          GPT model best-practice reference docs
 samples/                 Sample reports
-tests/                   Test suite (340+ tests)
+tests/                   Test suite (445+ tests)
 ```
 
 ## License
