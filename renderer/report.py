@@ -78,13 +78,16 @@ def render_report(
     15. Deep dive (topic details + knowledge search)
     """
     from timeline import estimate_credits
+    from .knowledge import render_citation_verification_md
     from .sections import (
         render_conversation_flow_md,
         render_conversation_summary_md,
         render_decision_timeline_md,
+        render_performance_waterfall_md,
         render_plan_evolution_md,
         render_topic_lifecycles_md,
         render_trigger_analysis_md,
+        render_variable_tracker_md,
     )
 
     if timeline is None:
@@ -163,10 +166,22 @@ def render_report(
     if conv_summary:
         sections.append(conv_summary)
 
-    # 7.2 Conversation flow
-    conv_flow = render_conversation_flow_md(timeline)
+    # 7.2 Conversation flow (with AUTO/MANUAL binding annotations on
+    # plan-step rows when a profile is available).
+    conv_flow = render_conversation_flow_md(timeline, profile=profile)
     if conv_flow:
         sections.append(conv_flow)
+
+    # 7.3 Performance Waterfall — between-activity gap-time table
+    waterfall = render_performance_waterfall_md(timeline)
+    if waterfall:
+        sections.append(waterfall)
+
+    # 7.4 Variable Tracker — orchestrator tool calls, Topic / Global
+    # variable assignments, and topic-level Generative Answer harvesting.
+    var_tracker = render_variable_tracker_md(timeline, profile=profile)
+    if var_tracker:
+        sections.append(var_tracker)
 
     # 8. Orchestrator reasoning
     reasoning = render_orchestrator_reasoning(timeline)
@@ -247,6 +262,13 @@ def render_report(
         sections.append(topic_details)
 
     sections.append(render_knowledge_search_section(timeline, profile=profile))
+
+    # 15.05 Citation Verification — flat audit table of every (trace,
+    # citation) pair with answer / completion / moderation / provenance
+    # flags. Mirrors the dynamic Knowledge tab's panel.
+    citation_audit = render_citation_verification_md(timeline)
+    if citation_audit:
+        sections.append(citation_audit)
 
     # 15.1 Trigger phrase analysis
     trigger_analysis = render_trigger_analysis_md(timeline, profile)

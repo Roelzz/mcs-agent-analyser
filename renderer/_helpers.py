@@ -1,3 +1,10 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from models import TimelineEvent  # noqa: F401 — used in string-quoted annotations
+
 IDLE_THRESHOLD_MS = 5000  # gaps > 5s are shown as idle markers
 
 ACTOR_NAMES: dict[str, str] = {

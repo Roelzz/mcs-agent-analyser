@@ -279,8 +279,13 @@ def render_bot_metadata(profile: BotProfile) -> str:
 
 
 def render_topic_inventory(profile: BotProfile) -> str:
-    """Render topic inventory: user, system, automation topics + supporting config."""
-    # Classify into categories (exclude GptComponent, orchestrator_topics, knowledge)
+    """Render topic inventory: user, system, automation topics + supporting config.
+
+    Mirrors the dynamic page's Category Summary: orchestrator_topics is
+    split by `tool_type` (MCP / Connector / Flow / Child Agent / ...)
+    so each capability kind gets its own count row.
+    """
+    # Classify into categories (exclude GptComponent, knowledge)
     by_category: dict[str, list[ComponentSummary]] = {}
     for comp in profile.components:
         cat = _classify_component(comp)
@@ -302,6 +307,18 @@ def render_topic_inventory(profile: BotProfile) -> str:
         )
         return "\n".join(lines)
 
+    # Per-tool-type label mapping — kept in sync with the dynamic
+    # page's Category Summary split (`web/state/_upload.py:_populate_topics_data`).
+    tool_type_labels: dict[str, str] = {
+        "MCPServer": "MCP Servers",
+        "ConnectorTool": "Connector Tools",
+        "FlowTool": "Power Automate Flows",
+        "ChildAgent": "Child Agents",
+        "ConnectedAgent": "Connected Agents",
+        "A2AAgent": "A2A Agents",
+    }
+    agent_tool_types = {"ChildAgent", "ConnectedAgent", "A2AAgent"}
+
     lines.extend(
         [
             "| Kind | Count | Active | Inactive |",
@@ -312,11 +329,47 @@ def render_topic_inventory(profile: BotProfile) -> str:
         comps = by_category.get(cat)
         if not comps:
             continue
+        if cat == "orchestrator_topics":
+            # Split into per-tool-type rows so MCP / Connector / Flow /
+            # agent kinds each surface independently.
+            by_tool_type: dict[str, list[ComponentSummary]] = {}
+            for c in comps:
+                key = c.tool_type or "Other"
+                by_tool_type.setdefault(key, []).append(c)
+            non_agent_keys = sorted(
+                (k for k in by_tool_type if k not in agent_tool_types),
+                key=lambda k: tool_type_labels.get(k, k).lower(),
+            )
+            agent_keys = sorted(
+                (k for k in by_tool_type if k in agent_tool_types),
+                key=lambda k: tool_type_labels.get(k, k).lower(),
+            )
+            for key in non_agent_keys + agent_keys:
+                kind_comps = by_tool_type[key]
+                label = tool_type_labels.get(key, key or "Tools")
+                kind_active = sum(1 for c in kind_comps if c.state == "Active")
+                kind_inactive = len(kind_comps) - kind_active
+                lines.append(f"| {label} | {len(kind_comps)} | {kind_active} | {kind_inactive} |")
+            continue
         display = _CATEGORY_DISPLAY[cat]
         cat_active = sum(1 for c in comps if c.state == "Active")
         cat_inactive = len(comps) - cat_active
         lines.append(f"| {display} | {len(comps)} | {cat_active} | {cat_inactive} |")
     lines.append("")
+
+    # Topic Architecture Anomalies (matches the dynamic page chips).
+    anomalies = detect_topic_graph_anomalies(profile)
+    if any(anomalies.values()):
+        lines.append("### Topic Architecture Anomalies\n")
+        lines.append(
+            f"- **Orphaned topics** (no inbound connections): {anomalies.get('orphaned', 0)}"
+        )
+        lines.append(
+            f"- **Dead ends** (no outbound connections + no resolution): "
+            f"{anomalies.get('dead_ends', 0)}"
+        )
+        lines.append(f"- **Cycles** detected: {anomalies.get('cycles', 0)}")
+        lines.append("")
 
     # Detail tables per category
     for cat in _CATEGORY_ORDER:
@@ -413,35 +466,67 @@ def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | N
 
 
 def render_topic_settings_explained(profile: BotProfile) -> str:
-    """Per-topic deep walkthrough of every action and property.
+    """Per-component deep walkthrough of every action and property.
 
-    For each non-system topic in the bot, walks the dialog action tree and
-    renders a markdown block with KB-sourced explanations and Microsoft doc
-    links. Undocumented kinds/properties are flagged with a visible sentinel
-    rather than silently filled in.
+    Markdown equivalent of the dynamic page's Component Explorer.
+    Walks every DialogComponent that has a populated `raw_dialog` —
+    user topics, system topics, automation topics, AND tools
+    (TaskDialog / AgentDialog) — and renders a per-component block with
+    KB-sourced explanations and Microsoft doc links. Undocumented
+    kinds/properties are flagged with a visible sentinel.
+
+    Components are grouped by category (User Topics → Tools → Agents →
+    System / Automation) so the markdown reads like a structured
+    capabilities report.
     """
-    topics = [
-        c
-        for c in profile.components
-        if c.kind == "DialogComponent" and c.raw_dialog and c.trigger_kind not in (_SYSTEM_TRIGGERS | {None})
-    ]
-    if not topics:
+    components = [c for c in profile.components if c.kind == "DialogComponent" and c.raw_dialog]
+    if not components:
         return ""
     try:
         kb = load_kb()
     except Exception as e:
-        return f"## Topic Settings Explained\n\n_Could not load explainer KB: {e}_\n"
+        return f"## Component Settings Explained\n\n_Could not load explainer KB: {e}_\n"
 
-    lines: list[str] = ["## Topic Settings Explained\n"]
+    # Bucket per the dynamic page's Component Explorer split.
+    agent_tool_types = {"ChildAgent", "ConnectedAgent", "A2AAgent"}
+
+    def _bucket(c: ComponentSummary) -> tuple[int, str]:
+        if c.dialog_kind in ("TaskDialog", "AgentDialog"):
+            tt = c.tool_type or ""
+            if tt in agent_tool_types:
+                return (4, "Agents")
+            label_map = {
+                "MCPServer": "MCP Servers",
+                "ConnectorTool": "Connector Tools",
+                "FlowTool": "Power Automate Flows",
+            }
+            return (3, label_map.get(tt, "Tools"))
+        if c.trigger_kind in (_SYSTEM_TRIGGERS or set()):
+            return (5, "System Topics")
+        if c.trigger_kind in (_AUTOMATION_TRIGGERS or set()):
+            return (6, "Automation Topics")
+        return (1, "User Topics")
+
+    grouped: dict[tuple[int, str], list[ComponentSummary]] = {}
+    for comp in components:
+        grouped.setdefault(_bucket(comp), []).append(comp)
+
+    lines: list[str] = ["## Component Settings Explained\n"]
     lines.append(
-        "Walks every action and property in each topic's dialog tree and explains "
+        "Walks every action and property in each component's dialog tree and explains "
         "what the setting does, with links to Microsoft's documentation. Lines marked "
-        "⚪ are not yet documented in the analyser's curated knowledge base.\n"
+        "⚪ are not yet documented in the analyser's curated knowledge base. Components "
+        "are grouped by category (topics first, then tools and agents).\n"
     )
-    for comp in topics:
-        block = render_explainer_for_topic(comp, kb)
-        if block:
-            lines.append(block)
+    for sort_key, label in sorted(grouped.keys()):
+        comps = grouped[(sort_key, label)]
+        if not comps:
+            continue
+        lines.append(f"### {label} ({len(comps)})\n")
+        for comp in sorted(comps, key=lambda c: c.display_name.lower()):
+            block = render_explainer_for_topic(comp, kb)
+            if block:
+                lines.append(block)
 
     # Also render explainer blocks for the agent's KnowledgeSourceComponents,
     # since those carry the `triggerCondition` field that gates topic-level

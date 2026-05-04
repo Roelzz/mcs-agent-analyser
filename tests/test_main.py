@@ -6491,3 +6491,158 @@ def test_error_banner_rows_filter_to_error_flow_items():
     assert err["flow_id"] == "flow-1"
     assert err["topic_name"] == "MyTopic"
     assert "connector unreachable" in err["summary"]
+
+
+# --- Export markdown renderers for dynamic-page features ---
+
+
+def test_render_variable_tracker_md_three_sections():
+    """The markdown Variable Tracker emits one sub-section per card_kind
+    (tool_call / variable_assignment / generative_answer) so the export
+    mirrors the dynamic page."""
+    from models import GenerativeAnswerTrace, ToolCall
+
+    from renderer.sections import render_variable_tracker_md
+
+    timeline = ConversationTimeline(
+        tool_calls=[
+            ToolCall(
+                step_id="s1",
+                task_dialog_id="tool.X",
+                display_name="Tool X",
+                state="completed",
+                arguments={"a": "auto-val", "b": "manual-val"},
+                auto_filled_argument_names=["a"],
+                trigger_timestamp="2024-01-01T00:00:00Z",
+                finish_timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+        events=[
+            TimelineEvent(
+                event_type=EventType.VARIABLE_ASSIGNMENT,
+                summary="Topic Topic.X = hello",
+                timestamp="2024-01-01T00:00:02Z",
+            ),
+        ],
+        generative_answer_traces=[
+            GenerativeAnswerTrace(
+                topic_name="Onboarding",
+                gpt_answer_state="Answered",
+                summary_text="Click forgot password.",
+                timestamp="2024-01-01T00:00:03Z",
+            ),
+        ],
+    )
+    md = render_variable_tracker_md(timeline)
+    assert "## Variable Tracker" in md
+    assert "### Tool Calls" in md
+    assert "### Topic / Global Variable Assignments" in md
+    assert "### Topic-Level Generative Answers" in md
+    # AUTO/MANUAL counts surface from the tool call
+    assert "| Tool X" in md
+
+
+def test_render_variable_tracker_md_empty():
+    """Empty timeline → empty string (no header noise in the export)."""
+    from renderer.sections import render_variable_tracker_md
+
+    assert render_variable_tracker_md(ConversationTimeline()) == ""
+
+
+def test_render_performance_waterfall_md_table():
+    """Waterfall markdown renders one row per timed event with a bar."""
+    from renderer.sections import render_performance_waterfall_md
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.USER_MESSAGE,
+                summary='User: "hi"',
+                timestamp="2024-01-01T00:00:00Z",
+            ),
+            TimelineEvent(
+                event_type=EventType.PLAN_RECEIVED,
+                summary="Plan received",
+                timestamp="2024-01-01T00:00:01.500Z",
+            ),
+        ],
+    )
+    md = render_performance_waterfall_md(timeline)
+    assert "## Performance Waterfall" in md
+    assert "| Time | Category | Activity | Gap |" in md
+    # The second row has a non-empty gap (1.5s → bar)
+    assert "1.5 s" in md
+
+
+def test_render_performance_waterfall_md_empty_for_zero_events():
+    from renderer.sections import render_performance_waterfall_md
+
+    assert render_performance_waterfall_md(ConversationTimeline()) == ""
+
+
+def test_render_citation_verification_md_table():
+    """Citation Verification markdown produces a flat table with one row
+    per (trace, citation) pair."""
+    from models import GenerativeAnswerCitation, GenerativeAnswerTrace
+
+    from renderer.knowledge import render_citation_verification_md
+
+    timeline = ConversationTimeline(
+        generative_answer_traces=[
+            GenerativeAnswerTrace(
+                topic_name="Onboarding",
+                gpt_answer_state="Answered",
+                completion_state="Complete",
+                performed_content_moderation=True,
+                performed_content_provenance=True,
+                citations=[
+                    GenerativeAnswerCitation(title="Doc A", url="https://x/a", snippet="alpha"),
+                    GenerativeAnswerCitation(title="Doc B", url="https://x/b", snippet="beta"),
+                ],
+            ),
+        ],
+    )
+    md = render_citation_verification_md(timeline)
+    assert "## Citation Verification" in md
+    assert "T1·C1" in md
+    assert "T1·C2" in md
+    assert "Onboarding" in md
+    # URL renders as a link
+    assert "[link](https://x/a)" in md
+
+
+def test_render_citation_verification_md_empty():
+    from renderer.knowledge import render_citation_verification_md
+
+    assert render_citation_verification_md(ConversationTimeline()) == ""
+
+
+def test_render_conversation_flow_md_includes_auto_manual():
+    """StepTriggered rows annotate AUTO=N / MANUAL=N when the
+    correlated tool call has bound arguments."""
+    from models import ToolCall
+
+    from renderer.sections import render_conversation_flow_md
+
+    timeline = ConversationTimeline(
+        events=[
+            TimelineEvent(
+                event_type=EventType.STEP_TRIGGERED,
+                summary="Action Started",
+                step_id="abc",
+                topic_name="MyTool",
+                timestamp="2024-01-01T00:00:01Z",
+            ),
+        ],
+        tool_calls=[
+            ToolCall(
+                step_id="abc",
+                task_dialog_id="MyTool",
+                arguments={"a": "auto-val", "b": "auto-val", "c": "manual-val"},
+                auto_filled_argument_names=["a", "b"],
+            ),
+        ],
+    )
+    md = render_conversation_flow_md(timeline)
+    assert "AUTO=2" in md
+    assert "MANUAL=1" in md

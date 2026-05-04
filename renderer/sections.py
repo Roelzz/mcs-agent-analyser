@@ -1743,9 +1743,14 @@ def render_conversation_summary_md(timeline: ConversationTimeline) -> str:
     return "\n".join(lines)
 
 
-def render_conversation_flow_md(timeline: ConversationTimeline) -> str:
-    """Render conversation flow as markdown."""
-    items = build_conversation_flow_items(timeline)
+def render_conversation_flow_md(timeline: ConversationTimeline, profile: BotProfile | None = None) -> str:
+    """Render conversation flow as markdown.
+
+    StepTriggered / StepFinished rows append AUTO=N / MANUAL=N badges
+    when the correlated tool call has bound arguments — same data the
+    dynamic page uses for its inline binding badges.
+    """
+    items = build_conversation_flow_items(timeline, profile=profile)
     if not items:
         return ""
     lines = ["## Conversation Flow\n"]
@@ -1763,8 +1768,162 @@ def render_conversation_flow_md(timeline: ConversationTimeline) -> str:
             summary = item.get("summary", "")
             thought = item.get("thought", "")
             line = f"- {ts_prefix}**{title}**: {summary}"
+            badges: list[str] = []
+            auto_n = item.get("auto_filled_count", "")
+            manual_n = item.get("manual_filled_count", "")
+            if auto_n:
+                badges.append(f"AUTO={auto_n}")
+            if manual_n:
+                badges.append(f"MANUAL={manual_n}")
+            if badges:
+                line += f" `{' / '.join(badges)}`"
             if thought:
                 line += f" — *{thought}*"
             lines.append(line)
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Variable Tracker markdown
+# ---------------------------------------------------------------------------
+
+
+def _md_escape(s: str) -> str:
+    """Minimal escape for markdown table cells (pipes + newlines)."""
+    return (s or "").replace("|", "\\|").replace("\n", " ").replace("\r", "")
+
+
+def render_variable_tracker_md(timeline: ConversationTimeline, profile: BotProfile | None = None) -> str:
+    """Markdown equivalent of the dynamic page's Variable Tracker card.
+
+    Renders three sub-sections (one per `card_kind`) so the markdown
+    report carries the same orchestrator tool calls + Topic / Global
+    variable assignments + topic-level Generative Answer harvesting that
+    the inline UI shows. Empty when the conversation has none of the
+    three.
+    """
+    from .dynamic_data import build_variable_tracker_rows
+
+    rows = build_variable_tracker_rows(timeline, profile)
+    if not rows:
+        return ""
+
+    tool_calls = [r for r in rows if r["card_kind"] == "tool_call"]
+    var_assigns = [r for r in rows if r["card_kind"] == "variable_assignment"]
+    gen_answers = [r for r in rows if r["card_kind"] == "generative_answer"]
+
+    lines: list[str] = ["## Variable Tracker\n"]
+    lines.append(
+        "_Inputs, outputs, and harvested values across the conversation: orchestrator "
+        "tool calls (AUTO/MANUAL bindings), Topic / Global variable assignments, and "
+        "topic-level Generative Answer traces._\n"
+    )
+
+    if tool_calls:
+        lines.append("### Tool Calls\n")
+        lines.append("| Time | Tool | Step Type | State | Duration | AUTO | MANUAL | Output |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for r in tool_calls:
+            args = r.get("arguments", []) or []
+            auto_n = sum(1 for a in args if a.get("auto_filled") == "true")
+            manual_n = len(args) - auto_n
+            output = _md_escape(r.get("output_preview") or "—")
+            if len(output) > 80:
+                output = output[:77] + "…"
+            lines.append(
+                f"| `{r['timestamp'] or '—'}` "
+                f"| {_md_escape(r['display_name'])} "
+                f"| {_md_escape(r['step_type'])} "
+                f"| {_md_escape(r['state'])} "
+                f"| {_md_escape(r['duration'])} "
+                f"| {auto_n if auto_n else '—'} "
+                f"| {manual_n if manual_n else '—'} "
+                f"| {output} |"
+            )
+        lines.append("")
+
+    if var_assigns:
+        lines.append("### Topic / Global Variable Assignments\n")
+        lines.append("| # | Time | Scope | Variable | Value |")
+        lines.append("|---|---|---|---|---|")
+        for i, r in enumerate(var_assigns, 1):
+            value = _md_escape(r.get("var_value") or "")
+            if len(value) > 80:
+                value = value[:77] + "…"
+            lines.append(
+                f"| {i} | `{r['timestamp'] or '—'}` "
+                f"| {_md_escape(r['var_scope'] or '—')} "
+                f"| `{_md_escape(r['var_name'] or '—')}` "
+                f"| {value} |"
+            )
+        lines.append("")
+
+    if gen_answers:
+        lines.append("### Topic-Level Generative Answers\n")
+        lines.append("| # | Time | Topic | Output Variable | Answer State | Citations | Summary |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for i, r in enumerate(gen_answers, 1):
+            summary_preview = _md_escape(r.get("ga_summary") or "")
+            if len(summary_preview) > 80:
+                summary_preview = summary_preview[:77] + "…"
+            output_var = r.get("ga_output_variable") or "—"
+            lines.append(
+                f"| {i} | `{r['timestamp'] or '—'}` "
+                f"| {_md_escape(r['topic_name'] or '—')} "
+                f"| `{_md_escape(output_var)}` "
+                f"| {_md_escape(r['state'])} "
+                f"| {r.get('ga_citation_count', '0')} "
+                f"| {summary_preview} |"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Performance Waterfall markdown
+# ---------------------------------------------------------------------------
+
+
+def render_performance_waterfall_md(timeline: ConversationTimeline) -> str:
+    """Markdown equivalent of the dynamic page's Performance Waterfall.
+
+    Renders a table with timestamp, category, activity label, gap to
+    the previous activity, and a small unicode-block bar so the static
+    output still hints at proportions. Idle gaps (user-think time, HITL
+    waits) are suppressed via `_is_genuine_idle`, matching the UI.
+    """
+    rows = build_performance_waterfall(timeline)
+    if not rows:
+        return ""
+
+    lines: list[str] = ["## Performance Waterfall\n"]
+    lines.append(
+        "_Time gap between consecutive activities — the bar width is proportional "
+        "to the longest gap so the slowest step is easiest to spot. User-think idle "
+        "time is suppressed._\n"
+    )
+    lines.append("| Time | Category | Activity | Gap |  |")
+    lines.append("|---|---|---|---|---|")
+    for r in rows:
+        # `width_pct` is "12.5%" — strip the % and convert to a 0..20 char bar
+        pct_str = (r.get("width_pct") or "0%").rstrip("%")
+        try:
+            pct = float(pct_str)
+        except (ValueError, TypeError):
+            pct = 0.0
+        bar_len = int(round(pct * 0.20))  # 100% = 20 blocks
+        bar = "█" * bar_len if bar_len else ("·" if r.get("gap_fmt") not in ("—", "") else "")
+        label = _md_escape(r.get("label") or "")
+        if len(label) > 60:
+            label = label[:57] + "…"
+        lines.append(
+            f"| `{r.get('timestamp') or '—'}` "
+            f"| {_md_escape(r.get('category', ''))} "
+            f"| {label} "
+            f"| {_md_escape(r.get('gap_fmt') or '—')} "
+            f"| `{bar}` |"
+        )
     lines.append("")
     return "\n".join(lines)
