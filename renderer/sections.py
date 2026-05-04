@@ -657,7 +657,12 @@ def build_conversation_flow_items(
                 link_tab = "knowledge"
             elif ev.event_type == EventType.GENERATIVE_ANSWER:
                 link_tab = "knowledge"
-                link_id = f"gen:{(ev.topic_name or '').strip()}" if ev.topic_name else ""
+                # Use the raw topic_name as the link id — the click
+                # handler routes it to `jump_to_knowledge_topic(topic)`,
+                # which sanitizes to the matching `row-gen-<topic>` DOM
+                # anchor. (Pre-PR #20 used a `"gen:"` prefix tied to a
+                # DOM id that no longer exists.)
+                link_id = (ev.topic_name or "").strip()
 
             items.append(
                 {

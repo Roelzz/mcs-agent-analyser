@@ -539,7 +539,15 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 border_radius="20px",
                 padding="4px 10px",
                 cursor=rx.cond(is_linked, "pointer", "default"),
-                on_click=State.set_dynamic_link_target(item["link_target_tab"], item["link_target_id"]),
+                on_click=rx.cond(
+                    item["link_target_tab"] == "tools",
+                    State.jump_to_component_in_explorer(item["link_target_id"]),
+                    rx.cond(
+                        item["link_target_tab"] == "knowledge",
+                        State.jump_to_knowledge_topic(item["link_target_id"]),
+                        rx.noop(),
+                    ),
+                ),
             ),
             width="100%",
             id=item["flow_row_id"],
@@ -634,7 +642,15 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 border_radius="12px",
                 padding="10px 12px",
                 cursor=rx.cond(is_linked, "pointer", "default"),
-                on_click=State.set_dynamic_link_target(item["link_target_tab"], item["link_target_id"]),
+                on_click=rx.cond(
+                    item["link_target_tab"] == "tools",
+                    State.jump_to_component_in_explorer(item["link_target_id"]),
+                    rx.cond(
+                        item["link_target_tab"] == "knowledge",
+                        State.jump_to_knowledge_topic(item["link_target_id"]),
+                        rx.noop(),
+                    ),
+                ),
                 _hover=rx.cond(
                     is_linked,
                     {"border_color": "var(--green-a8)", "background": "var(--green-a3)"},

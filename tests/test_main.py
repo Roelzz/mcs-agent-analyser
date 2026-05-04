@@ -5655,7 +5655,7 @@ def test_flow_generative_answer_resolves_to_knowledge_with_topic_id():
     items = build_conversation_flow_items(timeline)
     gen = next(i for i in items if i.get("event_type") == "GenerativeAnswer")
     assert gen["link_target_tab"] == "knowledge"
-    assert gen["link_target_id"] == "gen:CT 7500"
+    assert gen["link_target_id"] == "CT 7500"
 
 
 def test_flow_messages_have_no_link_target():
