@@ -82,6 +82,15 @@ from renderer import render_instruction_drift
 
 BASE_DIR = Path(__file__).parent.parent
 
+# Many tests in this module load real bot exports from BASE_DIR/botContent*/
+# and BASE_DIR/Transcripts/ — both gitignored (client-specific data, not in repo).
+# Skip the whole module when the fixtures aren't checked out (CI / fresh clones).
+if not (BASE_DIR / "botContent" / "botContent.yml").exists():
+    pytest.skip(
+        "Bot export fixtures not present (gitignored) — skipping integration tests",
+        allow_module_level=True,
+    )
+
 
 # --- YAML parsing tests ---
 
@@ -477,9 +486,7 @@ def test_system_instructions_visible():
 
     next_section = re.search(r"\n\n#{1,3} ", rest)
     section = rest[: next_section.start()] if next_section else rest
-    assert "<details>" not in section, (
-        "System Instructions section should render inline, not collapsed"
-    )
+    assert "<details>" not in section, "System Instructions section should render inline, not collapsed"
 
 
 # --- Newline sanitization tests ---
@@ -5980,9 +5987,7 @@ def test_variable_tracker_includes_generative_answer_rows():
                 display_name="Ai assistant Knowledge",
                 schema_name="aiAssistantKnowledge",
                 raw_dialog={
-                    "actions": [
-                        {"kind": "SearchAndSummarizeContent", "variable": "Topic.Var1"}
-                    ],
+                    "actions": [{"kind": "SearchAndSummarizeContent", "variable": "Topic.Var1"}],
                 },
             ),
         ],

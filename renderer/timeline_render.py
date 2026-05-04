@@ -262,7 +262,6 @@ def render_errors(timeline: ConversationTimeline) -> str:
     return "\n".join(lines)
 
 
-
 def _gantt_label(event: TimelineEvent) -> str:
     """Short label for a Gantt task."""
     if event.event_type == EventType.USER_MESSAGE:
@@ -298,7 +297,7 @@ def _gantt_label(event: TimelineEvent) -> str:
         raw = (event.summary or "").replace("Orchestrator: ", "", 1)
         # Strip trailing duration
         if "(" in raw:
-            raw = raw[:raw.rfind("(")].strip()
+            raw = raw[: raw.rfind("(")].strip()
         return raw or "Thinking"
     return event.summary[:40] or "Event"
 
@@ -309,7 +308,12 @@ def _gantt_section(event: TimelineEvent) -> str:
         return ACTOR_NAMES["User"]
     if event.event_type == EventType.BOT_MESSAGE:
         return ACTOR_NAMES["Bot"]
-    if event.event_type in (EventType.PLAN_RECEIVED, EventType.PLAN_RECEIVED_DEBUG, EventType.PLAN_FINISHED, EventType.ORCHESTRATOR_THINKING):
+    if event.event_type in (
+        EventType.PLAN_RECEIVED,
+        EventType.PLAN_RECEIVED_DEBUG,
+        EventType.PLAN_FINISHED,
+        EventType.ORCHESTRATOR_THINKING,
+    ):
         return ACTOR_NAMES["AI"]
     if event.event_type == EventType.KNOWLEDGE_SEARCH:
         return ACTOR_NAMES["KS"]
@@ -347,7 +351,6 @@ def _gantt_tag(event: TimelineEvent) -> str:
     if event.state == "failed" or event.event_type == EventType.ERROR:
         return "crit, "
     return _GANTT_TAG_MAP.get(event.event_type, "")
-
 
 
 def render_gantt_chart(timeline: ConversationTimeline) -> str:
@@ -498,18 +501,20 @@ def render_orchestrator_reasoning(timeline: ConversationTimeline) -> str:
             if event.has_recommendations and not has_recs:
                 has_recs = "Yes"
 
-            rows.append({
-                "step": step_num,
-                "topic": event.topic_name or "Unknown",
-                "step_type": step_type,
-                "status": fin_status,
-                "duration": duration_label,
-                "reasoning": event.thought.replace("|", "\\|").replace("\n", " "),
-                "error": fin_error.replace("|", "\\|").replace("\n", " ") if fin_error else "",
-                "ask": last_ask.replace("|", "\\|").replace("\n", " ")[:100] if last_ask else "",
-                "has_recs": has_recs,
-                "used_outputs": used_outputs.replace("|", "\\|").replace("\n", " ")[:100] if used_outputs else "",
-            })
+            rows.append(
+                {
+                    "step": step_num,
+                    "topic": event.topic_name or "Unknown",
+                    "step_type": step_type,
+                    "status": fin_status,
+                    "duration": duration_label,
+                    "reasoning": event.thought.replace("|", "\\|").replace("\n", " "),
+                    "error": fin_error.replace("|", "\\|").replace("\n", " ") if fin_error else "",
+                    "ask": last_ask.replace("|", "\\|").replace("\n", " ")[:100] if last_ask else "",
+                    "has_recs": has_recs,
+                    "used_outputs": used_outputs.replace("|", "\\|").replace("\n", " ")[:100] if used_outputs else "",
+                }
+            )
 
     if not rows:
         return ""

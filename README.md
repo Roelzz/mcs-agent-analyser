@@ -11,15 +11,13 @@ Everything you need to build with confidence and debug without guessing. If you'
 
 ## Why Agent Analyser
 
-- **Full visibility into bot architecture** — see every topic, skill, entity, knowledge source, and how they connect, in one report
+- **Your data stays yours** — runs locally or self-hosted in your own tenant. No data is sent externally (except to OpenAI/Anthropic if you opt into the LLM Audit Runner)
+- **Full visibility into bot architecture** — see every topic, variable, knowledge source, MCP server, connector, and connected agent, and how they wire together, in one report
+- **Conversation debugging** — chat-style conversation flow with filter chips, error banner, deep-link hyperlinks, plan-tree grouping, and per-event raw-JSON viewer
+- **Performance insights** — per-turn efficiency metrics, latency bottleneck identification, between-activity gap waterfall, knowledge source effectiveness, and multi-agent delegation tracing
 - **Conversation quality analysis** — response groundedness scoring, hallucination risk detection, instruction compliance checking, and dead code detection
-- **Performance insights** — per-turn efficiency metrics, latency bottleneck identification, knowledge source effectiveness, and multi-agent delegation tracing
-- **Best-practice rules out of the box** — 18 configurable rules catch misconfigurations before they hit production, with custom YAML rules support
-- **Batch conversation analytics** — aggregate transcripts to surface success rates, topic usage, error patterns, and credit estimates
-- **Bot comparison** — diff two bot exports side by side to see what changed in components, instructions, settings, and connections
-- **Catch issues with AI-powered lint** — instruction audit checks guardrails, topic structure, and component health
-- **Your data stays yours** — runs locally or self-hosted in your own tenant. No data is sent externally (except to OpenAI/Anthropic if you opt into the Lint feature)
 - **Works with exports and live Dataverse** — upload a `.zip` export, or connect directly to your environment and auto-analyse on login
+- **Catch issues with AI-powered linting of agent instructions** — multi-mode audit runner (Static Config + opt-in Conversation Summary / Sentiment / PII / Answer Accuracy / Topic Routing / Custom prompts) powered by OpenAI or Anthropic
 
 ## What You Can Do
 
@@ -40,7 +38,9 @@ Everything you need to build with confidence and debug without guessing. If you'
 | **Batch analytics** | Aggregate multiple Dataverse transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
 | **Custom rules** | 18 default best-practice rules + user-defined YAML rules, evaluated during analysis |
 | **Tool call analysis** | Runtime tool call tracing — per-tool statistics, async chain detection, orchestrator reasoning, Mermaid flow diagrams. Supports MCP servers, connectors, child/connected agents, A2A, flows, CUA |
-| **Instruction lint** | AI-powered audit of bot instructions and architecture (supports OpenAI and Anthropic models) |
+| **Component Explorer** | Inline searchable picker over every topic and tool (User / System / Automation topics, MCP servers, connectors, flows, child / connected / A2A agents) with KB-sourced explanations per setting |
+| **LLM Audit Runner** | Multi-mode audit (default + opt-in: conversation summary / sentiment / PII / answer accuracy / topic routing / custom prompts) — runs in parallel via OpenAI or Anthropic |
+| **Exports** | Markdown / HTML / Print → PDF / Audit-bundle downloads — every dynamic-page surface (Variable Tracker, Performance Waterfall, Citation Verification, etc.) is reflected in the exports |
 | **Dark / Light mode** | Respects your OS preference, green accent theme throughout |
 | **Analysis counter** | Tracks how many analyses you've run, with cat-themed gamification milestones |
 
@@ -83,7 +83,7 @@ uv run reflex run
 
 Open http://localhost:3000, sign in with **`inspector`** / **`underthehood`**, and upload a `.zip` bot export or connect to Dataverse.
 
-> **Privacy note:** Deploy this locally or self-host in your own Azure tenant. Bot exports and Dataverse data never leave your machine. External API calls are made to OpenAI or Anthropic when you use the Instruction Lint or Model Comparison features.
+> **Privacy note:** Deploy this locally or self-host in your own Azure tenant. Bot exports and Dataverse data never leave your machine. External API calls are only made when you opt into the LLM Audit Runner (uses OpenAI or Anthropic).
 
 ### CLI
 
@@ -172,10 +172,15 @@ rules:
 
 **Field paths** reference `BotProfile` attributes using dot notation. Use `[]` for array fields (e.g. `channels`, `knowledge_sources`).
 
-**Supported operators:**
-- `eq` — field equals the given value
+**Supported operators** (`custom_rules.py:_apply_operator`):
+- `exists` — field is not `None`
 - `not_exists` — field is `None` or missing
-- `not_contains` — string field does not contain the given substring
+- `eq` — field equals the given value
+- `ne` — field is not equal to the given value
+- `contains` — string field contains substring, or list contains element
+- `not_contains` — inverse of `contains`
+- `matches` — string field matches a regex (capped at 500 chars; nested-quantifier patterns rejected for safety)
+- `gt` / `gte` / `lt` / `lte` — numeric comparisons (returns `False` on type mismatch)
 
 ### Configuration
 
@@ -190,21 +195,98 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 - **Analysis reports** — Quick Wins section with emoji severity indicators (🔴 fail, 🟡 warning, 🔵 info) and styled badges
 - **Rules page** (`/rules`) — view, edit, and manage rules in the web UI
 
+## LLM Audit Runner
+
+The Quality tab carries an audit runner that puts **`OPENAI_API_KEY`** or **`ANTHROPIC_API_KEY`** to work over your bot config and conversation transcript. Every audit mode is opt-in except the legacy default; clicking **Instruction Lint** with no other interaction reproduces the original behaviour.
+
+| Mode | Default | Inputs | What it answers |
+| --- | --- | --- | --- |
+| **Static Config** | ✅ on | bot profile | Are the system instructions clear? Guardrails, knowledge config, topic architecture, component health. |
+| **Conversation Summary** | ⬜ opt-in | transcript | 3-bullet recap + a single actionable insight. |
+| **User Sentiment** | ⬜ opt-in | transcript | Per-turn sentiment, escalation signals, final-state risk score. |
+| **PII Detection** | ⬜ opt-in | transcript | Categorised findings table + per-finding source + risk + recommendations. |
+| **Answer Accuracy** | ⬜ opt-in | transcript | Per user-question verdict (Answered / Partial / Avoided / Wrong) with evidence. |
+| **Topic Routing Quality** | ⬜ opt-in | profile + transcript | Did the orchestrator pick the right topic? Lists missed-better-fit cases. |
+| **Custom prompt** | ⬜ opt-in | available | Free-form prompt — useful one-off audits. |
+
+Modes shipped in **`data/default_lint_modes.yaml`** — extend or override by editing the file. Selected modes run in **parallel**; per-audit failures are isolated (one mode crashing doesn't take out the others). Transcript-only modes auto-disable when no `dialog.json` is uploaded.
+
+The audit results are appended to the markdown report (so `.md` / `.html` / PDF downloads include them) and downloadable on their own as a separate audit bundle.
+
 ## Dynamic Analysis Tabs
 
-The dynamic analysis page presents bot and conversation data across 7 purpose-driven tabs:
+The dynamic analysis page presents bot and conversation data across 6 purpose-driven tabs:
 
 | Tab | Icon | What it answers |
 | --- | --- | --- |
 | **Profile** | `user-round` | What is this bot? Architecture, AI config, model, security, metadata, custom findings |
-| **Topics** | `list` | What topics exist? Inventory, trigger overlaps, anomalies, topic graph |
-| **Tools** | `wrench` | Did the tools work? Inventory, runtime stats, async chains, orchestrator reasoning, agent delegation |
-| **Knowledge** | `database` | Is the knowledge useful? Sources, search results, source effectiveness |
+| **Tools** | `wrench` | What can it do, and did it work? Component Explorer (topics + tools + agents), inventory, runtime stats, agent delegation, topic graph |
+| **Knowledge** | `database` | Is the knowledge useful? Sources, search results, source effectiveness, citation verification |
 | **Routing** | `route` | How did orchestration work? Decision timeline, plan evolution diffs, topic lifecycles, trigger analysis, topic coverage |
-| **Conversation** | `message-square` | What happened? Visual dashboard, chat replay, sequence/Gantt diagrams, turn efficiency, latency bottlenecks |
-| **Quality** | `shield-check` | How can I improve? Credits estimate, quick wins, response quality, dead code, instruction alignment |
+| **Conversation** | `message-square` | What happened? Visual dashboard, chat replay, sequence/Gantt diagrams, performance waterfall, variable tracker, turn efficiency, latency bottlenecks |
+| **Quality** | `shield-check` | How can I improve? LLM Audit Runner, credits estimate, quick wins, response quality, dead code, instruction alignment |
 
 When uploading a transcript without a bot export, a reduced tab bar shows: Conversation, Tools, Routing, Quality.
+
+### Inside the tabs
+
+#### Profile — agent-level lens
+
+- **AI configuration** — model hint, knowledge sources, web browsing, code interpreter
+- **System instructions** — full instructions in a collapsible block
+- **Security chips** — auth mode, access control, content moderation
+- **Bot metadata + environment variables**
+- **Connections** — connector definitions + references + instances merged
+- **Model configuration + recommendation**
+- **Trigger Overlaps** — topics with >50% overlap in trigger phrases, flags ambiguous routing
+- **Quick Wins + custom rule findings**
+
+#### Tools — what it can do, did it work
+
+- **Component Explorer** — inline two-pane (searchable picker + step-by-step settings tree with KB-sourced explanations) over every topic + tool: User / System / Automation topics, MCP servers, connectors, flows, child / connected / A2A agents
+- **Category summary** — broken out by `tool_type`
+- **Anomaly chips** — orphans, dead ends, cycles
+- **Integration map + topic connection graph + external calls**
+- **Runtime tool-call statistics**
+- **Multi-agent delegation analysis**
+
+#### Knowledge — is the knowledge useful
+
+- **Source effectiveness** — configured sources merged with hit rate, contribution, errors, avg results
+- **File attachments**
+- **Search results per turn**
+- **Generative answer traces** — rewrite chain, token usage, ranked results, citations (per topic)
+- **Citation Verification panel** — flat audit of every (trace, citation) pair with answer state, completion state, moderation flags, provenance
+
+#### Routing — how orchestration worked
+
+- **Decision timeline** — grouped by user-message turn
+- **Plan Evolution** — per-turn diffs + plan-by-plan timeline in one card
+- **Topic Lifecycles**
+- **Trigger Phrase Analysis**
+- **Topic Coverage** — which configured topics never fired
+
+#### Conversation — what happened
+
+- **Visual summary KPIs** — Slowest Step, Plans Completed, Tool Success Rate
+- **Error banner** — click-to-jump deep links into the flow
+- **Conversation metadata**
+- **Sequence diagram + Gantt chart + phase breakdown**
+- **Performance Waterfall** — between-activity gap-time view (distinct from Gantt's phase totals)
+- **Variable Tracker** — orchestrator tool calls with AUTO/MANUAL binding badges, Topic/Global variable assignments, topic-level generative answer harvesting
+- **Conversation Flow** — chat-style view with filter chips, plan-tree grouping, AUTO/MANUAL annotations, copy-JSON button, raw activity-JSON viewer per row
+- **Orchestrator reasoning + turn efficiency + latency bottlenecks**
+
+> **Deep-linking:** every entity-naming visualization on this tab is clickable. Variable Tracker cards, Waterfall rows, Phase Breakdown rows, Reasoning rows, and Conversation Flow rows jump to the canonical destination (Tools tab Component Explorer for tools / topics / agents; Knowledge tab for knowledge calls). An **Expand all / Collapse all** toolbar at the top toggles every accordion in one click.
+
+#### Quality — how can I improve
+
+- **LLM Audit Runner** — default Static Config + opt-in Conversation Summary / User Sentiment / PII Detection / Answer Accuracy / Topic Routing Quality / Custom prompt; runs in parallel, stitched into one audit report
+- **Credits estimate** — per-step breakdown + Mermaid flow
+- **Quick wins**
+- **Response quality scoring**
+- **Dead code detection**
+- **Instruction alignment**
 
 ## Screenshots
 
@@ -239,8 +321,7 @@ When uploading a transcript without a bot export, a reduced tab bar shows: Conve
 - Full conversation timeline (user messages, bot responses, plan steps, knowledge searches, errors)
 - Routing scores — per-step trigger match confidence shown in decision timeline, conversation flow, and plan evolution
 - Execution phases with duration and status
-- Mermaid sequence diagram of the conversation flow
-- Mermaid Gantt chart of execution timing
+- Mermaid diagrams: conversation **sequence**, execution **Gantt**, **topic connection graph**, **integration map** (connectors), **tool call flow**, **latency heatmap**, **credit flow** (sequence with per-turn credits)
 
 **From Dataverse (live connection):**
 - Bot config and all components fetched via Web API
@@ -281,7 +362,7 @@ Each generated report contains:
 13. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log, errors
 14. **Routing Analysis** — orchestrator decision timeline with routing scores, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution with per-step confidence and diff detection, trigger phrase similarity analysis, condition evaluations
 
-The dynamic analysis view adds interactive versions of these sections across 7 tabs, plus conversation analysis features: turn efficiency, response quality scoring, dead code detection, knowledge source effectiveness, multi-agent delegation tracing, latency bottleneck analysis, and instruction-to-behavior alignment checking.
+The dynamic analysis view adds interactive versions of these sections across 6 tabs, plus conversation analysis features: turn efficiency, response quality scoring, dead code detection, knowledge source effectiveness, multi-agent delegation tracing, latency bottleneck analysis, and instruction-to-behavior alignment checking.
 
 Transcript reports contain:
 
@@ -304,6 +385,19 @@ When a conversation includes orchestrator-driven tool invocations (MCP servers, 
 - **Configured vs Called** — cross-reference tools defined in `botContent.yml` against tools actually invoked in `dialog.json`
 
 Tool call data is captured from `DynamicPlanStepTriggered`, `DynamicPlanStepBindUpdate`, and `DynamicPlanStepFinished` events in the conversation trace. Works with both full bot exports (ZIP) and transcript-only uploads.
+
+## Exports
+
+Every dynamic-page surface is reflected in the exports — what you see on screen is what lands in the file you download.
+
+| Format | Trigger | Content |
+| --- | --- | --- |
+| **Markdown (`.md`)** | Download → Markdown | Canonical text export. Drives every other format. |
+| **HTML (`.html`)** | Download → HTML | Self-contained HTML built from the markdown via `build_standalone_html`. Embedded Mermaid diagrams. |
+| **PDF (Print)** | Download → Print to PDF | Browser print of the HTML view. |
+| **Audit bundle (`.md`)** | Download Audit (Quality tab) | Audit-runner output on its own — every selected mode's result, model attribution, error per mode. |
+
+The markdown report includes: TL;DR, Quick Wins, AI configuration, security, bot metadata, sequence + Gantt diagrams, conversation flow with AUTO/MANUAL annotations, **Performance Waterfall**, **Variable Tracker**, orchestrator reasoning, decision timeline, plan evolution, topic lifecycles, topic + tool inventory (split by `tool_type`), **Component Settings Explained** (per-component action tree), integration map, model comparison, knowledge inventory + coverage + source details + search results, **Citation Verification** table, trigger phrase analysis, MCS credit estimate.
 
 ## Dataverse Connection
 
@@ -487,7 +581,7 @@ Make sure `.env` contains at least `REFLEX_ENV=prod` and `PORT=2009`.
 ```bash
 cp .env.example .env          # edit credentials
 uv sync
-uv run pytest              # 340+ tests
+uv run pytest              # 445+ tests
 uv run ruff check .
 uv run ruff format .
 uv run reflex run          # dev server — frontend :3000, backend :8000
@@ -532,7 +626,7 @@ web/
     _lint.py             Instruction lint state
     _report.py           Report generation state
     _rules.py            Custom rules state
-    _dynamic.py          Dynamic analysis state (7 tabs: profile, topics, tools, knowledge, routing, conversation, quality)
+    _dynamic.py          Dynamic analysis state (6 tabs: profile, tools, knowledge, routing, conversation, quality)
     _upload.py           File upload state + conversation analysis population
 
   components/            UI components
@@ -540,15 +634,17 @@ web/
     dataverse.py         Dataverse import form
     report.py            Report viewer
     rules.py             Rules editor
-    dynamic_analysis.py  Dynamic analysis panels (profile, topics, tools, knowledge, routing, conversation, quality)
+    dynamic_analysis.py  Dynamic analysis panels (profile, tools, knowledge, routing, conversation, quality)
     upload.py            Upload form
 
 data/
-  default_rules.yaml     18 default best-practice rules
+  default_rules.yaml         18 default best-practice rules (custom_rules YAML)
+  default_lint_modes.yaml    6 LLM Audit Runner mode definitions (system prompts + input declarations)
+  topic_explainer.yaml       Curated KB feeding the Component Explorer's hover-card explanations + per-component settings tree
 
 best_practices/          GPT model best-practice reference docs
 samples/                 Sample reports
-tests/                   Test suite (340+ tests)
+tests/                   Test suite (445+ tests)
 ```
 
 ## License

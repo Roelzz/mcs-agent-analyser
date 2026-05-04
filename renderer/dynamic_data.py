@@ -167,9 +167,8 @@ def _tool_call_var_row(tc, component_lookup: dict[str, str]) -> dict:
     # task_dialog_id (which is sometimes the schema, sometimes a
     # `P:...` runtime id). When nothing resolves, leave the link
     # target empty.
-    schema = (
-        _resolve_component_schema(tc.display_name or "", component_lookup)
-        or _resolve_component_schema(tc.task_dialog_id or "", component_lookup)
+    schema = _resolve_component_schema(tc.display_name or "", component_lookup) or _resolve_component_schema(
+        tc.task_dialog_id or "", component_lookup
     )
     row = _empty_var_row()
     row.update(
@@ -330,5 +329,5 @@ def build_variable_tracker_rows(timeline, profile=None) -> list[dict]:
             rows.append(_variable_assignment_var_row(ev, idx))
     for idx, trace in enumerate(timeline.generative_answer_traces):
         rows.append(_generative_answer_var_row(trace, idx, topic_to_var))
-    rows.sort(key=lambda r: (r.get("timestamp") or ""))
+    rows.sort(key=lambda r: r.get("timestamp") or "")
     return rows
