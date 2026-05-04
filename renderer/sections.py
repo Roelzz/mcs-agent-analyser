@@ -51,8 +51,21 @@ def _build_dialog_link_resolver(profile: "BotProfile | None"):
     is keyed by `schema_name` — the picker key used by the Component
     Explorer's `select_topic_in_explorer(schema_name)` event.
 
+    Resolution rules:
+      - Exact match against display_name (case-insensitive).
+      - Exact match against schema_name (case-insensitive).
+      - No fuzzy suffix matching: bots with namespace-style schemas
+        (e.g. `org.foo.Topic` and `org.bar.Topic`) used to mis-resolve
+        because both shared a `topic` suffix and `setdefault` picked
+        the first-inserted component. A clean miss is preferable to a
+        silent mis-route.
+      - Components without a `schema_name` are unaddressable in the
+        Component Explorer (its picker is keyed by schema_name), so
+        return `("", "")` for them rather than emitting a broken link
+        with empty target_id.
+
     Returns `("", "")` when profile is None or the name can't be
-    resolved.
+    resolved cleanly.
     """
     if profile is None:
         return lambda _name: ("", "")
@@ -61,24 +74,21 @@ def _build_dialog_link_resolver(profile: "BotProfile | None"):
     for c in profile.components:
         if c.kind != "DialogComponent":
             continue
+        if not c.schema_name:
+            # Unaddressable in the Component Explorer — skip entirely.
+            continue
         dn_lower = (c.display_name or "").lower().strip()
         if dn_lower:
             by_key.setdefault(dn_lower, c)
-        if c.schema_name:
-            sl = c.schema_name.lower()
-            by_key.setdefault(sl, c)
-            suffix = c.schema_name.rsplit(".", 1)[-1].lower()
-            by_key.setdefault(suffix, c)
+        by_key.setdefault(c.schema_name.lower(), c)
 
     def resolve(topic_name: str) -> tuple[str, str]:
         if not topic_name:
             return ("", "")
         comp = by_key.get(topic_name.lower().strip())
-        if comp is None:
+        if comp is None or not comp.schema_name:
             return ("", "")
-        # Always Tools tab (post-#18), always keyed by schema_name to
-        # match the Component Explorer picker.
-        return ("tools", comp.schema_name or comp.display_name or "")
+        return ("tools", comp.schema_name)
 
     return resolve
 
