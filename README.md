@@ -11,11 +11,11 @@ Everything you need to build with confidence and debug without guessing. If you'
 
 ## Why Agent Analyser
 
+- **Your data stays yours** — runs locally or self-hosted in your own tenant. No data is sent externally (except to OpenAI/Anthropic if you opt into the LLM Audit Runner)
 - **Full visibility into bot architecture** — see every topic, variable, knowledge source, MCP server, connector, and connected agent, and how they wire together, in one report
 - **Conversation debugging** — chat-style conversation flow with filter chips, error banner, deep-link hyperlinks, plan-tree grouping, and per-event raw-JSON viewer
 - **Performance insights** — per-turn efficiency metrics, latency bottleneck identification, between-activity gap waterfall, knowledge source effectiveness, and multi-agent delegation tracing
 - **Conversation quality analysis** — response groundedness scoring, hallucination risk detection, instruction compliance checking, and dead code detection
-- **Your data stays yours** — runs locally or self-hosted in your own tenant. No data is sent externally (except to OpenAI/Anthropic if you opt into the LLM Audit Runner)
 - **Works with exports and live Dataverse** — upload a `.zip` export, or connect directly to your environment and auto-analyse on login
 - **Catch issues with AI-powered linting of agent instructions** — multi-mode audit runner (Static Config + opt-in Conversation Summary / Sentiment / PII / Answer Accuracy / Topic Routing / Custom prompts) powered by OpenAI or Anthropic
 
