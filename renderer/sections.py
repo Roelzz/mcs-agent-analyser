@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from models import (
@@ -53,6 +54,13 @@ def _build_dialog_link_resolver(profile: "BotProfile | None"):
     Resolution rules:
       - Exact match against display_name (case-insensitive).
       - Exact match against schema_name (case-insensitive).
+      - **MCP `Server:tool` patterns** — the timeline emits topic_name
+        like `ZavaExpenseMCP:create_new_expense_report`. The prefix
+        before the colon is the server's display_name with whitespace
+        stripped (e.g. "Zava Expense MCP" → "ZavaExpenseMCP"). Match
+        the prefix against a parallel space-stripped display_name index
+        so every MCP tool row in the Conversation Flow can deep-link to
+        the parent MCP server component.
       - No fuzzy suffix matching: bots with namespace-style schemas
         (e.g. `org.foo.Topic` and `org.bar.Topic`) used to mis-resolve
         because both shared a `topic` suffix and `setdefault` picked
@@ -70,6 +78,9 @@ def _build_dialog_link_resolver(profile: "BotProfile | None"):
         return lambda _name: ("", "")
 
     by_key: dict = {}
+    # Parallel index keyed by display_name with all whitespace stripped
+    # — MCP tool calls use `<DisplayNameNoSpaces>:<tool>` topic_names.
+    by_compact: dict = {}
     for c in profile.components:
         if c.kind != "DialogComponent":
             continue
@@ -79,12 +90,18 @@ def _build_dialog_link_resolver(profile: "BotProfile | None"):
         dn_lower = (c.display_name or "").lower().strip()
         if dn_lower:
             by_key.setdefault(dn_lower, c)
+            by_compact.setdefault(dn_lower.replace(" ", "").replace("-", ""), c)
         by_key.setdefault(c.schema_name.lower(), c)
 
     def resolve(topic_name: str) -> tuple[str, str]:
         if not topic_name:
             return ("", "")
-        comp = by_key.get(topic_name.lower().strip())
+        key = topic_name.lower().strip()
+        comp = by_key.get(key)
+        if comp is None and ":" in key:
+            # MCP-style "Server:tool" — try the server prefix.
+            prefix = key.split(":", 1)[0].strip()
+            comp = by_key.get(prefix) or by_compact.get(prefix.replace(" ", "").replace("-", ""))
         if comp is None or not comp.schema_name:
             return ("", "")
         return ("tools", comp.schema_name)
@@ -339,6 +356,97 @@ def _strip_prefix(text: str, prefix: str) -> str:
     return text
 
 
+# ---------------------------------------------------------------------------
+# Human-in-the-loop detection (Issue C from the AgentRx plan).
+#
+# HITL tool calls (built-in Approvals action, MCP variants, or future
+# Adaptive-Card / Forms connectors) carry the most consequential exchange in
+# the trajectory: the bot asks a structured question, a human answers via
+# email/Teams, the bot consumes the answer. The default flow renderer reduces
+# this to two opaque "Step start / Step end" rows. The matcher below tags
+# the tool call so `build_conversation_flow_items` can emit a single richer
+# row instead.
+#
+# Extending: add a new entry to `_HITL_MATCHERS`. Match strings are
+# case-insensitive substrings of `task_dialog_id` or `display_name`.
+# ---------------------------------------------------------------------------
+
+_HITL_MATCHERS: tuple[str, ...] = (
+    "humanintheloop",
+    "human_in_the_loop",
+    "request_for_information",
+    "requestforinformation",
+)
+
+# Bookkeeping keys we strip out of HITL response dicts before showing them —
+# the user doesn't care about Microsoft Entra IDs returned by Approvals.
+_HITL_RESPONSE_NOISE_KEYS = frozenset({"responderObjectId", "responderObjectID", "_responderObjectId"})
+
+
+def _is_hitl_tool_call(tc) -> bool:
+    """True when the tool call looks like a human-in-the-loop / approval
+    action. Matches against `task_dialog_id` and `display_name`."""
+    blob = ((getattr(tc, "task_dialog_id", "") or "") + " " + (getattr(tc, "display_name", "") or "")).lower()
+    return any(tok in blob for tok in _HITL_MATCHERS)
+
+
+def _hitl_request_input_keys(arguments: dict) -> list[str]:
+    """Pull the ordered list of input keys from a HITL tool's `input.properties`.
+
+    The parser stringifies argument values via `str(v)`, which produces
+    Python's repr (single-quoted) rather than valid JSON. Try `json.loads`
+    first (in case the source was a string), fall back to `ast.literal_eval`,
+    then accept the value directly if it's already a dict. Returns [] when
+    the schema is missing or malformed."""
+    raw = arguments.get("input")
+    if not raw:
+        return []
+    parsed = None
+    if isinstance(raw, dict):
+        parsed = raw
+    elif isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            try:
+                import ast
+
+                parsed = ast.literal_eval(raw)
+            except (ValueError, SyntaxError):
+                return []
+    if not isinstance(parsed, dict):
+        return []
+    props = parsed.get("properties")
+    if not isinstance(props, dict):
+        return []
+    return list(props.keys())
+
+
+def _hitl_response_pairs(observation) -> list[dict]:
+    """Flatten the HITL response into `[{key, value}, ...]` for rx.foreach.
+
+    Reads from `ToolCallObservation.structured_content` (populated for
+    connector-style tools by the parser fallback in timeline.py)."""
+    if observation is None:
+        return []
+    structured = getattr(observation, "structured_content", None)
+    if not isinstance(structured, dict):
+        return []
+    pairs: list[dict] = []
+    for key, value in structured.items():
+        if key in _HITL_RESPONSE_NOISE_KEYS:
+            continue
+        if isinstance(value, (dict, list)):
+            try:
+                value_str = json.dumps(value, default=str)
+            except (TypeError, ValueError):
+                value_str = str(value)
+        else:
+            value_str = str(value) if value is not None else ""
+        pairs.append({"key": str(key), "value": value_str[:300]})
+    return pairs
+
+
 def group_flow_items(items: list[dict]) -> list[dict]:
     """Group conversation flow items into plan cards + loose groups.
 
@@ -399,10 +507,31 @@ def group_flow_items(items: list[dict]) -> list[dict]:
         groups.append(current_plan)
         current_plan = None
 
+    def _close_running_plan() -> None:
+        """Flush an unfinished plan as 'running'. Used both at end-of-stream
+        AND when a fresh PlanReceived arrives without a prior PlanFinished
+        — orchestrators legitimately re-plan mid-run, so we'd otherwise
+        silently drop every plan except the last one."""
+        nonlocal current_plan
+        if current_plan is None:
+            return
+        n = len(current_plan["items"])
+        pid = current_plan["plan_identifier"]
+        short_pid = pid[:8] if pid else "<unknown>"
+        current_plan["status"] = "running"
+        current_plan["status_tone"] = "info"
+        current_plan["header_summary"] = f"Plan {short_pid} — {n} event{'s' if n != 1 else ''} (running)"
+        groups.append(current_plan)
+        current_plan = None
+
     for item in items:
         et = item.get("event_type", "")
         if et == "PlanReceived":
             _close_loose()
+            # Flush any in-flight plan before starting a new one. Without
+            # this, every PlanReceived after the first one silently dropped
+            # the previous plan's items.
+            _close_running_plan()
             current_plan = {
                 "is_plan": "true",
                 "plan_identifier": item.get("plan_identifier") or "",
@@ -429,15 +558,9 @@ def group_flow_items(items: list[dict]) -> list[dict]:
                 loose = _empty_loose()
             loose["items"].append(item)
 
-    # Flush — a plan that never received PlanFinished stays as "running".
-    if current_plan is not None:
-        n = len(current_plan["items"])
-        pid = current_plan["plan_identifier"]
-        short_pid = pid[:8] if pid else "<unknown>"
-        current_plan["status"] = "running"
-        current_plan["status_tone"] = "info"
-        current_plan["header_summary"] = f"Plan {short_pid} — {n} event{'s' if n != 1 else ''} (running)"
-        groups.append(current_plan)
+    # End-of-stream flush — unfinished plan stays as "running", loose items
+    # get their own group.
+    _close_running_plan()
     _close_loose()
     return groups
 
@@ -460,6 +583,14 @@ def build_conversation_flow_items(
     # Per-step tool-call lookup so STEP_TRIGGERED / STEP_FINISHED flow
     # rows can render AUTO/MANUAL binding counts.
     tool_call_by_step: dict[str, object] = {tc.step_id: tc for tc in timeline.tool_calls if tc.step_id}
+
+    # HITL detection (Issue C) — collect step_ids of human-in-the-loop tool
+    # calls so the loop below can replace their generic Triggered/Finished
+    # rows with a single richer "hitl_exchange" card.
+    hitl_step_ids: set[str] = {sid for sid, tc in tool_call_by_step.items() if _is_hitl_tool_call(tc)}
+    hitl_finished_ids: set[str] = {
+        ev.step_id for ev in timeline.events if ev.event_type == EventType.STEP_FINISHED and ev.step_id in hitl_step_ids
+    }
 
     # Extra detail keys required by rx.foreach (must be uniform across all dicts)
     _detail_defaults = {
@@ -495,6 +626,16 @@ def build_conversation_flow_items(
         # row isn't a step or has no matching tool call.
         "auto_filled_count": "",
         "manual_filled_count": "",
+        # ── HITL exchange row (kind="hitl_exchange") fields ──
+        # All rows carry these (defaults empty) so rx.foreach gets a
+        # uniform shape; only HITL rows actually populate them.
+        "hitl_request_title": "",
+        "hitl_request_message": "",
+        "hitl_request_input_keys": [],
+        "hitl_assignee": "",
+        "hitl_response_pairs": [],
+        "hitl_state": "",
+        "hitl_duration_label": "",
     }
 
     latest_user_idx: int | None = None
@@ -541,6 +682,67 @@ def build_conversation_flow_items(
                     "topic_name": "",
                     "state": "",
                     **_detail_defaults,
+                }
+            )
+            items[-1]["raw_json"] = _flow_event_raw_json(ev)
+            continue
+
+        # HITL exchange — replace the generic Triggered/Finished pair with a
+        # single rich row at whichever event has the data we need (Finished
+        # if it exists; Triggered otherwise for in-flight HITL).
+        if (
+            ev.step_id
+            and ev.step_id in hitl_step_ids
+            and ev.event_type
+            in (
+                EventType.STEP_TRIGGERED,
+                EventType.STEP_FINISHED,
+            )
+        ):
+            # Skip Triggered when a Finished will follow — we'll emit there.
+            if ev.event_type == EventType.STEP_TRIGGERED and ev.step_id in hitl_finished_ids:
+                continue
+            tc = tool_call_by_step[ev.step_id]
+            args = getattr(tc, "arguments", {}) or {}
+            response_pairs = (
+                _hitl_response_pairs(getattr(tc, "observation", None))
+                if ev.event_type == EventType.STEP_FINISHED
+                else []
+            )
+            duration_label = ""
+            duration_ms = getattr(tc, "duration_ms", 0) or 0
+            if duration_ms > 0:
+                duration_label = _format_duration(duration_ms)
+            state_label = (
+                "completed"
+                if ev.event_type == EventType.STEP_FINISHED and (getattr(tc, "state", "") or "completed") != "failed"
+                else ("failed" if getattr(tc, "state", "") == "failed" else "inProgress")
+            )
+            link_tab, link_id = dialog_link(ev.topic_name or "")
+            items.append(
+                {
+                    "kind": "hitl_exchange",
+                    "role": "",
+                    "actor": "",
+                    "text": "",
+                    "event_type": ev.event_type.value,
+                    "title": "Human-in-the-loop",
+                    "summary": (args.get("title") or "Human-in-the-loop request")[:160],
+                    "timestamp": timestamp,
+                    "tone": "warn" if state_label == "failed" else "info",
+                    "thought": "",
+                    "topic_name": ev.topic_name or "",
+                    "state": state_label,
+                    **{**_detail_defaults},
+                    "link_target_tab": link_tab,
+                    "link_target_id": link_id,
+                    "hitl_request_title": (args.get("title") or "")[:200],
+                    "hitl_request_message": (args.get("message") or "")[:1000],
+                    "hitl_request_input_keys": _hitl_request_input_keys(args),
+                    "hitl_assignee": (args.get("assignedTo") or "")[:200],
+                    "hitl_response_pairs": response_pairs,
+                    "hitl_state": state_label,
+                    "hitl_duration_label": duration_label,
                 }
             )
             items[-1]["raw_json"] = _flow_event_raw_json(ev)

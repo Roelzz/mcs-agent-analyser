@@ -9,6 +9,27 @@ Everything you need to build with confidence and debug without guessing. If you'
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
+## Contents
+
+- [Why Agent Analyser](#why-agent-analyser)
+- [What You Can Do](#what-you-can-do)
+- [How data flows through it](#how-data-flows-through-it)
+- [Quick Start](#quick-start)
+- [Dynamic Analysis Tabs](#dynamic-analysis-tabs)
+- [What It Extracts](#what-it-extracts)
+- [Tool Call Analysis](#tool-call-analysis)
+- [Rules engine](#rules-engine)
+- [Report Structure](#report-structure)
+- [Exports](#exports)
+- [Dataverse Connection](#dataverse-connection)
+- [AI-powered features](#ai-powered-features)
+  - [LLM Audit Runner](#llm-audit-runner)
+  - [Failure Diagnosis (AgentRX)](#failure-diagnosis-agentrx)
+- [Deployment](#deployment)
+- [Development](#development)
+- [Project Structure](#project-structure)
+- [License](#license)
+
 ## Why Agent Analyser
 
 - **Your data stays yours** — runs locally or self-hosted in your own tenant. No data is sent externally (except to OpenAI/Anthropic if you opt into the LLM Audit Runner)
@@ -18,6 +39,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 - **Conversation quality analysis** — response groundedness scoring, hallucination risk detection, instruction compliance checking, and dead code detection
 - **Works with exports and live Dataverse** — upload a `.zip` export, or connect directly to your environment and auto-analyse on login
 - **Catch issues with AI-powered linting of agent instructions** — multi-mode audit runner (Static Config + opt-in Conversation Summary / Sentiment / PII / Answer Accuracy / Topic Routing / Custom prompts) powered by OpenAI or Anthropic
+- **AgentRX-style failure diagnosis** — root-cause attribution into 10 categories with critical-step localization, secondary findings, and a streaming chat panel to interrogate the verdict
 
 ## What You Can Do
 
@@ -40,9 +62,92 @@ Everything you need to build with confidence and debug without guessing. If you'
 | **Tool call analysis** | Runtime tool call tracing — per-tool statistics, async chain detection, orchestrator reasoning, Mermaid flow diagrams. Supports MCP servers, connectors, child/connected agents, A2A, flows, CUA |
 | **Component Explorer** | Inline searchable picker over every topic and tool (User / System / Automation topics, MCP servers, connectors, flows, child / connected / A2A agents) with KB-sourced explanations per setting |
 | **LLM Audit Runner** | Multi-mode audit (default + opt-in: conversation summary / sentiment / PII / answer accuracy / topic routing / custom prompts) — runs in parallel via OpenAI or Anthropic |
+| **Failure Diagnosis (AgentRX)** | AgentRx-style root-cause diagnosis: 10-category taxonomy, 6 heuristic rules, LLM judge with confidence + secondary findings, streaming chat-with-judge, HITL exchange surfacing in the Conversation Flow |
 | **Exports** | Markdown / HTML / Print → PDF / Audit-bundle downloads — every dynamic-page surface (Variable Tracker, Performance Waterfall, Citation Verification, etc.) is reflected in the exports |
 | **Dark / Light mode** | Respects your OS preference, green accent theme throughout |
 | **Analysis counter** | Tracks how many analyses you've run, with cat-themed gamification milestones |
+
+## How data flows through it
+
+Five ways to get data in, two channels of data, one parsing pipeline, optional LLM enrichment, four export formats. Nothing leaves your machine unless you explicitly click an LLM action — the dashed box below is the only network boundary.
+
+```mermaid
+flowchart TD
+  subgraph Inputs["📥 Input sources"]
+    direction TB
+    I1[Upload ZIP<br/>full Copilot Studio export]
+    I2[Upload loose files<br/>botContent.yml + dialog.json]
+    I3[Upload transcript JSON]
+    I4[Loose files + transcript<br/>combined upload]
+    I5[Live Dataverse fetch<br/>OAuth device code]
+  end
+
+  I1 --> BC
+  I2 --> BC
+  I4 --> BC
+  I4 --> TR
+  I3 --> TR
+  I5 --> BC
+  I5 --> TR
+
+  BC[Bot content channel<br/>static structure: topics, tools,<br/>knowledge, routing] --> PB[Parse YAML / JSON]
+  TR[Transcript channel<br/>runtime trace: events,<br/>tool calls, decisions] --> PT[Parse activity log<br/>→ timeline events]
+
+  PB --> M[Pydantic models<br/>BotProfile + ConversationTimeline]
+  PT --> M
+
+  M --> R[Renderer<br/>markdown + mermaid]
+
+  R --> T1[Profile / Tools /<br/>Knowledge / Routing tabs]
+  R --> T2[Conversation / Quality tabs]
+
+  T1 -.->|opt-in| LLM
+  T2 -.->|opt-in| LLM
+
+  subgraph LLM["🔒 Opt-in LLM enrichment — leaves your machine ONLY when you click Run / Diagnose"]
+    L1[LLM Audit Runner<br/>instruction lint]
+    L2[AgentRX judge<br/>10-category verdict]
+    L3[Ask the judge<br/>streaming chat]
+    L4[AI recs<br/>augment canned recs]
+  end
+
+  T1 --> Out
+  T2 --> Out
+  LLM --> Out
+
+  subgraph Out["📤 Outputs"]
+    O1[Markdown .md]
+    O2[HTML .html]
+    O3[PDF print]
+    O4[Audit bundle .md]
+  end
+
+  classDef input fill:#dbeafe,stroke:#1e40af,color:#1e3a8a
+  classDef channel fill:#ede9fe,stroke:#6d28d9,color:#4c1d95
+  classDef process fill:#fef3c7,stroke:#a16207,color:#713f12
+  classDef tabs fill:#d1fae5,stroke:#047857,color:#064e3b
+  classDef llm fill:#fecaca,stroke:#b91c1c,color:#7f1d1d
+  classDef output fill:#d1fae5,stroke:#047857,color:#064e3b
+
+  class I1,I2,I3,I4,I5 input
+  class BC,TR channel
+  class PB,PT,M,R process
+  class T1,T2 tabs
+  class L1,L2,L3,L4 llm
+  class O1,O2,O3,O4 output
+
+  style LLM fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d,stroke-dasharray:5 5
+```
+
+**Two data channels, not one.** *Bot content* is the static structure of your agent (topics, tools, knowledge sources, routing config). *Transcript* is a runtime trace of what actually happened in a conversation. Either alone gets you partial coverage:
+
+- **Bot content alone** → Profile, Tools, Knowledge, Routing tabs are full. Conversation + Quality tabs are empty.
+- **Transcript alone** → Conversation tab renders, but most cross-cutting analysis (dead-code, knowledge effectiveness, multi-agent delegation) needs the static config to compare against.
+- **Both together** → full report, including cross-references between runtime evidence and static config (e.g. *"this topic is defined but never triggered"*, *"this knowledge source is queried but never contributes a citation"*).
+
+A live Dataverse fetch always pulls both — it grabs `bot` + `botcomponent` (bot content) and `conversationtranscript` (transcripts) in one go.
+
+**Opt-in LLM enrichment.** The dashed cyan box is the only place your data hits an external API. Parsing, heuristic rules, rendering, exports — all local. The LLM Audit Runner needs your own OpenAI / Anthropic key; the AgentRX judge + chat reuse it. **Off by default.** When you do turn them on, PII redaction (emails, phones, IBAN, BSN, credit-card numbers, names) is on by default for the AgentRX judge so transcripts get scrubbed before they leave the box.
 
 ## Quick Start
 
@@ -100,119 +205,6 @@ uv run python main.py path/to/botContent_folder
 uv run python main.py path/to/botContent_folder -o custom_report.md
 ```
 
-## Quick Wins (Built-in Rules)
-
-Every bot analysis automatically evaluates a set of built-in heuristic checks against the parsed `BotProfile`. Results appear in the **Quick Wins** section of the report with emoji severity indicators (🔴 fail, 🟡 warning, 🔵 info).
-
-These are hardcoded checks — no configuration needed. They catch structural issues that are easy to miss when reading raw bot config.
-
-### Component Checks
-
-| Check | Severity | What it catches |
-| --- | --- | --- |
-| Disabled topics | warning | Topics with state ≠ Active — enable or remove to reduce clutter |
-| No trigger queries | warning | User topics without trigger phrases — recognizer can never match them |
-| Weak descriptions | info | Topics, tools, agents, etc. with missing, too-short, or display-name-matching descriptions |
-| Missing system topics | warning | Missing `OnError`, `OnUnknownIntent`, or `OnEscalate` handlers |
-| Unused global variables | info | Global variables whose schema name isn't referenced by other components (heuristic) |
-
-### Connection Checks
-
-| Check | Severity | What it catches |
-| --- | --- | --- |
-| Missing connector definition | warning | Connection reference points to a connector ID with no matching definition |
-| Duplicate connection reference | warning | Same logical name appears more than once |
-| Orphaned connector definition | info | Connector defined but not referenced by any connection reference |
-| Unused connection reference | info | Connection reference defined but not used by any component |
-
-Custom rules (see below) are evaluated after these built-in checks and appended to the same Quick Wins section.
-
-## Custom Rules
-
-Rules are YAML-based conditions evaluated against the `BotProfile` model. They run during bot analysis and surface in the Quick Wins section of the report.
-
-### Default Rules
-
-Agent Analyser ships with 18 best-practice rules across 4 categories:
-
-| ID | Category | Severity | What it checks |
-| --- | --- | --- | --- |
-| BP001 | Architecture | warning | No conversation starters defined |
-| BP002 | Architecture | warning | No system instructions configured |
-| BP003 | Architecture | warning | No explicit model hint configured |
-| BP004 | Architecture | warning | Authentication mode is Unknown |
-| BP005 | Architecture | info | No GPT description set |
-| BP017 | Architecture | warning | Instructions lack constraint/boundary language |
-| BP018 | Architecture | info | No escalation or handoff guidance in instructions |
-| BP006 | Security | fail | Content moderation is Unknown |
-| BP007 | Security | fail | Sensitive properties logged to Application Insights |
-| BP008 | Security | warning | Access control policy is Unknown |
-| BP009 | Security | warning | Instructions don't mention data handling or privacy |
-| BP011 | Knowledge | info | Code interpreter is enabled |
-| BP012 | Knowledge | info | Web browsing is enabled |
-| BP010 | Operations | info | Automatic model updates enabled |
-| BP013 | Operations | warning | No Application Insights configured |
-| BP014 | Operations | warning | Activity logging disabled in Application Insights |
-| BP015 | Operations | warning | No deployment channels configured |
-| BP016 | Operations | info | No knowledge sources configured |
-
-### YAML Format
-
-```yaml
-rules:
-  - rule_id: BP001
-    severity: warning          # fail | warning | info
-    category: Architecture     # free-text grouping
-    message: "No conversation starters defined"
-    condition:
-      field: "gpt_info.conversation_starters"
-      operator: eq             # eq | not_exists | not_contains
-      value: []
-```
-
-**Field paths** reference `BotProfile` attributes using dot notation. Use `[]` for array fields (e.g. `channels`, `knowledge_sources`).
-
-**Supported operators** (`custom_rules.py:_apply_operator`):
-- `exists` — field is not `None`
-- `not_exists` — field is `None` or missing
-- `eq` — field equals the given value
-- `ne` — field is not equal to the given value
-- `contains` — string field contains substring, or list contains element
-- `not_contains` — inverse of `contains`
-- `matches` — string field matches a regex (capped at 500 chars; nested-quantifier patterns rejected for safety)
-- `gt` / `gte` / `lt` / `lte` — numeric comparisons (returns `False` on type mismatch)
-
-### Configuration
-
-Set `CUSTOM_RULES_FILE` in `.env` to point to your rules file. Falls back to `data/default_rules.yaml` if unset.
-
-```bash
-CUSTOM_RULES_FILE=data/default_rules.yaml
-```
-
-### Where Rules Appear
-
-- **Analysis reports** — Quick Wins section with emoji severity indicators (🔴 fail, 🟡 warning, 🔵 info) and styled badges
-- **Rules page** (`/rules`) — view, edit, and manage rules in the web UI
-
-## LLM Audit Runner
-
-The Quality tab carries an audit runner that puts **`OPENAI_API_KEY`** or **`ANTHROPIC_API_KEY`** to work over your bot config and conversation transcript. Every audit mode is opt-in except the legacy default; clicking **Instruction Lint** with no other interaction reproduces the original behaviour.
-
-| Mode | Default | Inputs | What it answers |
-| --- | --- | --- | --- |
-| **Static Config** | ✅ on | bot profile | Are the system instructions clear? Guardrails, knowledge config, topic architecture, component health. |
-| **Conversation Summary** | ⬜ opt-in | transcript | 3-bullet recap + a single actionable insight. |
-| **User Sentiment** | ⬜ opt-in | transcript | Per-turn sentiment, escalation signals, final-state risk score. |
-| **PII Detection** | ⬜ opt-in | transcript | Categorised findings table + per-finding source + risk + recommendations. |
-| **Answer Accuracy** | ⬜ opt-in | transcript | Per user-question verdict (Answered / Partial / Avoided / Wrong) with evidence. |
-| **Topic Routing Quality** | ⬜ opt-in | profile + transcript | Did the orchestrator pick the right topic? Lists missed-better-fit cases. |
-| **Custom prompt** | ⬜ opt-in | available | Free-form prompt — useful one-off audits. |
-
-Modes shipped in **`data/default_lint_modes.yaml`** — extend or override by editing the file. Selected modes run in **parallel**; per-audit failures are isolated (one mode crashing doesn't take out the others). Transcript-only modes auto-disable when no `dialog.json` is uploaded.
-
-The audit results are appended to the markdown report (so `.md` / `.html` / PDF downloads include them) and downloadable on their own as a separate audit bundle.
-
 ## Dynamic Analysis Tabs
 
 The dynamic analysis page presents bot and conversation data across 6 purpose-driven tabs:
@@ -224,7 +216,7 @@ The dynamic analysis page presents bot and conversation data across 6 purpose-dr
 | **Knowledge** | `database` | Is the knowledge useful? Sources, search results, source effectiveness, citation verification |
 | **Routing** | `route` | How did orchestration work? Decision timeline, plan evolution diffs, topic lifecycles, trigger analysis, topic coverage |
 | **Conversation** | `message-square` | What happened? Visual dashboard, chat replay, sequence/Gantt diagrams, performance waterfall, variable tracker, turn efficiency, latency bottlenecks |
-| **Quality** | `shield-check` | How can I improve? LLM Audit Runner, credits estimate, quick wins, response quality, dead code, instruction alignment |
+| **Quality** | `shield-check` | How can I improve? LLM Audit Runner, AgentRX failure diagnosis, credits estimate, quick wins, response quality, dead code, instruction alignment |
 
 When uploading a transcript without a bot export, a reduced tab bar shows: Conversation, Tools, Routing, Quality.
 
@@ -240,6 +232,8 @@ When uploading a transcript without a bot export, a reduced tab bar shows: Conve
 - **Model configuration + recommendation**
 - **Trigger Overlaps** — topics with >50% overlap in trigger phrases, flags ambiguous routing
 - **Quick Wins + custom rule findings**
+
+![Dynamic Analysis Profile](docs/screenshots/dynamic-profile.png)
 
 #### Tools — what it can do, did it work
 
@@ -258,6 +252,8 @@ When uploading a transcript without a bot export, a reduced tab bar shows: Conve
 - **Generative answer traces** — rewrite chain, token usage, ranked results, citations (per topic)
 - **Citation Verification panel** — flat audit of every (trace, citation) pair with answer state, completion state, moderation flags, provenance
 
+![Knowledge Search](docs/screenshots/knowledge-search.png)
+
 #### Routing — how orchestration worked
 
 - **Decision timeline** — grouped by user-message turn
@@ -265,6 +261,8 @@ When uploading a transcript without a bot export, a reduced tab bar shows: Conve
 - **Topic Lifecycles**
 - **Trigger Phrase Analysis**
 - **Topic Coverage** — which configured topics never fired
+
+![Execution Timeline](docs/screenshots/execution-timeline.png)
 
 #### Conversation — what happened
 
@@ -279,32 +277,17 @@ When uploading a transcript without a bot export, a reduced tab bar shows: Conve
 
 > **Deep-linking:** every entity-naming visualization on this tab is clickable. Variable Tracker cards, Waterfall rows, Phase Breakdown rows, Reasoning rows, and Conversation Flow rows jump to the canonical destination (Tools tab Component Explorer for tools / topics / agents; Knowledge tab for knowledge calls). An **Expand all / Collapse all** toolbar at the top toggles every accordion in one click.
 
+![Conversation Analytics](docs/screenshots/conversation-analytics.png)
+
 #### Quality — how can I improve
 
-- **LLM Audit Runner** — default Static Config + opt-in Conversation Summary / User Sentiment / PII Detection / Answer Accuracy / Topic Routing Quality / Custom prompt; runs in parallel, stitched into one audit report
+- **LLM Audit Runner** — default Static Config + opt-in Conversation Summary / User Sentiment / PII Detection / Answer Accuracy / Topic Routing Quality / Custom prompt; runs in parallel, stitched into one audit report (see [AI-powered features](#ai-powered-features))
+- **Failure Diagnosis (AgentRX)** — AgentRx-style root-cause diagnosis with chat-with-judge (see [AI-powered features](#ai-powered-features))
 - **Credits estimate** — per-step breakdown + Mermaid flow
 - **Quick wins**
 - **Response quality scoring**
 - **Dead code detection**
 - **Instruction alignment**
-
-## Screenshots
-
-### Dynamic Analysis — Profile Tab
-
-![Dynamic Analysis Profile](docs/screenshots/dynamic-profile.png)
-
-### Knowledge Search Results
-
-![Knowledge Search](docs/screenshots/knowledge-search.png)
-
-### Conversation Analytics
-
-![Conversation Analytics](docs/screenshots/conversation-analytics.png)
-
-### Execution Timeline
-
-![Execution Timeline](docs/screenshots/execution-timeline.png)
 
 ## What It Extracts
 
@@ -343,6 +326,114 @@ When uploading a transcript without a bot export, a reduced tab bar shows: Conve
 - Automatically detects the bot's AI model provider (OpenAI or Anthropic) and uses the matching API
 - Requires `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` in `.env` (depending on the bot's configured model)
 
+## Tool Call Analysis
+
+When a conversation includes orchestrator-driven tool invocations (MCP servers, connectors, child agents, etc.), Agent Analyser traces every call from trigger to finish and presents runtime analysis in the Tools tab.
+
+**Supported tool types:** MCP Server, Connector Tool, Child Agent, Connected Agent, A2A Agent, Flow Tool, CUA Tool.
+
+**What it shows:**
+- **Tool Call Flow** — Mermaid sequence diagram showing Orchestrator dispatching to tools
+- **Tool Statistics** — per-tool call counts, success rates, avg/min/max/total timing
+- **Async Chain Detection** — automatically identifies polling/retry patterns (e.g. Databricks Genie query + poll cycles) with status progression tracking
+- **Orchestrator Reasoning** — the LLM's `thought` for each tool selection
+- **Tool Call Details** — expandable cards with arguments, observation summaries, and raw JSON responses
+- **Configured vs Called** — cross-reference tools defined in `botContent.yml` against tools actually invoked in `dialog.json`
+
+Tool call data is captured from `DynamicPlanStepTriggered`, `DynamicPlanStepBindUpdate`, and `DynamicPlanStepFinished` events in the conversation trace. Works with both full bot exports (ZIP) and transcript-only uploads.
+
+## Rules engine
+
+Two layers of rule evaluation, both surfacing in the analysis report's Quick Wins section with emoji severity indicators (🔴 fail, 🟡 warning, 🔵 info):
+
+1. **Built-in heuristic checks** — hardcoded structural checks against the parsed `BotProfile`. No configuration. Catch issues that are easy to miss when reading raw bot config.
+2. **Custom YAML rules** — declarative rules loaded from a YAML file. 18 default best-practice rules ship in the box; extend or replace them by pointing `CUSTOM_RULES_FILE` at your own file.
+
+### Built-in heuristic checks
+
+Every bot analysis automatically evaluates these checks. They run before the YAML rules and use the same severity legend.
+
+#### Component Checks
+
+| Check | Severity | What it catches |
+| --- | --- | --- |
+| Disabled topics | warning | Topics with state ≠ Active — enable or remove to reduce clutter |
+| No trigger queries | warning | User topics without trigger phrases — recognizer can never match them |
+| Weak descriptions | info | Topics, tools, agents, etc. with missing, too-short, or display-name-matching descriptions |
+| Missing system topics | warning | Missing `OnError`, `OnUnknownIntent`, or `OnEscalate` handlers |
+| Unused global variables | info | Global variables whose schema name isn't referenced by other components (heuristic) |
+
+#### Connection Checks
+
+| Check | Severity | What it catches |
+| --- | --- | --- |
+| Missing connector definition | warning | Connection reference points to a connector ID with no matching definition |
+| Duplicate connection reference | warning | Same logical name appears more than once |
+| Orphaned connector definition | info | Connector defined but not referenced by any connection reference |
+| Unused connection reference | info | Connection reference defined but not used by any component |
+
+### Default custom rules
+
+Agent Analyser ships with 18 best-practice rules across 4 categories. They're defined in `data/default_rules.yaml` and evaluated after the built-in heuristic checks.
+
+| ID | Category | Severity | What it checks |
+| --- | --- | --- | --- |
+| BP001 | Architecture | warning | No conversation starters defined |
+| BP002 | Architecture | warning | No system instructions configured |
+| BP003 | Architecture | warning | No explicit model hint configured |
+| BP004 | Architecture | warning | Authentication mode is Unknown |
+| BP005 | Architecture | info | No GPT description set |
+| BP017 | Architecture | warning | Instructions lack constraint/boundary language |
+| BP018 | Architecture | info | No escalation or handoff guidance in instructions |
+| BP006 | Security | fail | Content moderation is Unknown |
+| BP007 | Security | fail | Sensitive properties logged to Application Insights |
+| BP008 | Security | warning | Access control policy is Unknown |
+| BP009 | Security | warning | Instructions don't mention data handling or privacy |
+| BP011 | Knowledge | info | Code interpreter is enabled |
+| BP012 | Knowledge | info | Web browsing is enabled |
+| BP010 | Operations | info | Automatic model updates enabled |
+| BP013 | Operations | warning | No Application Insights configured |
+| BP014 | Operations | warning | Activity logging disabled in Application Insights |
+| BP015 | Operations | warning | No deployment channels configured |
+| BP016 | Operations | info | No knowledge sources configured |
+
+### Adding your own rules
+
+```yaml
+rules:
+  - rule_id: BP001
+    severity: warning          # fail | warning | info
+    category: Architecture     # free-text grouping
+    message: "No conversation starters defined"
+    condition:
+      field: "gpt_info.conversation_starters"
+      operator: eq             # eq | not_exists | not_contains
+      value: []
+```
+
+**Field paths** reference `BotProfile` attributes using dot notation. Use `[]` for array fields (e.g. `channels`, `knowledge_sources`).
+
+**Supported operators** (`custom_rules.py:_apply_operator`):
+- `exists` — field is not `None`
+- `not_exists` — field is `None` or missing
+- `eq` — field equals the given value
+- `ne` — field is not equal to the given value
+- `contains` — string field contains substring, or list contains element
+- `not_contains` — inverse of `contains`
+- `matches` — string field matches a regex (capped at 500 chars; nested-quantifier patterns rejected for safety)
+- `gt` / `gte` / `lt` / `lte` — numeric comparisons (returns `False` on type mismatch)
+
+Set `CUSTOM_RULES_FILE` in `.env` to point to your own rules file. Falls back to `data/default_rules.yaml` if unset.
+
+```bash
+CUSTOM_RULES_FILE=data/default_rules.yaml
+```
+
+### Where rules appear
+
+- **Analysis reports** — Quick Wins section with emoji severity indicators (🔴 fail, 🟡 warning, 🔵 info) and styled badges
+- **Rules page** (`/rules`) — view, edit, and manage rules in the web UI
+
 ## Report Structure
 
 Each generated report contains:
@@ -361,6 +452,7 @@ Each generated report contains:
 12. **Credit Estimate** — MCS message credit estimation based on bot features
 13. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log, errors
 14. **Routing Analysis** — orchestrator decision timeline with routing scores, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution with per-step confidence and diff detection, trigger phrase similarity analysis, condition evaluations
+15. **Failure Diagnosis** — when the heuristic engine flags non-trivial violations: critical step, category, evidence table, canned recommendations (see [AgentRX](#failure-diagnosis-agentrx))
 
 The dynamic analysis view adds interactive versions of these sections across 6 tabs, plus conversation analysis features: turn efficiency, response quality scoring, dead code detection, knowledge source effectiveness, multi-agent delegation tracing, latency bottleneck analysis, and instruction-to-behavior alignment checking.
 
@@ -369,22 +461,6 @@ Transcript reports contain:
 1. **Title** — derived from the JSON filename
 2. **Session Summary** — start/end time, session type, outcome, turn count, implied success
 3. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log
-
-## Tool Call Analysis
-
-When a conversation includes orchestrator-driven tool invocations (MCP servers, connectors, child agents, etc.), Agent Analyser traces every call from trigger to finish and presents runtime analysis in the Tools tab.
-
-**Supported tool types:** MCP Server, Connector Tool, Child Agent, Connected Agent, A2A Agent, Flow Tool, CUA Tool.
-
-**What it shows:**
-- **Tool Call Flow** — Mermaid sequence diagram showing Orchestrator dispatching to tools
-- **Tool Statistics** — per-tool call counts, success rates, avg/min/max/total timing
-- **Async Chain Detection** — automatically identifies polling/retry patterns (e.g. Databricks Genie query + poll cycles) with status progression tracking
-- **Orchestrator Reasoning** — the LLM's `thought` for each tool selection
-- **Tool Call Details** — expandable cards with arguments, observation summaries, and raw JSON responses
-- **Configured vs Called** — cross-reference tools defined in `botContent.yml` against tools actually invoked in `dialog.json`
-
-Tool call data is captured from `DynamicPlanStepTriggered`, `DynamicPlanStepBindUpdate`, and `DynamicPlanStepFinished` events in the conversation trace. Works with both full bot exports (ZIP) and transcript-only uploads.
 
 ## Exports
 
@@ -397,7 +473,7 @@ Every dynamic-page surface is reflected in the exports — what you see on scree
 | **PDF (Print)** | Download → Print to PDF | Browser print of the HTML view. |
 | **Audit bundle (`.md`)** | Download Audit (Quality tab) | Audit-runner output on its own — every selected mode's result, model attribution, error per mode. |
 
-The markdown report includes: TL;DR, Quick Wins, AI configuration, security, bot metadata, sequence + Gantt diagrams, conversation flow with AUTO/MANUAL annotations, **Performance Waterfall**, **Variable Tracker**, orchestrator reasoning, decision timeline, plan evolution, topic lifecycles, topic + tool inventory (split by `tool_type`), **Component Settings Explained** (per-component action tree), integration map, model comparison, knowledge inventory + coverage + source details + search results, **Citation Verification** table, trigger phrase analysis, MCS credit estimate.
+The markdown report includes: TL;DR, Quick Wins, AI configuration, security, bot metadata, sequence + Gantt diagrams, conversation flow with AUTO/MANUAL annotations, **Performance Waterfall**, **Variable Tracker**, orchestrator reasoning, decision timeline, plan evolution, topic lifecycles, topic + tool inventory (split by `tool_type`), **Component Settings Explained** (per-component action tree), integration map, model comparison, knowledge inventory + coverage + source details + search results, **Citation Verification** table, trigger phrase analysis, MCS credit estimate, **Failure Diagnosis** when applicable.
 
 ## Dataverse Connection
 
@@ -512,7 +588,196 @@ For admins reviewing network access or firewall rules:
 - **Tables accessed**: `bots`, `botcomponents`, `conversationtranscripts`
 - **Operations**: Read only (HTTP GET)
 
-## Configuration
+## AI-powered features
+
+The two LLM-driven capabilities live on the Quality tab. Both are opt-in, both run in your tenant against your own API keys, and both append their output to the exported reports.
+
+### LLM Audit Runner
+
+The Quality tab carries an audit runner that puts **`OPENAI_API_KEY`** or **`ANTHROPIC_API_KEY`** to work over your bot config and conversation transcript. Every audit mode is opt-in except the legacy default; clicking **Instruction Lint** with no other interaction reproduces the original behaviour.
+
+| Mode | Default | Inputs | What it answers |
+| --- | --- | --- | --- |
+| **Static Config** | ✅ on | bot profile | Are the system instructions clear? Guardrails, knowledge config, topic architecture, component health. |
+| **Conversation Summary** | ⬜ opt-in | transcript | 3-bullet recap + a single actionable insight. |
+| **User Sentiment** | ⬜ opt-in | transcript | Per-turn sentiment, escalation signals, final-state risk score. |
+| **PII Detection** | ⬜ opt-in | transcript | Categorised findings table + per-finding source + risk + recommendations. |
+| **Answer Accuracy** | ⬜ opt-in | transcript | Per user-question verdict (Answered / Partial / Avoided / Wrong) with evidence. |
+| **Topic Routing Quality** | ⬜ opt-in | profile + transcript | Did the orchestrator pick the right topic? Lists missed-better-fit cases. |
+| **Custom prompt** | ⬜ opt-in | available | Free-form prompt — useful one-off audits. |
+
+Modes shipped in **`data/default_lint_modes.yaml`** — extend or override by editing the file. Selected modes run in **parallel**; per-audit failures are isolated (one mode crashing doesn't take out the others). Transcript-only modes auto-disable when no `dialog.json` is uploaded.
+
+The audit results are appended to the markdown report (so `.md` / `.html` / PDF downloads include them) and downloadable on their own as a separate audit bundle.
+
+### Failure Diagnosis (AgentRX)
+
+A native re-implementation of the [AgentRx](https://github.com/microsoft/AgentRx) pattern from Microsoft Research, tailored to Copilot Studio. When a transcript looks broken, click **Diagnose failure** on the Quality tab and you get back: the *first unrecoverable failure step*, one of 10 root-cause categories with confidence, optional **secondary findings** (other failure-shaped events the judge spotted), canned MCS-specific recommendations, and a **streaming chat panel** to interrogate the verdict. Heuristics run for free; the LLM judge runs only when you ask.
+
+| Mode | Behaviour |
+| --- | --- |
+| **Online (default)** | Heuristic constraint engine + LLM judge in one pass. Categorises into 1 of 10. Verdict + reasoning + secondary findings. |
+| **Offline (no LLM)** | Heuristic engine only. Picks a category seed from the highest-severity rule. Free, deterministic. |
+| **Redact PII** | Regex pass scrubs emails, phones, IBAN, BSN, credit-card numbers, names before any LLM call. |
+| **Ask the judge** | Per-verdict streaming chat panel — questions like *"Where did you see Contoso invented?"* get token-by-token answers grounded in the same payload the judge originally saw. Persists across page reloads via `LocalStorage`. |
+
+#### Pipeline
+
+```mermaid
+flowchart TD
+  A[Conversation Timeline + Bot Profile] --> B[6 heuristic constraints]
+  B --> C{Any critical violation?}
+  C -- No --> D[Succeeded — audit-trail violations only]
+  C -- Yes --> E[Critical step localization<br/>first unrecovered violation]
+  E --> F{LLM judge enabled?}
+  F -- No --> G[Heuristic verdict + canned recs]
+  F -- Yes --> H[LLM judge call]
+  H --> I[Verdict: category + confidence + secondary failures]
+  I --> J[Canned recs + AI recs option]
+  J --> K[Ask the judge — streaming chat]
+
+  classDef input fill:#dbeafe,stroke:#1e40af,color:#1e3a8a
+  classDef process fill:#fef3c7,stroke:#a16207,color:#713f12
+  classDef decision fill:#ede9fe,stroke:#6d28d9,color:#4c1d95
+  classDef success fill:#d1fae5,stroke:#047857,color:#064e3b
+  classDef llm fill:#cffafe,stroke:#0e7490,color:#155e75
+
+  class A input
+  class B,E,J process
+  class C,F decision
+  class D,G success
+  class H,I,K llm
+```
+
+#### The 10 categories
+
+```mermaid
+flowchart LR
+  subgraph Agent["🔴 Agent-side"]
+    A1[Plan Adherence Failure]
+    A2[Invention of New Information]
+    A3[Invalid Invocation]
+    A4[Misinterpretation of Tool Output]
+  end
+  subgraph UAGap["🟠 User-Agent gap"]
+    B1[Intent-Plan Misalignment]
+    B2[Underspecified User Intent]
+    B3[Intent Not Supported]
+  end
+  subgraph Env["⚫ Environmental"]
+    C1[Guardrails Triggered]
+    C2[System Failure]
+  end
+  subgraph Unclassified["⚪ Unclassified"]
+    D1[Inconclusive]
+  end
+
+  classDef agent fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
+  classDef gap fill:#ffedd5,stroke:#c2410c,color:#7c2d12
+  classDef env fill:#e5e7eb,stroke:#374151,color:#111827
+  classDef unc fill:#f3f4f6,stroke:#9ca3af,color:#374151
+
+  class A1,A2,A3,A4 agent
+  class B1,B2,B3 gap
+  class C1,C2 env
+  class D1 unc
+```
+
+The taxonomy is lifted verbatim from the AgentRx repo. The headline always shows ONE primary category (the critical step's verdict) — that's faithful to the paper's design — but the violation log and the LLM judge's `secondary_failures` surface every other failure-shaped event spotted in the trajectory. AgentRx's own benchmark notes ~68% of failed trajectories contain two or more failures, which matches what you'll see in real Copilot Studio traces.
+
+`Inconclusive` is reserved for "evidence is insufficient or contradictory; you cannot pick one of 1..9 with at least medium confidence" — the judge is allowed to decline rather than guess.
+
+#### What the heuristic engine checks
+
+```mermaid
+flowchart LR
+  R1[knowledge_zero_results_with_citation] -->|seeds| C1[Invention]
+  R2[fallback_when_match_plausible] -->|seeds| C2[Plan Adherence]
+  R3[slot_loop_no_progress] -->|seeds| C3[Underspecified Intent]
+  R4[tool_error_ignored] -->|seeds| C4[Tool Misinterpretation]
+  R5[ungrounded_generative_answer] -->|seeds| C5[Invention or Guardrails]
+  R6[automatic_retry_after_misinterpretation] -->|seeds| C4
+
+  R1 -. watches .-> E1[KnowledgeSearch + BOT_MESSAGE]
+  R2 -. watches .-> E2[STEP_TRIGGERED + USER_MESSAGE]
+  R3 -. watches .-> E3[STEP_TRIGGERED + VARIABLE_ASSIGNMENT]
+  R4 -. watches .-> E4[ToolCall.state == failed + BOT_MESSAGE]
+  R5 -. watches .-> E5[GenerativeAnswerTrace]
+  R6 -. watches .-> E5
+
+  classDef rule fill:#fef3c7,stroke:#a16207,color:#713f12
+  classDef category fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
+  classDef event fill:#dbeafe,stroke:#1e40af,color:#1e3a8a
+
+  class R1,R2,R3,R4,R5,R6 rule
+  class C1,C2,C3,C4,C5 category
+  class E1,E2,E3,E4,E5 event
+```
+
+- **`knowledge_zero_results_with_citation`** — knowledge search returned 0 hits, the bot's next reply quotes a URL or `[1]`-style citation. Almost always invented.
+- **`fallback_when_match_plausible`** — orchestrator routed to a `*Fallback` topic but a non-fallback topic had ≥ 0.6 trigger-phrase similarity to the user's query. Trigger-phrase tuning fix.
+- **`slot_loop_no_progress`** — same slot-question topic re-triggered ≥ 3 times without an intervening `VariableAssignment`. The user can't or won't supply the requested value.
+- **`tool_error_ignored`** — `ToolCall.state == "failed"` but the bot's next reply doesn't acknowledge the error or quote it. Strong tool-misinterpretation signal.
+- **`ungrounded_generative_answer`** — `triggered_fallback=True` (GPT-default fallback) or `Answered` state with zero citations under a grounded-only config.
+- **`automatic_retry_after_misinterpretation`** — first generative-answer attempt returned `Not Found` / `Wrong` despite ≥ 1 search hit; orchestrator retried automatically. Useful even when the retry recovers — flaky knowledge sources surface this way.
+
+The list is extensible — `diagnosis/constraints/` is one file per rule. Add a new rule by dropping a new module and registering it in `__init__.py`.
+
+#### Recovery & critical-step localization
+
+```mermaid
+flowchart TD
+  S[Walk violations in position order] --> V{Severity == warn or critical?}
+  V -- No --> N[Skip]
+  V -- Yes --> L[Look ahead in timeline]
+  L --> R1{Later 'Answered' generative answer?}
+  R1 -- Yes --> R[Recovered → continue scan]
+  R1 -- No --> R2{Later successful tool call<br/>for same task_dialog_id?}
+  R2 -- Yes --> R
+  R2 -- No --> CR[Critical step found]
+  CR --> END[Return this violation as critical]
+  N --> S
+  R --> S
+
+  classDef process fill:#fef3c7,stroke:#a16207,color:#713f12
+  classDef decision fill:#ede9fe,stroke:#6d28d9,color:#4c1d95
+  classDef recovered fill:#d1fae5,stroke:#047857,color:#064e3b
+  classDef critical fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d
+
+  class S,L process
+  class V,R1,R2 decision
+  class N,R recovered
+  class CR,END critical
+```
+
+Lifted verbatim from AgentRx's root-cause detection algorithm. The "first unrecoverable failure" rule is what makes the diagnostic robust: a transient retry that recovers (e.g. bot2's failed-then-succeeded generative answer) doesn't get flagged as critical even though it's recorded in the violation log for the audit trail. Only failures that persist *to the end of the trajectory* become the headline verdict.
+
+#### Surfacing human-in-the-loop exchanges
+
+When a transcript contains an Approvals / Request-for-Information action (anything matching `humanintheloop` / `request_for_information` in the `task_dialog_id`), the Conversation Flow renders a single rich amber card in place of the two opaque "Step start / Step end" rows. The card shows:
+
+- The bot's question (title + message body + the structured input keys it asked for)
+- The reviewer (assignee email / UPN)
+- The reviewer's structured response (key/value table)
+- A clickable ↗ icon that jumps to the underlying tool component in the Component Explorer
+
+This was added because the most consequential exchange in many Copilot Studio transcripts — a human supplying missing details over Teams / email — used to be invisible in the analyser, leading to false-positive "invented data" verdicts from the judge.
+
+#### Acknowledgements
+
+This integration is a native re-implementation of the pattern from [microsoft/AgentRx](https://github.com/microsoft/AgentRx). The 10-category taxonomy, the recovery algorithm, and the "first unrecoverable failure" framing are lifted verbatim with credit. We do not import AgentRx as a runtime dependency — its Azure-AD-only auth model and tau-bench / Magentic-One trajectory shapes don't fit Copilot Studio without a non-trivial adapter.
+
+- [microsoft/AgentRx](https://github.com/microsoft/AgentRx) — the source framework
+- [AgentRx paper on arXiv](https://arxiv.org/abs/2602.02475) — research framing + benchmark methodology
+- ["Microsoft Just Built the Black Box Recorder for AI Agents"](https://medium.com/@michael.lanham/microsoft-just-built-the-black-box-recorder-for-ai-agents-fc2e7e07d35c) — the Medium write-up that started this work in our codebase (note: the article incorrectly says 9 categories; the AgentRx repo has 10 — `Inconclusive` is the 10th)
+
+## Deployment
+
+> **Recommendation:** Self-host this in your own tenant or run it locally. Bot configuration data and conversation transcripts are sensitive — keep them under your control.
+
+Reflex 0.9.x serves the frontend and backend on a single port. The repo ships a `Dockerfile`, `Procfile`, and `nixpacks.toml`, so most platforms work out of the box.
+
+### Configuration
 
 | Variable | Default | Description |
 | --- | --- | --- |
@@ -523,16 +788,10 @@ For admins reviewing network access or firewall rules:
 | `PORT` | `2009` | Single port for prod mode (`--single-port`) |
 | `LOG_LEVEL` | `INFO` | Logging verbosity (DEBUG, INFO, WARNING, ERROR) |
 | `USERS` | _(none)_ | Web UI credentials, comma-separated `user:pass` pairs |
-| `OPENAI_API_KEY` | _(none)_ | OpenAI API key for Instruction Lint (required for OpenAI-model bots) |
+| `OPENAI_API_KEY` | _(none)_ | OpenAI API key for Instruction Lint + AgentRX judge (required for OpenAI-model bots) |
 | `ANTHROPIC_API_KEY` | _(none)_ | Anthropic API key for Instruction Lint (required for Anthropic-model bots) |
 | `PYTHONUTF8` | `1` | Forces UTF-8 encoding for all Python I/O (prevents charmap errors on Windows and in Docker) |
 | `CUSTOM_RULES_FILE` | `data/default_rules.yaml` | Path to YAML file with custom rules for analysis |
-
-## Deployment
-
-> **Recommendation:** Self-host this in your own tenant or run it locally. Bot configuration data and conversation transcripts are sensitive — keep them under your control.
-
-Reflex 0.9.x serves the frontend and backend on a single port. The repo ships a `Dockerfile`, `Procfile`, and `nixpacks.toml`, so most platforms work out of the box.
 
 ### Coolify (recommended)
 
@@ -540,7 +799,7 @@ This repo is built to deploy cleanly on [Coolify](https://coolify.io/).
 
 1. **Create a new application** in Coolify pointing at this Git repo.
 2. **Build pack:** choose **Dockerfile** (recommended for Reflex apps — `nixpacks.toml` is also present if you prefer Nixpacks).
-3. **Port:** `2009` (matches the `PORT` env var below). Coolify maps this internal port to your public domain.
+3. **Port:** `2009` (matches the `PORT` env var). Coolify maps this internal port to your public domain.
 4. **Healthcheck path:** `/_health` (Reflex's built-in liveness endpoint, returns HTTP 200). The `Dockerfile` already declares an internal `HEALTHCHECK` against the same path; Coolify can use that directly or probe via HTTP.
 5. **Environment variables** (paste into Coolify's environment editor):
 
@@ -549,7 +808,7 @@ This repo is built to deploy cleanly on [Coolify](https://coolify.io/).
     PORT=2009
     USERS=admin:choose-a-strong-password   # comma-separated user:pass list
     LOG_LEVEL=INFO
-    OPENAI_API_KEY=sk-...                  # optional, enables Lint for OpenAI-model bots
+    OPENAI_API_KEY=sk-...                  # optional, enables Lint + AgentRX for OpenAI-model bots
     ANTHROPIC_API_KEY=sk-ant-...           # optional, enables Lint for Anthropic-model bots
     CUSTOM_RULES_FILE=data/default_rules.yaml   # optional, override path to rules YAML
     ```
@@ -581,7 +840,7 @@ Make sure `.env` contains at least `REFLEX_ENV=prod` and `PORT=2009`.
 ```bash
 cp .env.example .env          # edit credentials
 uv sync
-uv run pytest              # 445+ tests
+uv run pytest              # 200+ tests
 uv run ruff check .
 uv run ruff format .
 uv run reflex run          # dev server — frontend :3000, backend :8000
@@ -604,15 +863,31 @@ linter.py                Instruction lint logic (OpenAI + Anthropic, model resol
 utils.py                 Shared utilities
 rxconfig.py              Reflex app config
 
+diagnosis/               AgentRX-style failure diagnosis
+  models.py              FailureCategory enum (10), DiagnosisReport, ConstraintViolation, SecondaryFailure, Recommendation
+  constraints/           One file per heuristic rule + registry
+  recovery.py            "First unrecoverable failure" critical-step localization
+  judge.py               LLM judge (OpenAI streaming) + JSON parser
+  chat.py                Streaming chat-with-judge module
+  redaction.py           PII redaction (regex stage, optional LLM stage)
+  recommendations.py     Canned recommendation loader
+  labels.py              Shared category labels + colour-group badges
+  orchestrator.py        Public diagnose() / diagnose_async() entry points
+
 renderer/                Markdown + Mermaid rendering
   _helpers.py            Shared rendering helpers
   conversation_analysis.py  Renderers for conversation analysis features (markdown output)
+  diagnosis.py           Failure Diagnosis markdown rendering
   knowledge.py           Knowledge source rendering
   profile.py             Bot profile rendering
   report.py              Main report assembly
-  sections.py            Routing tab builders (lifecycles, decision timeline, trigger analysis, plan evolution, routing scores)
+  sections.py            Routing tab builders + Conversation Flow + HITL exchange card
   timeline_render.py     Timeline / conversation trace rendering
   tools.py               Tool call analysis rendering
+
+prompts/                 LLM prompt templates
+  judge.md               AgentRX failure-diagnosis judge prompt
+  judge_chat.md          AgentRX chat-with-judge persona prompt
 
 web/
   web.py                 Page definitions and Reflex app setup
@@ -623,28 +898,31 @@ web/
     _base.py             Base / shared state
     _counter.py          Analysis counter state
     _dataverse.py        Dataverse connection state
+    _diagnosis.py        AgentRX diagnosis + chat state
     _lint.py             Instruction lint state
     _report.py           Report generation state
     _rules.py            Custom rules state
-    _dynamic.py          Dynamic analysis state (6 tabs: profile, tools, knowledge, routing, conversation, quality)
+    _dynamic.py          Dynamic analysis state (6 tabs)
     _upload.py           File upload state + conversation analysis population
 
   components/            UI components
     common.py            Shared components (navbar, dashboard cards, login)
     dataverse.py         Dataverse import form
+    diagnosis_tab.py     AgentRX failure-diagnosis card + chat panel
     report.py            Report viewer
     rules.py             Rules editor
-    dynamic_analysis.py  Dynamic analysis panels (profile, tools, knowledge, routing, conversation, quality)
+    dynamic_analysis.py  Dynamic analysis panels (6 tabs)
     upload.py            Upload form
 
 data/
   default_rules.yaml         18 default best-practice rules (custom_rules YAML)
-  default_lint_modes.yaml    6 LLM Audit Runner mode definitions (system prompts + input declarations)
+  default_lint_modes.yaml    LLM Audit Runner mode definitions (system prompts + input declarations)
+  recommendations.yaml       AgentRX canned recommendations keyed by FailureCategory
   topic_explainer.yaml       Curated KB feeding the Component Explorer's hover-card explanations + per-component settings tree
 
 best_practices/          GPT model best-practice reference docs
 samples/                 Sample reports
-tests/                   Test suite (445+ tests)
+tests/                   Test suite (200+ tests)
 ```
 
 ## License

@@ -629,6 +629,16 @@ def _process_trace_event(
                     obs_structured = (
                         raw_observation.get("structuredContent") if isinstance(raw_observation, dict) else None
                     )
+                    # Connector-style responses (HITL Approvals, Power Automate
+                    # flows) put their result fields directly at the top level
+                    # instead of inside an MCP `content` / `structuredContent`
+                    # envelope. If the observation is a dict but neither
+                    # wrapper key is present, treat the whole dict as the
+                    # structured content so downstream code (renderers, the
+                    # judge payload) can read fields uniformly.
+                    if obs_structured is None and not obs_content and isinstance(raw_observation, dict):
+                        if "content" not in raw_observation and "structuredContent" not in raw_observation:
+                            obs_structured = raw_observation
                     tc_observation = ToolCallObservation(
                         content=obs_content,
                         structured_content=obs_structured,

@@ -511,10 +511,41 @@ def _flow_row_actions(item: dict) -> rx.Component:
     )
 
 
+def _flow_link_icon(item: dict, *, kind_field: str = "link_target_tab") -> rx.Component:
+    """Explicit clickable hyperlink icon for any flow row that has a
+    deep-link target. Replaces the unreliable row-level on_click — a
+    small, dedicated icon button is impossible to mis-route and gives
+    users a clear, expected affordance ("click the icon to open this
+    component / knowledge entry").
+
+    `kind_field` chooses which field to read because the codebase has two
+    naming conventions:
+    - Conversation Flow rows use `link_target_tab` ("tools" / "knowledge")
+    - Variable Tracker / Performance Waterfall / Phase Breakdown /
+      Orchestrator Reasoning rows use `link_target_kind` ("component" /
+      "knowledge")
+
+    Both flow into the same `handle_flow_link_click` handler which
+    accepts either naming.
+
+    Returns an empty box when the row has no link target so the layout
+    doesn't shift between linkable and non-linkable rows."""
+    return rx.cond(
+        item[kind_field] != "",
+        rx.button(
+            rx.icon("external-link", size=14),
+            on_click=State.handle_flow_link_click(item[kind_field], item["link_target_id"]),
+            size="1",
+            variant="soft",
+            color_scheme="cyan",
+        ),
+        rx.box(),
+    )
+
+
 def _mcs_flow_event(item: dict) -> rx.Component:
     is_error = item["tone"] == "error"
     is_trace = item["tone"] == "trace"
-    is_linked = item["link_target_tab"] != ""
 
     return rx.cond(
         is_trace,
@@ -524,30 +555,17 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 rx.icon("git-branch", size=12, color="var(--gray-a8)"),
                 rx.text(item["summary"], font_size="11px", color="var(--gray-a8)"),
                 rx.cond(
-                    is_linked,
-                    rx.icon("arrow-up-right", size=10, color="var(--green-a9)"),
-                ),
-                rx.cond(
                     item["timestamp"] != "",
                     rx.text(item["timestamp"], font_size="10px", color="var(--gray-a6)"),
                     rx.box(),
                 ),
+                _flow_link_icon(item),
                 spacing="2",
                 align="center",
                 background="var(--gray-a2)",
                 border=f"1px solid {SURFACE_BORDER}",
                 border_radius="20px",
                 padding="4px 10px",
-                cursor=rx.cond(is_linked, "pointer", "default"),
-                on_click=rx.cond(
-                    item["link_target_tab"] == "tools",
-                    State.jump_to_component_in_explorer(item["link_target_id"]),
-                    rx.cond(
-                        item["link_target_tab"] == "knowledge",
-                        State.jump_to_knowledge_topic(item["link_target_id"]),
-                        rx.noop(),
-                    ),
-                ),
             ),
             width="100%",
             id=item["flow_row_id"],
@@ -607,14 +625,11 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                                 ),
                             ),
                             rx.cond(
-                                is_linked,
-                                rx.icon("arrow-up-right", size=12, color="var(--green-a10)"),
-                            ),
-                            rx.cond(
                                 item["timestamp"] != "",
                                 rx.text(item["timestamp"], font_size="11px", color="var(--gray-a8)"),
                                 rx.box(),
                             ),
+                            _flow_link_icon(item),
                             spacing="2",
                             align="center",
                             flex_wrap="wrap",
@@ -641,22 +656,6 @@ def _mcs_flow_event(item: dict) -> rx.Component:
                 border=rx.cond(is_error, "1px solid var(--red-a5)", "1px solid var(--green-a4)"),
                 border_radius="12px",
                 padding="10px 12px",
-                cursor=rx.cond(is_linked, "pointer", "default"),
-                on_click=rx.cond(
-                    item["link_target_tab"] == "tools",
-                    State.jump_to_component_in_explorer(item["link_target_id"]),
-                    rx.cond(
-                        item["link_target_tab"] == "knowledge",
-                        State.jump_to_knowledge_topic(item["link_target_id"]),
-                        rx.noop(),
-                    ),
-                ),
-                _hover=rx.cond(
-                    is_linked,
-                    {"border_color": "var(--green-a8)", "background": "var(--green-a3)"},
-                    {},
-                ),
-                transition="border-color 0.15s ease, background 0.15s ease",
             ),
             width="100%",
             id=item["flow_row_id"],
@@ -664,8 +663,194 @@ def _mcs_flow_event(item: dict) -> rx.Component:
     )
 
 
+def _hitl_input_key(key) -> rx.Component:
+    return rx.text(
+        f"• {key}",
+        font_size="11px",
+        color="var(--gray-a10)",
+        font_family=_MONO,
+    )
+
+
+def _hitl_response_pair(pair: dict) -> rx.Component:
+    return rx.grid(
+        rx.text(
+            pair["key"],
+            font_size="11px",
+            color="var(--gray-a9)",
+            font_family=_MONO,
+            font_weight="600",
+        ),
+        rx.text(
+            pair["value"],
+            font_size="12px",
+            color="var(--gray-12)",
+            font_family=_MONO,
+        ),
+        columns="0.6fr 1.4fr",
+        gap="8px",
+        padding_y="2px",
+        width="100%",
+    )
+
+
+def _mcs_flow_hitl(item: dict) -> rx.Component:
+    """A single rich row for a human-in-the-loop exchange — replaces the
+    pair of opaque "Step start / Step end" rows the generic builder used to
+    emit. The bot's structured question and the reviewer's structured answer
+    are both visible at a glance."""
+    state_chip = rx.badge(
+        item["hitl_state"],
+        color_scheme=rx.match(
+            item["hitl_state"],
+            ("completed", "green"),
+            ("failed", "red"),
+            ("inProgress", "amber"),
+            "gray",
+        ),
+        variant="soft",
+        size="1",
+    )
+    return rx.box(
+        rx.vstack(
+            # Header
+            rx.hstack(
+                rx.icon("user-round-cog", size=18, color="var(--amber-9)"),
+                rx.text(
+                    "Human-in-the-loop",
+                    font_size="13px",
+                    font_weight="700",
+                    color="var(--gray-12)",
+                ),
+                state_chip,
+                rx.spacer(),
+                rx.cond(
+                    item["hitl_duration_label"] != "",
+                    rx.text(
+                        item["hitl_duration_label"],
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_family=_MONO,
+                    ),
+                ),
+                rx.cond(
+                    item["timestamp"] != "",
+                    rx.text(
+                        item["timestamp"],
+                        font_size="11px",
+                        color="var(--gray-a8)",
+                        font_family=_MONO,
+                    ),
+                ),
+                _flow_link_icon(item),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            # Bot's request
+            rx.vstack(
+                rx.cond(
+                    item["hitl_request_title"] != "",
+                    rx.hstack(
+                        rx.text(
+                            "Bot asks  →",
+                            font_size="11px",
+                            color="var(--gray-a9)",
+                            font_weight="600",
+                            min_width="80px",
+                        ),
+                        rx.text(
+                            item["hitl_request_title"],
+                            font_size="13px",
+                            color="var(--gray-12)",
+                            font_weight="600",
+                        ),
+                        spacing="2",
+                        align="start",
+                        width="100%",
+                    ),
+                ),
+                rx.cond(
+                    item["hitl_request_message"] != "",
+                    rx.text(
+                        item["hitl_request_message"],
+                        font_size="12px",
+                        color="var(--gray-a10)",
+                        line_height="1.5",
+                        padding_left="92px",
+                    ),
+                ),
+                rx.cond(
+                    item["hitl_request_input_keys"].to(list[str]).length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.foreach(item["hitl_request_input_keys"].to(list[str]), _hitl_input_key),
+                        padding_left="92px",
+                        padding_top="2px",
+                    ),
+                ),
+                rx.cond(
+                    item["hitl_assignee"] != "",
+                    rx.text(
+                        f"Reviewer ← {item['hitl_assignee']}",
+                        font_size="11px",
+                        color="var(--gray-a9)",
+                        font_weight="600",
+                        padding_top="6px",
+                    ),
+                ),
+                spacing="1",
+                align="start",
+                width="100%",
+            ),
+            # Reviewer's response
+            rx.cond(
+                item["hitl_response_pairs"].to(list[dict]).length() > 0,  # type: ignore[union-attr]
+                rx.box(
+                    rx.foreach(item["hitl_response_pairs"].to(list[dict]), _hitl_response_pair),
+                    margin_top="10px",
+                    padding="10px 12px",
+                    background="var(--green-a2)",
+                    border=f"1px solid {SURFACE_BORDER}",
+                    border_radius="8px",
+                    width="100%",
+                ),
+                rx.cond(
+                    item["hitl_state"] == "inProgress",
+                    rx.box(
+                        rx.text(
+                            "⏳ Awaiting reviewer response…",
+                            font_size="12px",
+                            color="var(--amber-11)",
+                            font_style="italic",
+                        ),
+                        margin_top="8px",
+                    ),
+                ),
+            ),
+            spacing="2",
+            align="start",
+            width="100%",
+        ),
+        background="var(--amber-a2)",
+        border="1px solid var(--amber-a5)",
+        border_radius="10px",
+        padding="14px 16px",
+        margin_y="8px",
+        width="100%",
+        id=item["flow_row_id"],
+    )
+
+
 def _mcs_flow_item(item: dict) -> rx.Component:
-    return rx.cond(item["kind"] == "message", _mcs_flow_message(item), _mcs_flow_event(item))
+    return rx.cond(
+        item["kind"] == "message",
+        _mcs_flow_message(item),
+        rx.cond(
+            item["kind"] == "hitl_exchange",
+            _mcs_flow_hitl(item),
+            _mcs_flow_event(item),
+        ),
+    )
 
 
 def _mcs_flow_group(group: dict) -> rx.Component:
@@ -4153,11 +4338,8 @@ def _mcs_waterfall_row(item: dict) -> rx.Component:
     horizontal proportional bar whose width is the gap-to-previous as a
     percentage of the largest gap. The colour reflects the event
     category. When the row references a tool / topic / agent or a
-    knowledge call, the entire row becomes clickable and jumps to the
-    canonical destination."""
-    is_component_link = item["link_target_kind"] == "component"
-    is_knowledge_link = item["link_target_kind"] == "knowledge"
-    is_linked = item["link_target_kind"] != ""
+    knowledge call, the trailing link icon jumps to the canonical
+    destination."""
     return rx.hstack(
         rx.text(
             item["timestamp"],
@@ -4192,10 +4374,7 @@ def _mcs_waterfall_row(item: dict) -> rx.Component:
             flex_grow="1",
             style={"overflow": "hidden", "textOverflow": "ellipsis", "whiteSpace": "nowrap"},
         ),
-        rx.cond(
-            is_linked,
-            rx.icon("arrow-up-right", size=10, color="var(--green-a10)"),
-        ),
+        _flow_link_icon(item, kind_field="link_target_kind"),
         rx.box(
             rx.box(
                 width=item["width_pct"],
@@ -4223,35 +4402,17 @@ def _mcs_waterfall_row(item: dict) -> rx.Component:
         align="center",
         width="100%",
         padding="3px 0",
-        cursor=rx.cond(is_linked, "pointer", "default"),
-        on_click=rx.cond(
-            is_component_link,
-            State.jump_to_component_in_explorer(item["link_target_id"]),
-            rx.cond(
-                is_knowledge_link,
-                State.jump_to_knowledge_topic(item["link_target_id"]),
-                rx.noop(),
-            ),
-        ),
-        _hover=rx.cond(is_linked, {"background": "var(--green-a2)"}, {}),
-        transition="background 0.15s ease",
     )
 
 
 def _mcs_conv_phase_row(item: dict) -> rx.Component:
-    """Phase Breakdown row — clickable when the phase label resolves to
-    a component (jumps to Tools tab) or the phase is a knowledge call
-    (jumps to Knowledge tab)."""
-    is_component_link = item["link_target_kind"] == "component"
-    is_knowledge_link = item["link_target_kind"] == "knowledge"
-    is_linked = item["link_target_kind"] != ""
+    """Phase Breakdown row — when the phase label resolves to a component
+    or a knowledge call, the dedicated link icon at the end of the row
+    jumps to the right tab."""
     return rx.grid(
         rx.hstack(
             rx.text(item["label"], font_size="13px", color="var(--gray-12)", font_weight="500"),
-            rx.cond(
-                is_linked,
-                rx.icon("arrow-up-right", size=10, color="var(--green-a10)"),
-            ),
+            _flow_link_icon(item, kind_field="link_target_kind"),
             spacing="1",
             align="center",
         ),
@@ -4265,23 +4426,10 @@ def _mcs_conv_phase_row(item: dict) -> rx.Component:
         padding_y="6px",
         border_bottom=f"1px solid {SURFACE_BORDER}",
         width="100%",
-        cursor=rx.cond(is_linked, "pointer", "default"),
-        on_click=rx.cond(
-            is_component_link,
-            State.jump_to_component_in_explorer(item["link_target_id"]),
-            rx.cond(
-                is_knowledge_link,
-                State.jump_to_knowledge_topic(item["link_target_id"]),
-                rx.noop(),
-            ),
-        ),
-        _hover=rx.cond(is_linked, {"background": "var(--green-a2)"}, {}),
-        transition="background 0.15s ease",
     )
 
 
 def _mcs_conv_reasoning_row(item: dict) -> rx.Component:
-    is_linked = item["link_target_kind"] == "component"
     return rx.box(
         rx.vstack(
             # Header row: step number + topic badge + step_type badge + status badge + duration
@@ -4292,22 +4440,11 @@ def _mcs_conv_reasoning_row(item: dict) -> rx.Component:
                     font_size="12px",
                     color="var(--gray-a9)",
                 ),
-                rx.box(
-                    rx.hstack(
-                        rx.badge(item["topic"], color_scheme="teal", variant="soft", size="1"),
-                        rx.cond(
-                            is_linked,
-                            rx.icon("arrow-up-right", size=10, color="var(--green-a10)"),
-                        ),
-                        spacing="1",
-                        align="center",
-                    ),
-                    cursor=rx.cond(is_linked, "pointer", "default"),
-                    on_click=rx.cond(
-                        is_linked,
-                        State.jump_to_component_in_explorer(item["link_target_id"]),
-                        rx.noop(),
-                    ),
+                rx.hstack(
+                    rx.badge(item["topic"], color_scheme="teal", variant="soft", size="1"),
+                    _flow_link_icon(item, kind_field="link_target_kind"),
+                    spacing="1",
+                    align="center",
                 ),
                 rx.cond(
                     item["step_type"] != "",
@@ -4403,12 +4540,9 @@ def _mcs_var_argument_row(arg: dict) -> rx.Component:
 def _mcs_var_card_header(item: dict, icon_name: str, badge_color: str) -> rx.Component:
     """Header row shared across the three Variable Tracker card kinds.
     When the row carries a `link_target_kind` (`"component"` or
-    `"knowledge"`), the header gets an arrow-up-right icon and a click
-    handler that jumps to the canonical destination — matching the
-    deep-link affordance on Conversation Flow rows."""
-    is_component_link = item["link_target_kind"] == "component"
-    is_knowledge_link = item["link_target_kind"] == "knowledge"
-    is_linked = item["link_target_kind"] != ""
+    `"knowledge"`), the header gets a dedicated link icon button that
+    jumps to the canonical destination — matching the deep-link affordance
+    on Conversation Flow rows."""
     return rx.vstack(
         rx.hstack(
             rx.icon(icon_name, size=14, color=PRIMARY),
@@ -4443,24 +4577,11 @@ def _mcs_var_card_header(item: dict, icon_name: str, badge_color: str) -> rx.Com
                     font_family=_MONO,
                 ),
             ),
-            rx.cond(
-                is_linked,
-                rx.icon("arrow-up-right", size=12, color="var(--green-a10)"),
-            ),
+            _flow_link_icon(item, kind_field="link_target_kind"),
             spacing="2",
             align="center",
             width="100%",
             flex_wrap="wrap",
-            cursor=rx.cond(is_linked, "pointer", "default"),
-            on_click=rx.cond(
-                is_component_link,
-                State.jump_to_component_in_explorer(item["link_target_id"]),
-                rx.cond(
-                    is_knowledge_link,
-                    State.jump_to_knowledge_topic(item["link_target_id"]),
-                    rx.noop(),
-                ),
-            ),
         ),
         rx.cond(
             item["thought"] != "",
@@ -5517,7 +5638,11 @@ def _mcs_audit_runner_card() -> rx.Component:
 
 
 def _mcs_quality_panel() -> rx.Component:
+    from web.components.diagnosis_tab import diagnosis_card
+
     return rx.vstack(
+        # ── Failure Diagnosis (AgentRx) — headline feature, top of tab ─────
+        diagnosis_card(),
         # ── LLM Audit Runner (visible when a profile is loaded) ────────────
         _mcs_audit_runner_card(),
         # ── Credits (moved from Credits tab) ───────────────────────────────
@@ -5666,8 +5791,10 @@ def _mcs_quality_panel() -> rx.Component:
             ),
         ),
         # ── Empty state ────────────────────────────────────────────────────
+        # Hide when user has bot+transcript loaded — the Diagnosis card at the
+        # top is the relevant CTA in that case.
         rx.cond(
-            ~State.has_mcs_quality,
+            ~State.has_mcs_quality & (State.bot_profile_json == "") & (State.timeline_json == ""),
             rx.center(
                 rx.vstack(
                     rx.icon("shield-check", size=48, color="var(--gray-a5)"),
