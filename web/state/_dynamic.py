@@ -251,6 +251,12 @@ class DynamicMixin(rx.State, mixin=True):
 
     @rx.var
     def has_mcs_quality(self) -> bool:
+        # The Failure Diagnosis card is always present once the user has a
+        # bot+transcript loaded, so the empty state shouldn't fire when both
+        # are available. We can't reach UploadMixin's source data through
+        # `self` typing here, so just OR in the existing quality signals;
+        # the dynamic_analysis.py panel always renders the diagnosis card
+        # at the top regardless of this flag.
         return bool(
             self.mcs_credit_rows
             or self.mcs_ins_quality_kpis
@@ -302,6 +308,52 @@ class DynamicMixin(rx.State, mixin=True):
     @rx.event
     def select_topic_in_explorer(self, schema_name: str):
         self.mcs_topic_explorer_selected = schema_name
+
+    @rx.event
+    def handle_flow_link_click(self, target: str, target_id: str):
+        """Single dispatched click handler for every Conversation-tab flow
+        row (Conversation Flow, Variable Tracker, Performance Waterfall,
+        Phase Breakdown, Orchestrator Reasoning, HITL exchange).
+
+        Accepts both naming conventions used by the row builders:
+        - `tools` / `component` → Tools tab + Component Explorer
+        - `knowledge` → Knowledge tab
+
+        Inlines the logic from `jump_to_component_in_explorer` and
+        `jump_to_knowledge_topic` rather than calling them — `@rx.event`
+        decorated methods don't reliably chain when invoked from another
+        event handler (Reflex resolves them as EventSpec descriptors, not
+        plain Python methods).
+
+        - `tools` → switch to Tools tab + pre-select component in the
+          inline Component Explorer + scroll into view.
+        - `knowledge` → switch to Knowledge tab + scroll the matching
+          generative-answer card into view.
+        - empty / anything else → no-op (the row's `cursor` already
+          reflects link-availability so users won't expect a navigation)."""
+        if target in ("tools", "component"):
+            self.mcs_analyse_tab = "tools"
+            if target_id:
+                self.mcs_topic_explorer_selected = target_id
+            return rx.call_script(
+                "setTimeout(function(){"
+                "  var el = document.getElementById('row-component-explorer');"
+                "  if (el) { el.scrollIntoView({block:'start', behavior:'smooth'}); }"
+                "}, 120);"
+            )
+        if target == "knowledge":
+            self.mcs_analyse_tab = "knowledge"
+            if not target_id:
+                return None
+            safe = "".join(c if c.isalnum() else "-" for c in target_id)
+            return rx.call_script(
+                "setTimeout(function(){"
+                f"  var el = document.getElementById('row-gen-{safe}');"
+                "  if (!el) { return; }"
+                "  el.scrollIntoView({block:'center', behavior:'smooth'});"
+                "}, 120);"
+            )
+        return None
 
     @rx.event
     def jump_to_component_in_explorer(self, schema_name: str):

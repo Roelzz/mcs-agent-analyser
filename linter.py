@@ -134,13 +134,43 @@ def build_component_payload(profile: BotProfile) -> dict:
     return payload
 
 
-def build_transcript_payload(timeline: ConversationTimeline) -> dict:
-    """Build a token-efficient JSON payload for transcript-based audits.
+def _truncate_json(value, *, max_chars: int) -> str:
+    """JSON-stringify and truncate. Used for tool observations / arguments
+    that can vary wildly in size (HITL inputs, large search payloads)."""
+    try:
+        encoded = json.dumps(value, default=str, separators=(",", ":"))
+    except (TypeError, ValueError):
+        encoded = str(value)
+    if len(encoded) > max_chars:
+        return encoded[: max_chars - 12].rstrip() + "…<truncated>"
+    return encoded
 
-    Strips noisy intermediate state (per-step bind updates, low-level
-    tracing) but keeps the user/bot messages, plan boundaries, knowledge
-    searches, and errors — enough for the LLM to reason about what
-    happened without paying tokens for every internal trace event.
+
+def build_transcript_payload(
+    timeline: ConversationTimeline,
+    *,
+    max_observation_chars: int = 1500,
+    max_total_chars: int = 60_000,
+) -> dict:
+    """Build a JSON payload for transcript-based audits.
+
+    Includes:
+    - Filtered events (the existing keep_types set).
+    - Per-step `tool_observation` for STEP_FINISHED events: arguments + the
+      tool's actual return value, looked up via `timeline.tool_calls`.
+      Without this, judges get only "step finished, state=completed" and
+      can't tell a grounded answer from a fabrication.
+    - `search_summary` for KNOWLEDGE_SEARCH events: query, sources, top-3
+      results — sourced from `timeline.knowledge_searches`.
+    - `generative_answer_summary` for GENERATIVE_ANSWER events: summary text
+      and citation count.
+
+    Truncation:
+    - Per-observation cap (`max_observation_chars`, default 1500) keeps a
+      single noisy tool from blowing the budget.
+    - Running total cap (`max_total_chars`, default 60k) tags later
+      observations as "<truncated>" once we've spent enough — primary verdicts
+      care about the early-to-mid trajectory.
     """
     from models import EventType
 
@@ -160,22 +190,99 @@ def build_transcript_payload(timeline: ConversationTimeline) -> dict:
         EventType.DIALOG_REDIRECT,
     }
 
+    # Build correlation maps so we can attach per-event detail without
+    # re-walking timeline.tool_calls / timeline.knowledge_searches per event.
+    tool_call_by_step: dict[str, object] = {tc.step_id: tc for tc in (timeline.tool_calls or []) if tc.step_id}
+    ks_by_position: dict[int, object] = {ks.position: ks for ks in (timeline.knowledge_searches or [])}
+    gen_by_position: dict[int, object] = {ga.position: ga for ga in (timeline.generative_answer_traces or [])}
+
+    running_chars = 0
     events: list[dict] = []
     for ev in timeline.events:
         if ev.event_type not in keep_types:
             continue
-        events.append(
-            {
-                "position": ev.position,
-                "timestamp": ev.timestamp,
-                "event_type": ev.event_type.value,
-                "summary": ev.summary,
-                "topic_name": ev.topic_name,
-                "state": ev.state,
-                "thought": ev.thought,
-                "error": ev.error,
-            }
-        )
+        entry: dict = {
+            "position": ev.position,
+            "timestamp": ev.timestamp,
+            "event_type": ev.event_type.value,
+            "summary": ev.summary,
+            "topic_name": ev.topic_name,
+            "state": ev.state,
+            "thought": ev.thought,
+            "error": ev.error,
+        }
+        # Truncation flag — once we cross the budget, later observations are
+        # replaced by a marker. Earlier event metadata is always kept.
+        budget_exhausted = running_chars >= max_total_chars
+
+        if ev.event_type == EventType.STEP_FINISHED and ev.step_id:
+            tc = tool_call_by_step.get(ev.step_id)
+            if tc is not None:
+                if budget_exhausted:
+                    entry["tool_observation"] = "<truncated>"
+                else:
+                    obs_payload: dict = {}
+                    obs = getattr(tc, "observation", None)
+                    if obs is not None:
+                        # Prefer structured_content (parsed dict); fall back
+                        # to the content list; never include raw_json (huge).
+                        if getattr(obs, "structured_content", None):
+                            obs_payload["observation"] = _truncate_json(
+                                obs.structured_content, max_chars=max_observation_chars
+                            )
+                        elif getattr(obs, "content", None):
+                            obs_payload["observation"] = _truncate_json(obs.content, max_chars=max_observation_chars)
+                    args = getattr(tc, "arguments", None) or {}
+                    if args:
+                        obs_payload["arguments"] = _truncate_json(dict(args), max_chars=max_observation_chars)
+                    obs_payload["display_name"] = getattr(tc, "display_name", "") or ""
+                    obs_payload["state"] = getattr(tc, "state", "") or ""
+                    obs_payload["error"] = getattr(tc, "error", "") or ""
+                    entry["tool_observation"] = obs_payload
+                    running_chars += sum(len(str(v)) for v in obs_payload.values())
+
+        elif ev.event_type == EventType.KNOWLEDGE_SEARCH:
+            ks = ks_by_position.get(ev.position)
+            if ks is not None:
+                if budget_exhausted:
+                    entry["search_summary"] = "<truncated>"
+                else:
+                    top_results = []
+                    for r in (getattr(ks, "search_results", None) or [])[:3]:
+                        snippet = (getattr(r, "text", "") or "")[:200]
+                        top_results.append(
+                            {
+                                "name": getattr(r, "name", "") or "",
+                                "url": getattr(r, "url", "") or "",
+                                "snippet": snippet,
+                            }
+                        )
+                    summary = {
+                        "search_query": getattr(ks, "search_query", "") or "",
+                        "knowledge_sources": list(getattr(ks, "knowledge_sources", []) or []),
+                        "results": top_results,
+                        "result_count": len(getattr(ks, "search_results", []) or []),
+                        "errors": list(getattr(ks, "search_errors", []) or []),
+                    }
+                    entry["search_summary"] = summary
+                    running_chars += len(_truncate_json(summary, max_chars=max_observation_chars * 2))
+
+        elif ev.event_type == EventType.GENERATIVE_ANSWER:
+            ga = gen_by_position.get(ev.position)
+            if ga is not None:
+                if budget_exhausted:
+                    entry["generative_answer_summary"] = "<truncated>"
+                else:
+                    summary_text = (getattr(ga, "summary_text", "") or "")[:500]
+                    entry["generative_answer_summary"] = {
+                        "gpt_answer_state": getattr(ga, "gpt_answer_state", "") or "",
+                        "summary_text": summary_text,
+                        "citation_count": len(getattr(ga, "citations", []) or []),
+                        "search_result_count": len(getattr(ga, "search_results", []) or []),
+                    }
+                    running_chars += len(summary_text) + 100
+
+        events.append(entry)
 
     return {
         "bot_name": timeline.bot_name,

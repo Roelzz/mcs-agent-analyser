@@ -203,6 +203,17 @@ def render_report(
     if topic_lc:
         sections.append(topic_lc)
 
+    # 8.4 Failure Diagnosis (AgentRx-style heuristic pass — LLM judge is
+    # opt-in via the Reflex Diagnose button; CLI runs heuristics only).
+    if timeline.events:
+        from diagnosis import diagnose
+        from .diagnosis import render_diagnosis_md
+
+        report = diagnose(profile, timeline, llm=False)
+        diag_md = render_diagnosis_md(report)
+        if diag_md:
+            sections.append(diag_md)
+
     # --- Inventories (static capabilities) ---
 
     # 10. Topic Inventory
