@@ -860,6 +860,11 @@ def build_conversation_flow_items(
 
             items.append(
                 {
+                    # Spread defaults first so any key added to
+                    # `_detail_defaults` (e.g. the HITL fields) automatically
+                    # lands on event rows; the explicit assignments below
+                    # then override the ones this branch actually populates.
+                    **_detail_defaults,
                     "kind": "event",
                     "role": "",
                     "actor": "",
@@ -1334,6 +1339,8 @@ def build_trigger_match_items(
     for pos, ui in enumerate(user_indices):
         ev = events[ui]
         user_text = (ev.summary or "").replace("User: ", "", 1).strip()
+        if len(user_text) >= 2 and user_text.startswith('"') and user_text.endswith('"'):
+            user_text = user_text[1:-1]
         if not user_text:
             continue
 

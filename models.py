@@ -347,6 +347,12 @@ class ConversationTimeline(BaseModel):
     custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)
     tool_calls: list[ToolCall] = Field(default_factory=list)
     generative_answer_traces: list[GenerativeAnswerTrace] = Field(default_factory=list)
+    # Per-activity audit table — what valueTypes / actionTypes / attachment
+    # kinds the parser saw in the source dialog.json, with a flag for which
+    # ones the parser knows how to handle. Lets the user spot parser drift
+    # ("the export contained event X that we didn't recognise") instead of
+    # silently zeroed downstream panels. Populated by `build_timeline`.
+    raw_event_index: dict = Field(default_factory=dict)
 
 
 # --- Credit estimation models ---

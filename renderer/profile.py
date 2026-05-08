@@ -390,6 +390,8 @@ def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | N
     # Section 1: Topics with external calls (per-action detail)
     external_topics = [c for c in profile.components if c.kind == "DialogComponent" and c.has_external_calls]
     if external_topics:
+        if not lines:
+            lines.append("## Topic Details\n")
         lines.append("### Topics with External Calls\n")
         # Check if any topic has action_details
         has_details = any(c.action_details for c in external_topics)
@@ -446,6 +448,8 @@ def render_topic_details(profile: BotProfile, timeline: ConversationTimeline | N
             total_count = len(dialog_comps)
             untriggered = [c for c in dialog_comps if c.display_name not in triggered_names]
 
+            if not lines:
+                lines.append("## Topic Details\n")
             lines.append("### Topic Coverage\n")
             lines.append(f"**{triggered_count} of {total_count} user topics triggered** in this conversation.")
             if untriggered:

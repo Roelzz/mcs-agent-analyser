@@ -183,33 +183,84 @@ def _normalize_role(value: object) -> str:
     return ""
 
 
+_ADAPTIVE_CARD_TEXT_CAP = 8  # max TextBlocks to extract before summarising
+_ADAPTIVE_CARD_TEXT_CHARS = 600  # max chars of combined card body text
+
+
 def _extract_adaptive_card_text(attachments: list) -> str:
-    """Extract readable text from Adaptive Card attachments."""
+    """Extract readable text from Adaptive Card attachments.
+
+    Walks the entire card recursively and concatenates every TextBlock's
+    text. Adaptive Cards nest content through any of `body`, `items`,
+    `columns`, `rows`, `cells`, `actions`, `card`, `selectAction`, and
+    deeper — enumerating each child key by name was leaving Tables / row-
+    cell layouts unscanned, which is why Copilot Studio's standard
+    greeting card (greeting + disclaimer + 4 suggested questions inside
+    a Table) only surfaced the disclaimer.
+    """
     texts: list[str] = []
 
-    def _extract_from_elements(elements: list) -> None:
-        for el in elements:
-            if len(texts) >= 2:
-                return
-            if el.get("type") == "TextBlock" and el.get("text"):
-                texts.append(el["text"])
-            # Recurse into containers and column sets
-            for child_key in ("items", "columns", "body"):
-                children = el.get(child_key, []) or []
-                if children:
-                    _extract_from_elements(children)
+    def _walk(node: object) -> None:
+        if len(texts) >= _ADAPTIVE_CARD_TEXT_CAP:
+            return
+        if isinstance(node, dict):
+            if node.get("type") == "TextBlock" and node.get("text"):
+                clean = node["text"].replace("<br>", " · ").replace("<br/>", " · ").replace("<br />", " · ")
+                texts.append(clean)
+                if len(texts) >= _ADAPTIVE_CARD_TEXT_CAP:
+                    return
+            for v in node.values():
+                _walk(v)
+        elif isinstance(node, list):
+            for x in node:
+                _walk(x)
 
     for att in attachments:
-        if len(texts) >= 2:
+        if len(texts) >= _ADAPTIVE_CARD_TEXT_CAP:
             break
-        content = att.get("content", {}) or {}
-        body = content.get("body", []) or []
-        _extract_from_elements(body)
+        _walk(att.get("content", {}))
 
     if texts:
         combined = " | ".join(texts)
-        return combined[:150] + "..." if len(combined) > 150 else combined
+        return combined[:_ADAPTIVE_CARD_TEXT_CHARS] + "..." if len(combined) > _ADAPTIVE_CARD_TEXT_CHARS else combined
     return "[Adaptive Card]"
+
+
+def _extract_suggested_actions(activity: dict) -> str:
+    """Extract titles from a bot message's `suggestedActions.actions[]` array
+    (Direct Line / web-chat suggested replies). Returns a `Suggested:` prefix
+    string suitable for appending to the summary, or empty if none.
+    """
+    suggested = activity.get("suggestedActions") or {}
+    actions = suggested.get("actions") or []
+    titles = [a.get("title") for a in actions if isinstance(a, dict) and a.get("title")]
+    if not titles:
+        return ""
+    # Cap at 6 titles + truncate each so the summary stays readable.
+    capped = [t[:80] for t in titles[:6]]
+    return " | Suggested: " + " · ".join(capped)
+
+
+def _extract_user_value_payload(value: object) -> str:
+    """Render a user message's `value` payload (adaptive-card submit form)
+    as a readable summary. The dialog ships these as JSON-shaped dicts:
+    ``{action: submitFeedback, is_answerhelpful: Yes, ac_rating: 1, ...}``
+    The previous parser dropped them entirely and labelled the row
+    ``User message`` — losing the actual user input.
+    """
+    if not isinstance(value, dict) or not value:
+        return ""
+    # Drop pure plumbing keys; keep anything that looks like form data.
+    pairs: list[str] = []
+    for k, v in value.items():
+        if k in ("actionSubmitId",):
+            continue
+        if v in ("", None):
+            continue
+        pairs.append(f"{k}={v}")
+    if not pairs:
+        return ""
+    return ", ".join(pairs[:8])
 
 
 def _ms_between(start: str | None, end: str | None) -> float:
@@ -698,12 +749,20 @@ def _process_trace_event(
             }
 
             SUMMARY_TEMPLATES = {
-                EventType.ACTION_HTTP_REQUEST: "HTTP call in {topic}",
                 EventType.ACTION_QA: "QA in {topic}",
                 EventType.ACTION_TRIGGER_EVAL: "Evaluate: {topic}",
                 EventType.ACTION_BEGIN_DIALOG: "Call to {topic}",
                 EventType.ACTION_SEND_ACTIVITY: "Send response in {topic}",
                 EventType.ACTION_AI_BUILDER: "AI Builder model in {topic}",
+            }
+            # ACTION_HTTP_REQUEST is shared by raw HttpRequestAction and
+            # InvokeFlowAction (Power Automate). The labels are different
+            # enough that we branch on the source `actionType` instead of
+            # the merged EventType, so the conversation flow doesn't
+            # mislabel a Power Automate flow as an "HTTP call".
+            ACTION_TYPE_LABEL = {
+                "HttpRequestAction": "HTTP call in {topic}",
+                "InvokeFlowAction": "Flow call (Power Automate) in {topic}",
             }
 
             actions = value.get("actions", [])
@@ -719,7 +778,8 @@ def _process_trace_event(
                     state.errors.append(f"{topic}.{action_type}: {exception}")
 
                 event_type = ACTION_TYPE_MAP.get(action_type, EventType.DIALOG_TRACING)
-                template = SUMMARY_TEMPLATES.get(event_type)
+                action_specific = ACTION_TYPE_LABEL.get(action_type)
+                template = action_specific or SUMMARY_TEMPLATES.get(event_type)
                 if template:
                     summary = template.format(topic=topic)
                 else:
@@ -1034,6 +1094,15 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
                 state.latest_user_text = text
             if not state.user_query and text:
                 state.user_query = text
+            # Adaptive-card submit messages have text=null and a structured
+            # `value` payload — extract those form values so the row shows
+            # what the user actually submitted instead of "User message".
+            if not text:
+                payload = _extract_user_value_payload(activity.get("value"))
+                if payload:
+                    text = f"[Form submit] {payload}"
+                    if not state.latest_user_text:
+                        state.latest_user_text = text
             state.events.append(
                 TimelineEvent(
                     timestamp=timestamp,
@@ -1051,6 +1120,11 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
             attachments = activity.get("attachments", []) or []
             if not text and attachments:
                 text = _extract_adaptive_card_text(attachments)
+            # Append top-level Direct Line suggested-actions titles. These
+            # are the inline reply chips Copilot Studio renders below a bot
+            # message — they're meaningful conversation context (often the
+            # bot's offered next-turn options) and were silently dropped.
+            text = (text or "") + _extract_suggested_actions(activity)
             clean_text = text.replace("\n", " ").replace("\r", "")
             state.events.append(
                 TimelineEvent(
@@ -1071,6 +1145,8 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
 
     total_elapsed = _ms_between(state.first_timestamp, state.last_timestamp)
 
+    from parser import build_raw_event_index
+
     return ConversationTimeline(
         bot_name=state.bot_name,
         conversation_id=state.conversation_id,
@@ -1083,6 +1159,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         custom_search_steps=state.custom_search_steps,
         tool_calls=state.tool_calls,
         generative_answer_traces=state.generative_answer_traces,
+        raw_event_index=build_raw_event_index(activities),
     )
 
 

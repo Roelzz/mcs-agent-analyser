@@ -74,6 +74,217 @@ def _trigger_score_badge(score_str, color_str) -> rx.Component:
     )
 
 
+def _coverage_skipped_row(item: dict) -> rx.Component:
+    return rx.hstack(
+        rx.badge(item["tab"], color_scheme="gray", variant="soft", size="1"),
+        rx.text(item["panel"], font_size="12px", color="var(--gray-12)", font_weight="600"),
+        rx.text("—", font_size="12px", color="var(--gray-a8)"),
+        rx.text(item["reason"], font_size="12px", color="var(--gray-a9)", font_style="italic"),
+        spacing="2",
+        align="center",
+        width="100%",
+        padding_y="4px",
+    )
+
+
+def _coverage_banner() -> rx.Component:
+    """Top-of-dashboard summary listing skipped panels and reasons.
+
+    Mirrors the markdown report's `## Report Coverage` section so the user
+    can tell "feature broken" apart from "this conversation had no X events"
+    without scrolling every tab.
+    """
+    return rx.cond(
+        State.mcs_coverage_skipped.length() > 0,  # type: ignore[union-attr]
+        rx.box(
+            rx.hstack(
+                rx.icon("info", size=14, color="var(--gray-a8)"),
+                rx.text(
+                    State.mcs_coverage_skipped.length().to(str),  # type: ignore[union-attr]
+                    font_size="12px",
+                    font_weight="700",
+                    color="var(--gray-12)",
+                ),
+                rx.text(
+                    " panel(s) skipped — this conversation had no relevant data for them.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                ),
+                spacing="2",
+                align="center",
+                padding_bottom="6px",
+                width="100%",
+            ),
+            rx.foreach(State.mcs_coverage_skipped, _coverage_skipped_row),
+            background="var(--gray-a2)",
+            border=f"1px solid {SURFACE_BORDER}",
+            border_radius="10px",
+            padding="12px 16px",
+            margin_bottom="20px",
+            width="100%",
+        ),
+    )
+
+
+def _empty_panel(title: str, icon: str, reason: str) -> rx.Component:
+    """Card shown in place of a data panel when its underlying state is empty.
+
+    Lets the user distinguish "feature broken" from "this conversation
+    legitimately had no X events" — same intent as `empty_section_stub`
+    in the markdown report.
+    """
+    return card(
+        rx.hstack(
+            rx.icon(icon, size=16, color="var(--gray-a8)"),
+            section_heading(title),
+            rx.spacer(),
+            rx.badge("Stubbed", color_scheme="gray", variant="soft", size="1"),
+            align="center",
+            width="100%",
+        ),
+        rx.text(
+            reason,
+            font_size="12px",
+            color="var(--gray-a9)",
+            font_style="italic",
+            line_height="1.5",
+            padding_top="8px",
+        ),
+        rx.hstack(
+            rx.icon("info", size=12, color="var(--gray-a8)"),
+            rx.text(
+                "See ",
+                font_size="11px",
+                color="var(--gray-a8)",
+            ),
+            rx.link(
+                "Raw Events",
+                font_size="11px",
+                font_weight="600",
+                color="var(--green-11)",
+                cursor="pointer",
+                on_click=State.set_mcs_analyse_tab("conversation"),
+            ),
+            rx.text(
+                " on the Conversation tab to verify what the parser actually saw.",
+                font_size="11px",
+                color="var(--gray-a8)",
+            ),
+            spacing="1",
+            align="center",
+            padding_top="6px",
+            flex_wrap="wrap",
+        ),
+        width="100%",
+    )
+
+
+def _raw_event_row(item: dict) -> rx.Component:
+    return rx.grid(
+        rx.badge(item["category"], color_scheme="gray", variant="soft", size="1"),
+        rx.text(item["name"], font_size="12px", font_family=_MONO, color="var(--gray-12)"),
+        rx.text(item["count"], font_size="12px", color="var(--gray-a9)", text_align="right"),
+        rx.cond(
+            item["recognised"] == "yes",
+            rx.badge("recognised", color_scheme="green", variant="soft", size="1"),
+            rx.badge("unrecognised", color_scheme="amber", variant="soft", size="1"),
+        ),
+        rx.text(item["mapped_to"], font_size="12px", color="var(--gray-a9)"),
+        columns="1fr 2fr 0.6fr 1fr 2fr",
+        gap="8px",
+        align="center",
+        padding_y="6px",
+        border_bottom=f"1px solid {SURFACE_BORDER}",
+        width="100%",
+    )
+
+
+def _raw_events_panel() -> rx.Component:
+    """Conversation-tab parser-audit table.
+
+    Shows every valueType / actionType / attachment kind extracted from the
+    source dialog with a recognition badge. The point: when a downstream
+    panel says "no knowledge searches", the user can scroll up here and
+    confirm the parser didn't see any knowledge-event signatures (vs. seeing
+    one it didn't recognise — in which case it shows up as `unrecognised`
+    and we know the parser needs an update).
+    """
+    return rx.cond(
+        State.mcs_raw_event_index.length() > 0,  # type: ignore[union-attr]
+        card(
+            rx.hstack(
+                rx.icon("scan-line", size=16, color=PRIMARY),
+                section_heading("Raw Events (parser audit)"),
+                rx.spacer(),
+                rx.badge(
+                    State.mcs_raw_event_index.length().to(str),  # type: ignore[union-attr]
+                    color_scheme="green",
+                    variant="soft",
+                    size="1",
+                ),
+                align="center",
+                width="100%",
+            ),
+            rx.text(
+                "Every event signature extracted from the source dialog, with the parser's recognition status. "
+                "Anything marked `unrecognised` means the export shipped an event the parser doesn't yet handle — "
+                "the matching downstream panels will be empty until the parser learns the signature.",
+                font_size="11px",
+                color="var(--gray-a9)",
+                font_style="italic",
+                padding_top="6px",
+            ),
+            rx.box(
+                rx.grid(
+                    rx.text(
+                        "Category",
+                        font_size="10px",
+                        font_weight="700",
+                        color="var(--gray-a9)",
+                        text_transform="uppercase",
+                    ),
+                    rx.text(
+                        "Name", font_size="10px", font_weight="700", color="var(--gray-a9)", text_transform="uppercase"
+                    ),
+                    rx.text(
+                        "Count",
+                        font_size="10px",
+                        font_weight="700",
+                        color="var(--gray-a9)",
+                        text_transform="uppercase",
+                        text_align="right",
+                    ),
+                    rx.text(
+                        "Status",
+                        font_size="10px",
+                        font_weight="700",
+                        color="var(--gray-a9)",
+                        text_transform="uppercase",
+                    ),
+                    rx.text(
+                        "Mapped to",
+                        font_size="10px",
+                        font_weight="700",
+                        color="var(--gray-a9)",
+                        text_transform="uppercase",
+                    ),
+                    columns="1fr 2fr 0.6fr 1fr 2fr",
+                    gap="8px",
+                    padding_y="8px",
+                    border_bottom=f"2px solid {SURFACE_BORDER}",
+                    width="100%",
+                ),
+                rx.foreach(State.mcs_raw_event_index, _raw_event_row),
+                width="100%",
+                padding_top="8px",
+                max_height="320px",
+                overflow_y="auto",
+            ),
+            width="100%",
+        ),
+    )
+
+
 # ── Sub-tab bar ───────────────────────────────────────────────────────────────
 
 
@@ -941,6 +1152,10 @@ def _flow_filter_chip(label: str) -> rx.Component:
 
 
 def _mcs_conversation_flow_panel() -> rx.Component:
+    # When fullscreen is on, the card switches from "in-flow box" to
+    # "fixed overlay covering the viewport". The button label/icon also
+    # flips so the user can collapse back. Body scroll stays where it is —
+    # only the inner flow box scrolls.
     return card(
         rx.hstack(
             rx.hstack(
@@ -959,6 +1174,18 @@ def _mcs_conversation_flow_panel() -> rx.Component:
                 color_scheme="green",
                 variant="soft",
                 size="1",
+            ),
+            rx.button(
+                rx.cond(
+                    State.mcs_conv_flow_fullscreen,
+                    rx.hstack(rx.icon("minimize-2", size=12), rx.text("Exit fullscreen", font_size="11px"), spacing="1"),
+                    rx.hstack(rx.icon("maximize-2", size=12), rx.text("Fullscreen", font_size="11px"), spacing="1"),
+                ),
+                on_click=State.toggle_mcs_conv_flow_fullscreen,
+                size="1",
+                variant="soft",
+                color_scheme="green",
+                cursor="pointer",
             ),
             align="center",
             width="100%",
@@ -1033,10 +1260,36 @@ def _mcs_conversation_flow_panel() -> rx.Component:
             border=f"1px solid {SURFACE_BORDER}",
             border_radius="12px",
             padding=["10px", "12px", "14px"],
-            max_height="720px",
+            # In fullscreen, fill the remaining viewport height inside the
+            # overlay; otherwise cap at 720px so the card doesn't dominate
+            # the dashboard.
+            max_height=rx.cond(State.mcs_conv_flow_fullscreen, "calc(100vh - 220px)", "720px"),
+            flex_grow="1",
             overflow_y="auto",
         ),
         width="100%",
+        # Fullscreen overlay styling. `position: fixed` lifts the card out
+        # of normal flow and pins it to the viewport; `inset: 0` stretches
+        # it to all four edges; `z_index` puts it above the rest of the
+        # dashboard. The card's default background is `--gray-a2` (alpha)
+        # which would let the underlying dashboard bleed through, so we
+        # swap to the opaque `--color-background` only when fullscreen.
+        position=rx.cond(State.mcs_conv_flow_fullscreen, "fixed", "static"),
+        top=rx.cond(State.mcs_conv_flow_fullscreen, "0", "auto"),
+        left=rx.cond(State.mcs_conv_flow_fullscreen, "0", "auto"),
+        right=rx.cond(State.mcs_conv_flow_fullscreen, "0", "auto"),
+        bottom=rx.cond(State.mcs_conv_flow_fullscreen, "0", "auto"),
+        z_index=rx.cond(State.mcs_conv_flow_fullscreen, "1000", "auto"),
+        height=rx.cond(State.mcs_conv_flow_fullscreen, "100vh", "auto"),
+        max_width=rx.cond(State.mcs_conv_flow_fullscreen, "100vw", "none"),
+        border_radius=rx.cond(State.mcs_conv_flow_fullscreen, "0", "16px"),
+        background=rx.cond(State.mcs_conv_flow_fullscreen, "var(--color-background)", "var(--gray-a2)"),
+        # Override card's inner padding so the flow box has more room when
+        # fullscreen.
+        padding=rx.cond(State.mcs_conv_flow_fullscreen, "20px 32px", "24px"),
+        box_shadow=rx.cond(State.mcs_conv_flow_fullscreen, "none", CARD_SHADOW),
+        display="flex",
+        flex_direction="column",
     )
 
 
@@ -1963,6 +2216,11 @@ def _mcs_tools_panel() -> rx.Component:
                     ),
                 ),
                 width="100%",
+            ),
+            _empty_panel(
+                "Multi-Agent Delegation",
+                "network",
+                "The parser extracted no ChildAgent / ConnectedAgent / A2AAgent calls from this dialog.",
             ),
         ),
         spacing="4",
@@ -3067,6 +3325,13 @@ def _mcs_knowledge_panel() -> rx.Component:
                 spacing="3",
                 width="100%",
             ),
+            _empty_panel(
+                "Search Results",
+                "search",
+                "The parser matched no `UniversalSearchToolTraceData` or `KnowledgeSearchQuery` events in this dialog. "
+                "If your conversation used knowledge, the export may have shipped the trace under a different signature — "
+                "check Raw Events for the actual event types found.",
+            ),
         ),
         # Custom Search Steps
         rx.cond(
@@ -3108,6 +3373,13 @@ def _mcs_knowledge_panel() -> rx.Component:
                 spacing="3",
                 width="100%",
             ),
+            _empty_panel(
+                "Topic-Level Generative Answers",
+                "brain-circuit",
+                "The parser matched no `valueType=GenerativeAnswersSupportData` events in this dialog. "
+                "If your topics use SearchAndSummarizeContent and you expected traces here, the export may use a "
+                "different signature — see Raw Events.",
+            ),
         ),
         # Citation Verification panel — flat audit table of every citation
         # across all generative-answer traces with answer/completion state
@@ -3143,6 +3415,12 @@ def _mcs_knowledge_panel() -> rx.Component:
                     padding_top="8px",
                 ),
                 width="100%",
+            ),
+            _empty_panel(
+                "Citation Verification",
+                "badge-check",
+                "Citation Verification reads from the same generative-answer traces as the panel above — without those, "
+                "there are no citations to audit.",
             ),
         ),
         # (Knowledge Source Effectiveness merged into "Knowledge Sources"
@@ -3639,6 +3917,11 @@ def _mcs_routing_panel() -> rx.Component:
                 ),
                 width="100%",
             ),
+            _empty_panel(
+                "Plan Evolution",
+                "git-compare",
+                "Need at least 2 plans to compare. This conversation contained only 1 planning cycle, so there's nothing to diff.",
+            ),
         ),
         # Section 3: Topic Lifecycles (enhanced)
         rx.cond(
@@ -3668,6 +3951,11 @@ def _mcs_routing_panel() -> rx.Component:
                     overflow="hidden",
                 ),
                 width="100%",
+            ),
+            _empty_panel(
+                "Topic Lifecycles",
+                "activity",
+                "The parser extracted no STEP_TRIGGERED events from this dialog — no per-topic lifecycle to chart.",
             ),
         ),
         # Section 4: Trigger Phrase Analysis (enhanced)
@@ -5933,6 +6221,7 @@ def dynamic_analysis_viewer() -> rx.Component:
         rx.cond(
             State.has_dynamic_sections,
             rx.box(
+                _coverage_banner(),
                 rx.match(
                     State.mcs_analyse_tab,
                     ("profile", _mcs_profile_panel()),
@@ -5942,6 +6231,7 @@ def dynamic_analysis_viewer() -> rx.Component:
                     (
                         "conversation",
                         rx.vstack(
+                            _raw_events_panel(),
                             rx.cond(State.has_mcs_conv_visual_summary, _mcs_conversation_visual_dashboard()),
                             rx.cond(State.has_mcs_conversation_flow, _mcs_conversation_flow_panel()),
                             _mcs_conversation_detail_panel(),
@@ -5986,6 +6276,12 @@ def dynamic_analysis_viewer() -> rx.Component:
                                         ),
                                     ),
                                     width="100%",
+                                ),
+                                _empty_panel(
+                                    "Turn Efficiency",
+                                    "gauge",
+                                    "Per-turn efficiency requires user-message and step events. The parser extracted "
+                                    "fewer than the threshold needed to compute the KPIs.",
                                 ),
                             ),
                             # Latency Bottlenecks (moved from Insights)
@@ -6038,6 +6334,12 @@ def dynamic_analysis_viewer() -> rx.Component:
                                         ),
                                     ),
                                     width="100%",
+                                ),
+                                _empty_panel(
+                                    "Latency Bottlenecks",
+                                    "timer",
+                                    "Bottleneck detection needs multiple timed events. The parser extracted fewer "
+                                    "than the threshold required to flag any.",
                                 ),
                             ),
                             spacing="4",

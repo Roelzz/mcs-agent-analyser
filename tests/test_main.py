@@ -2576,7 +2576,9 @@ def test_report_new_sections_orchestrator():
 
 
 def test_report_graceful_degradation_simple_bot():
-    """F2: Simple bot report doesn't crash, optional sections omitted."""
+    """F2: Simple bot report doesn't crash. Sections without data are now
+    rendered as stubs instead of silently skipped, so the user can tell
+    'no data' from 'feature broken' (see tests/test_3511v_coverage.py)."""
     profile, lookup = parse_yaml(BASE_DIR / "botContent" / "botContent.yml")
     activities = parse_dialog_json(BASE_DIR / "botContent" / "dialog.json")
     timeline = build_timeline(activities, lookup)
@@ -2584,8 +2586,11 @@ def test_report_graceful_degradation_simple_bot():
     assert "## TL;DR" in report
     assert "## Bot Profile" in report
     assert "## Topic Inventory" in report
-    # These should NOT appear for simple bots
-    assert "## Tool Inventory" not in report
+    # Tool Inventory now shows a stub for bots with no orchestrator tools
+    tool_inv_idx = report.index("## Tool Inventory")
+    next_h2 = report.find("\n## ", tool_inv_idx + 1)
+    tool_inv_block = report[tool_inv_idx : next_h2 if next_h2 != -1 else None]
+    assert "No data" in tool_inv_block
 
 
 # --- Credit estimation tests ---

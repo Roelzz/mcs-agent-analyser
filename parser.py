@@ -743,6 +743,110 @@ def parse_dialog_json(path: Path) -> list[dict]:
     return activities
 
 
+# valueType / name strings the trace-event parser explicitly handles in
+# `timeline.py:_process_trace_event` and `timeline.py:build_timeline`.
+# Used by `build_raw_event_index` to flag unknown event names so the user
+# can spot parser drift (e.g. Copilot Studio shipping a new event type
+# under a name we don't recognise yet) instead of seeing silent zeroes.
+RECOGNISED_VALUE_TYPES: dict[str, str] = {
+    "GenerativeAnswersSupportData": "Generative-answer trace",
+    "DynamicPlanReceived": "Plan received",
+    "DynamicPlanReceivedDebug": "Orchestrator ask / plan summary",
+    "DynamicPlanStepTriggered": "Step triggered",
+    "DynamicPlanStepFinished": "Step finished",
+    "DynamicPlanFinished": "Plan finished",
+    "DynamicPlanStepBindUpdate": "Tool-argument bindings",
+    "DialogTracingInfo": "Topic-action trace",
+    "UniversalSearchToolTraceData": "Knowledge-search trace",
+    "IntentRecognition": "Intent recognition",
+    "ErrorCode": "Runtime error",
+    "VariableAssignment": "Variable assignment (transcript format)",
+    "DialogRedirect": "Dialog redirect (transcript format)",
+    "SessionInfo": "Session metadata (transcript format)",
+    "ConversationInfo": "Conversation metadata (transcript format)",
+    "UnknownIntent": "Unknown intent (transcript format)",
+    "SkillInfo": "Skill metadata (transcript format)",
+    "DialogTracing": "Topic-action trace",  # alias used as `name`
+}
+
+# actionType strings inside `DialogTracingInfo.actions[]` that the parser
+# specifically maps to a TimelineEvent type. Other actionTypes still
+# parse — they fall through to a generic DIALOG_TRACING event — so this
+# table is informational, not a gate.
+RECOGNISED_ACTION_TYPES: dict[str, str] = {
+    "HttpRequestAction": "HTTP request",
+    "InvokeFlowAction": "Power Automate flow",
+    "InvokeConnectorAction": "Connector call",
+    "InvokeAIBuilderModelAction": "AI Builder model",
+    "BeginDialog": "Begin dialog",
+    "SendActivity": "Send message",
+    "ConditionGroup": "Condition evaluation",
+    "ConditionItem": "Condition branch",
+    "SetVariable": "Set variable",
+    "AdaptiveCardPrompt": "Adaptive-card prompt",
+    "LogCustomTelemetryEvent": "Custom telemetry",
+    "CancelAllDialogs": "Cancel all dialogs",
+}
+
+
+def build_raw_event_index(activities: list[dict]) -> dict[str, list[dict]]:
+    """Inventory every event the parser saw, with recognition flags.
+
+    Returns three rows: ``value_types`` (per-activity ``valueType`` /
+    ``name``), ``action_types`` (the ``actionType`` strings nested inside
+    ``DialogTracingInfo.actions[]``), and ``attachment_kinds`` (top-level
+    message attachment ``contentType``s).
+
+    Each row is ``{name, count, recognised: bool, mapped_to: str}``. The
+    point isn't to build new analytics — it's to give the user an audit
+    table so they can verify "did the parser actually see knowledge
+    events in this dialog?" rather than trusting empty downstream
+    panels.
+    """
+    value_counts: dict[str, int] = {}
+    action_counts: dict[str, int] = {}
+    attachment_counts: dict[str, int] = {}
+
+    for act in activities:
+        # Prefer .valueType, fall back to .name (some events only use name).
+        key = act.get("valueType") or act.get("name") or ""
+        if key:
+            value_counts[key] = value_counts.get(key, 0) + 1
+
+        value = act.get("value") or {}
+        for action in value.get("actions", []) or []:
+            atype = action.get("actionType") or ""
+            if atype:
+                action_counts[atype] = action_counts.get(atype, 0) + 1
+
+        for att in act.get("attachments", []) or []:
+            ctype = att.get("contentType") or ""
+            if ctype:
+                attachment_counts[ctype] = attachment_counts.get(ctype, 0) + 1
+
+    def _row(name: str, count: int, table: dict[str, str]) -> dict:
+        mapped = table.get(name, "")
+        return {
+            "name": name,
+            "count": count,
+            "recognised": name in table,
+            "mapped_to": mapped,
+        }
+
+    return {
+        "value_types": [
+            _row(n, c, RECOGNISED_VALUE_TYPES) for n, c in sorted(value_counts.items(), key=lambda x: -x[1])
+        ],
+        "action_types": [
+            _row(n, c, RECOGNISED_ACTION_TYPES) for n, c in sorted(action_counts.items(), key=lambda x: -x[1])
+        ],
+        "attachment_kinds": [
+            {"name": n, "count": c, "recognised": True, "mapped_to": ""}
+            for n, c in sorted(attachment_counts.items(), key=lambda x: -x[1])
+        ],
+    }
+
+
 def resolve_topic_name(schema_name: str, lookup: dict[str, str]) -> str:
     """Resolve a schema name like 'copilots_header_21961.topic.GenAIAnsGeneration' to a display name."""
     if schema_name in lookup:

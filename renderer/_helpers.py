@@ -101,6 +101,16 @@ def _sanitize_table_cell(text: str) -> str:
     return text.replace("|", "/").replace("\n", " ").replace("\r", "")
 
 
+def empty_section_stub(title: str, reason: str) -> str:
+    """Render a placeholder for a section that has no data.
+
+    Replaces the silent-skip pattern (`if data: append(data)`) so the user
+    can distinguish "feature broken" from "this conversation legitimately
+    had no X events".
+    """
+    return f"## {title}\n\n_No data — {reason}._\n"
+
+
 def _parse_timestamp_to_epoch_ms(ts: str) -> int | None:
     """Parse ISO timestamp to epoch milliseconds."""
     if not ts:

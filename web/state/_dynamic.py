@@ -65,8 +65,26 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_flow_filter_types: list[str] = []
     mcs_conversation_flow_source: str = ""  # "snapshot" | "transcript" | ""
 
+    # When true, the Conversation Flow panel renders as a fixed-position
+    # overlay covering the full app viewport (the navbar, sub-tabs, sibling
+    # panels, etc.). Body scroll is preserved; the panel itself scrolls
+    # internally. The user toggles this via a button in the panel header.
+    mcs_conv_flow_fullscreen: bool = False
+
     # Custom rule findings for dynamic view
     mcs_custom_findings: list[dict] = []
+
+    # Coverage summary — list of {tab, panel, reason} dicts for panels that
+    # were not rendered because their data was empty. Lets the user tell
+    # "feature broken" apart from "this conversation had no X events".
+    # Mirrors the markdown report's `## Report Coverage` section.
+    mcs_coverage_skipped: list[dict] = []
+
+    # Parser-audit table for the Conversation tab — same shape as
+    # `parser.build_raw_event_index` returns: rows of
+    # {category, name, count, recognised, mapped_to}. The user-facing
+    # version of "what did the parser actually see in this dialog?".
+    mcs_raw_event_index: list[dict] = []
 
     # ── Profile tab ──────────────────────────────────────────────────────────
     mcs_profile_kpis: list[dict] = []
@@ -491,6 +509,11 @@ class DynamicMixin(rx.State, mixin=True):
     def clear_mcs_flow_filters(self):
         self.mcs_flow_filter_text = ""
         self.mcs_flow_filter_types = []
+
+    @rx.event
+    def toggle_mcs_conv_flow_fullscreen(self):
+        """Toggle the fullscreen overlay for the Conversation Flow panel."""
+        self.mcs_conv_flow_fullscreen = not self.mcs_conv_flow_fullscreen
 
     @rx.var
     def mcs_conversation_flow_groups_filtered(self) -> list[dict]:

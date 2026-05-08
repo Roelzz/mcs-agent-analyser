@@ -503,11 +503,99 @@ class UploadMixin(rx.State, mixin=True):
         # ── Conversation analysis insights ─────────────────────────────────
         self._populate_insights_data(profile, timeline)
 
+        # ── Coverage summary ───────────────────────────────────────────────
+        # Walk every gated dashboard panel and record which ones will render
+        # an empty-state card so the user gets a one-line summary instead of
+        # silently missing sections.
+        self._populate_coverage_summary(profile, timeline)
+
+        # ── Raw event index (parser audit) ─────────────────────────────────
+        # Surfaces every valueType / actionType / attachment kind the parser
+        # saw in the source dialog so the user can verify "did the parser
+        # actually see knowledge events?" instead of trusting empty panels.
+        if timeline is not None:
+            self.mcs_raw_event_index = self._flatten_raw_event_index(timeline.raw_event_index)  # type: ignore[attr-defined]
+        else:
+            self.mcs_raw_event_index = []  # type: ignore[attr-defined]
+
         # Set default tab based on profile presence
         if profile is not None:
             self.mcs_analyse_tab = "profile"  # type: ignore[attr-defined]
         else:
             self.mcs_analyse_tab = "conversation"  # type: ignore[attr-defined]
+
+    def _populate_coverage_summary(self, profile, timeline) -> None:
+        """Populate `mcs_coverage_skipped` based on which panels are empty.
+
+        Reasons describe what the parser *looked for* and didn't match —
+        they avoid claiming the conversation didn't perform an action,
+        because the parser can only report what its current signatures
+        recognise (see Raw Events for the full event-type audit).
+        """
+        skipped: list[dict] = []
+
+        def _add(tab: str, panel: str, reason: str) -> None:
+            skipped.append({"tab": tab, "panel": panel, "reason": reason})
+
+        if not self.mcs_routing_plan_evolution and not self.mcs_ins_plan_diffs:  # type: ignore[attr-defined]
+            _add("Routing", "Plan Evolution", "fewer than 2 plans received — need ≥2 to compare")
+        if not self.mcs_routing_lifecycles:  # type: ignore[attr-defined]
+            _add("Routing", "Topic Lifecycles", "no STEP_TRIGGERED events extracted (see Raw Events)")
+        if not self.mcs_knowledge_searches:  # type: ignore[attr-defined]
+            _add(
+                "Knowledge",
+                "Search Results",
+                "parser matched no UniversalSearchToolTraceData / KnowledgeSearchQuery events (see Raw Events)",
+            )
+        if not self.mcs_generative_traces:  # type: ignore[attr-defined]
+            _add(
+                "Knowledge",
+                "Topic-Level Generative Answers",
+                "parser matched no GenerativeAnswersSupportData events (see Raw Events)",
+            )
+        if not self.mcs_knowledge_citation_panel:  # type: ignore[attr-defined]
+            _add(
+                "Knowledge",
+                "Citation Verification",
+                "no generative-answer traces with citations were extracted",
+            )
+        if not self.mcs_ins_deleg_kpis:  # type: ignore[attr-defined]
+            _add("Tools", "Multi-Agent Delegation", "no ChildAgent / ConnectedAgent / A2AAgent calls extracted")
+        if not self.mcs_ins_turn_kpis:  # type: ignore[attr-defined]
+            _add("Conversation", "Turn Efficiency", "fewer user turns than required for the per-turn KPIs")
+        if not self.mcs_ins_latency_kpis:  # type: ignore[attr-defined]
+            _add("Conversation", "Latency Bottlenecks", "not enough timed events to flag a bottleneck")
+
+        self.mcs_coverage_skipped = skipped  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _flatten_raw_event_index(idx: dict) -> list[dict]:
+        """Flatten the nested {value_types, action_types, attachment_kinds}
+        dict into one list of rows for `rx.foreach`.
+
+        Each row gets a `category` field so the table can group/colour the
+        rows in the UI.
+        """
+        out: list[dict] = []
+        if not idx:
+            return out
+        labels = {
+            "value_types": "valueType",
+            "action_types": "actionType",
+            "attachment_kinds": "attachmentType",
+        }
+        for key, label in labels.items():
+            for r in idx.get(key, []) or []:
+                out.append(
+                    {
+                        "category": label,
+                        "name": r.get("name", ""),
+                        "count": str(r.get("count", 0)),
+                        "recognised": "yes" if r.get("recognised") else "no",
+                        "mapped_to": r.get("mapped_to", "") or "—",
+                    }
+                )
+        return out
 
     # ── Profile tab data extraction ──────────────────────────────────────────
 
@@ -2263,6 +2351,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_credit_step_rows = []  # type: ignore[attr-defined]
         self.mcs_credit_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_custom_findings = []  # type: ignore[attr-defined]
+        self.mcs_coverage_skipped = []  # type: ignore[attr-defined]
+        self.mcs_raw_event_index = []  # type: ignore[attr-defined]
         self.mcs_conv_metadata = []  # type: ignore[attr-defined]
         self.mcs_conversation_id = ""  # type: ignore[attr-defined]
         self.mcs_highlight_target_id = ""  # type: ignore[attr-defined]

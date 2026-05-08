@@ -10,6 +10,7 @@ from models import (
 from ._helpers import (
     _sanitize_mermaid,
     _sanitize_table_cell,
+    empty_section_stub,
 )
 from model_comparison import build_comparison_markdown
 from .knowledge import render_knowledge_search_section
@@ -93,6 +94,14 @@ def render_report(
     if timeline is None:
         timeline = ConversationTimeline()
 
+    # Track sections that legitimately have no data so we can render
+    # both an in-place stub and a top-of-report coverage summary.
+    skipped: list[tuple[str, str]] = []
+
+    def _stub(title: str, reason: str) -> str:
+        skipped.append((title, reason))
+        return empty_section_stub(title, reason)
+
     # 1. Heading
     sections = [render_bot_profile(profile)]
 
@@ -101,6 +110,19 @@ def render_report(
 
     # 2. TL;DR
     sections.append(render_tldr(profile, timeline, credit_estimate))
+
+    # 2.05 Reserve a slot for the coverage summary; we fill it after every
+    # other section has been built so we know what was rendered vs. skipped.
+    coverage_slot = len(sections)
+    sections.append("")
+
+    # 2.07 Raw Events parser-audit table — gives the user direct visibility
+    # into what the parser saw before any analysis section. If a downstream
+    # panel says "no knowledge searches", the user can scroll up and verify
+    # that no knowledge-event signatures were actually present.
+    raw_events = _render_raw_events(timeline)
+    if raw_events:
+        sections.append(raw_events)
 
     # 2.1 Instruction drift warning (if significant)
     if instruction_diff and instruction_diff.is_significant:
@@ -157,6 +179,8 @@ def render_report(
         gantt = render_gantt_chart(timeline)
         if gantt:
             sections.append(gantt)
+    else:
+        sections.append(_stub("Execution Diagrams", "build_timeline produced 0 timeline events from this dialog"))
 
     # 7. Conversation trace
     sections.append(render_timeline(timeline, skip_diagrams=True))
@@ -165,43 +189,68 @@ def render_report(
     conv_summary = render_conversation_summary_md(timeline)
     if conv_summary:
         sections.append(conv_summary)
+    else:
+        sections.append(_stub("Conversation Summary", "no events to compute KPIs from — see Raw Events"))
 
     # 7.2 Conversation flow (with AUTO/MANUAL binding annotations on
     # plan-step rows when a profile is available).
     conv_flow = render_conversation_flow_md(timeline, profile=profile)
     if conv_flow:
         sections.append(conv_flow)
+    else:
+        sections.append(_stub("Conversation Flow", "no message or trace events extracted — see Raw Events"))
 
     # 7.3 Performance Waterfall — between-activity gap-time table
     waterfall = render_performance_waterfall_md(timeline, profile=profile)
     if waterfall:
         sections.append(waterfall)
+    else:
+        sections.append(
+            _stub("Performance Waterfall", "fewer than 2 timed activities — nothing to compare gaps between")
+        )
 
     # 7.4 Variable Tracker — orchestrator tool calls, Topic / Global
     # variable assignments, and topic-level Generative Answer harvesting.
     var_tracker = render_variable_tracker_md(timeline, profile=profile)
     if var_tracker:
         sections.append(var_tracker)
+    else:
+        sections.append(
+            _stub(
+                "Variable Tracker",
+                "the parser matched no tool-call / variable-assignment / generative-answer signatures in this dialog",
+            )
+        )
 
     # 8. Orchestrator reasoning
     reasoning = render_orchestrator_reasoning(timeline)
     if reasoning:
         sections.append(reasoning)
+    else:
+        sections.append(
+            _stub("Orchestrator Reasoning", "the parser found no orchestrator-thinking events in this dialog")
+        )
 
     # 8.1 Orchestrator decision timeline
     decision_timeline = render_decision_timeline_md(timeline)
     if decision_timeline:
         sections.append(decision_timeline)
+    else:
+        sections.append(_stub("Orchestrator Decision Timeline", "no user messages or plan/step events to sequence"))
 
     # 8.2 Plan evolution
     plan_evo = render_plan_evolution_md(timeline)
     if plan_evo:
         sections.append(plan_evo)
+    else:
+        sections.append(_stub("Plan Evolution", "fewer than 2 plans received — need ≥2 to compare"))
 
     # 8.3 Topic lifecycles
     topic_lc = render_topic_lifecycles_md(timeline)
     if topic_lc:
         sections.append(topic_lc)
+    else:
+        sections.append(_stub("Topic Lifecycles", "no STEP_TRIGGERED events extracted — see Raw Events"))
 
     # 8.4 Failure Diagnosis (AgentRx-style heuristic pass — LLM judge is
     # opt-in via the Reflex Diagnose button; CLI runs heuristics only).
@@ -223,12 +272,23 @@ def render_report(
     tool_inv = render_tool_inventory(profile)
     if tool_inv:
         sections.append(tool_inv)
+    else:
+        sections.append(_stub("Tool Inventory", "no `tool_type` components in this bot's `botContent.yml`"))
 
     # 11.5 Tool Call Analysis (runtime — from dialog.json)
     if timeline.tool_calls:
         tool_analysis = render_tool_analysis(timeline, profile)
         if tool_analysis:
             sections.append(tool_analysis)
+        else:
+            sections.append(_stub("Tool Call Analysis", "tool calls present but produced no analysable detail"))
+    else:
+        sections.append(
+            _stub(
+                "Tool Call Analysis",
+                "no STEP_TRIGGERED / STEP_FINISHED runtime events extracted — see Raw Events",
+            )
+        )
 
     # 12. Integration Map
     int_map = render_integration_map(profile)
@@ -271,6 +331,8 @@ def render_report(
     topic_details = render_topic_details(profile, timeline)
     if topic_details:
         sections.append(topic_details)
+    else:
+        sections.append(_stub("Topic Details", "no topics with external calls and no triggered-topic coverage data"))
 
     sections.append(render_knowledge_search_section(timeline, profile=profile))
 
@@ -280,18 +342,109 @@ def render_report(
     citation_audit = render_citation_verification_md(timeline)
     if citation_audit:
         sections.append(citation_audit)
+    else:
+        sections.append(
+            _stub(
+                "Citation Verification",
+                "the parser matched no `valueType=GenerativeAnswersSupportData` events — if your conversation used"
+                " knowledge, check Raw Events above for the event signature it shipped under",
+            )
+        )
 
     # 15.1 Trigger phrase analysis
     trigger_analysis = render_trigger_analysis_md(timeline, profile)
     if trigger_analysis:
         sections.append(trigger_analysis)
+    else:
+        sections.append(_stub("Trigger Phrase Analysis", "no user messages to match against trigger phrases"))
 
     # 16. MCS Credit Estimate (last section)
     credit_section = render_credit_estimate(credit_estimate, timeline)
     if credit_section:
         sections.append(credit_section)
 
+    sections[coverage_slot] = _render_coverage_summary(sections, skipped, coverage_slot)
+
     return "\n".join(sections)
+
+
+def _render_coverage_summary(sections: list[str], skipped: list[tuple[str, str]], slot: int) -> str:
+    """Build the report-coverage summary that goes near the top.
+
+    `sections` already contains everything else; `slot` is the index of the
+    placeholder we wrote earlier and excludes from the count.
+    """
+    rendered_count = sum(1 for i, s in enumerate(sections) if i != slot and s)
+    total = rendered_count + len(skipped)
+    lines = [
+        "## Report Coverage\n",
+        f"**{rendered_count} of {total} sections rendered.** {len(skipped)} stubbed — the parser found no events matching their patterns.\n",
+        "_See **Raw Events** below for the full list of event types the parser saw, and which ones it recognised. If a section is stubbed but you expected data, the parser may need to learn a new event signature._\n",
+    ]
+    if skipped:
+        lines.append("| Section | Why it stubbed |")
+        lines.append("| --- | --- |")
+        for title, reason in skipped:
+            lines.append(f"| {_sanitize_table_cell(title)} | {_sanitize_table_cell(reason)} |")
+        lines.append("")
+    else:
+        lines.append("_All sections rendered with data._\n")
+    return "\n".join(lines)
+
+
+def _render_raw_events(timeline: ConversationTimeline) -> str:
+    """Render the parser-audit table — what valueTypes/actionTypes/attachments
+    the parser saw and whether it recognised each one.
+
+    This is the user-facing version of `parser.build_raw_event_index`. It
+    sits near the top of the report so the user can verify what the parser
+    extracted before reading any analysis section.
+    """
+    idx = timeline.raw_event_index or {}
+    if not idx or not (idx.get("value_types") or idx.get("action_types")):
+        return ""
+
+    lines = [
+        "## Raw Events (parser audit)\n",
+        f"{len(timeline.events)} timeline events extracted. Below: every event-type signature in the source dialog, "
+        "with the parser's recognition status. Anything marked ❌ is the parser drifting from the export format — "
+        "we'll need to teach it the new signature.\n",
+    ]
+
+    vts = idx.get("value_types", [])
+    if vts:
+        lines.append("### `valueType` / event name\n")
+        lines.append("| name | count | recognised | mapped to |")
+        lines.append("| --- | ---: | :---: | --- |")
+        for r in vts:
+            mark = "✅" if r["recognised"] else "❌"
+            lines.append(
+                f"| `{_sanitize_table_cell(r['name'])}` | {r['count']} | {mark} | {_sanitize_table_cell(r['mapped_to'] or '—')} |"
+            )
+        lines.append("")
+
+    ats = idx.get("action_types", [])
+    if ats:
+        lines.append("### `actionType` (inside `DialogTracingInfo.actions[]`)\n")
+        lines.append("| name | count | recognised | mapped to |")
+        lines.append("| --- | ---: | :---: | --- |")
+        for r in ats:
+            mark = "✅" if r["recognised"] else "❌"
+            lines.append(
+                f"| `{_sanitize_table_cell(r['name'])}` | {r['count']} | {mark} | {_sanitize_table_cell(r['mapped_to'] or 'generic trace')} |"
+            )
+        lines.append("")
+
+    aks = idx.get("attachment_kinds", [])
+    if aks:
+        lines.append("### Attachment content types\n")
+        lines.append("| contentType | count |")
+        lines.append("| --- | ---: |")
+        for r in aks:
+            lines.append(f"| `{_sanitize_table_cell(r['name'])}` | {r['count']} |")
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def render_transcript_report(
