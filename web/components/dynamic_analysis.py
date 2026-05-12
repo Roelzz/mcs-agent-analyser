@@ -2149,6 +2149,51 @@ def _mcs_tools_ext_detail_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_tools_ai_builder_summary_row(item: dict) -> rx.Component:
+    """One row of the AI Builder Calls summary table — per
+    aIModelDefinitions entry, with static call-site count + runtime
+    invocation totals (calls / tokens / credits)."""
+    return _grid_row(
+        [
+            rx.vstack(
+                rx.text(item["name"], font_size="13px", font_weight="600", color="var(--gray-12)"),
+                rx.text(item["id"], font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                spacing="0",
+                align="start",
+            ),
+            rx.text(item["call_site_count"], font_size="13px", color="var(--gray-11)", text_align="right"),
+            rx.text(item["runtime_call_count"], font_size="13px", color="var(--gray-12)", font_weight="600", text_align="right"),
+            rx.text(item["prompt_tokens"], font_size="12px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(item["completion_tokens"], font_size="12px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(item["credits"], font_size="13px", color=PRIMARY, font_weight="600", text_align="right"),
+            rx.text(item["topics_text"], font_size="11px", color="var(--gray-a8)"),
+        ],
+        template="3fr 0.8fr 0.8fr 1fr 1fr 1fr 3fr",
+    )
+
+
+def _mcs_tools_ai_builder_call_row(item: dict) -> rx.Component:
+    """One row per runtime AI Builder invocation. Shows turn · host
+    topic · model · token counts · output preview."""
+    return _grid_row(
+        [
+            rx.vstack(
+                rx.text(item["model_display"], font_size="12px", font_weight="600", color="var(--gray-12)"),
+                rx.text(item["host_topic"], font_size="10px", color="var(--gray-a8)"),
+                spacing="0",
+                align="start",
+            ),
+            rx.text(item["variable_name"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["turn_message"], font_size="12px", color="var(--gray-12)"),
+            rx.text(item["prompt_tokens"], font_size="11px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(item["completion_tokens"], font_size="11px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(item["credits"], font_size="11px", color="var(--gray-11)", font_family=_MONO, text_align="right"),
+            rx.text(item["output_preview"], font_size="11px", color="var(--gray-a9)", font_style="italic"),
+        ],
+        template="2fr 2fr 2fr 0.7fr 0.7fr 0.7fr 4fr",
+    )
+
+
 def _mcs_tools_stats_row(item: dict) -> rx.Component:
     """Statistics table row for tool call analysis."""
     return _grid_row(
@@ -2237,6 +2282,103 @@ def _mcs_tools_panel() -> rx.Component:
                     "2fr 1fr 2fr 2fr",
                     State.mcs_tools_external_calls,
                     _mcs_tools_ext_detail_row,
+                ),
+                width="100%",
+            ),
+        ),
+        # AI Builder Calls — summary table (per `aIModelDefinitions` entry)
+        # + per-call detail (every runtime invocation harvested from
+        # `TurnPromptMetrics`). AI Builder calls aren't on the
+        # orchestrator-level tool surface (they fire from inside
+        # DialogComponent action trees) so they get their own card.
+        rx.cond(
+            State.mcs_tools_ai_builder_summary.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("brain-circuit", size=16, color=PRIMARY),
+                    section_heading("AI Builder Calls"),
+                    rx.spacer(),
+                    rx.badge(
+                        State.mcs_tools_ai_builder_summary.length().to(str),  # type: ignore[union-attr]
+                        " models",
+                        color_scheme="purple",
+                        variant="soft",
+                        size="1",
+                    ),
+                    rx.badge(
+                        State.mcs_tools_ai_builder_calls.length().to(str),  # type: ignore[union-attr]
+                        " runtime calls",
+                        color_scheme="blue",
+                        variant="soft",
+                        size="1",
+                    ),
+                    align="center",
+                    width="100%",
+                ),
+                rx.text(
+                    "Every aIModelDefinitions entry in your bot, paired with "
+                    "the runtime invocations the analyser captured from "
+                    "VariableAssignment events. Static call-sites = where the "
+                    "model is wired in the YAML; runtime calls = how many "
+                    "times it actually fired in this session.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                    padding_bottom="8px",
+                ),
+                _data_table(
+                    [
+                        "Model",
+                        "Call-sites",
+                        "Runtime calls",
+                        "Prompt tok",
+                        "Completion tok",
+                        "Credits",
+                        "Topics that fired it",
+                    ],
+                    "3fr 0.8fr 0.8fr 1fr 1fr 1fr 3fr",
+                    State.mcs_tools_ai_builder_summary,
+                    _mcs_tools_ai_builder_summary_row,
+                ),
+                rx.cond(
+                    State.mcs_tools_ai_builder_calls.length() > 0,  # type: ignore[union-attr]
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("list", size=12, color="var(--gray-a9)"),
+                                rx.text(
+                                    "Per-call detail (",
+                                    State.mcs_tools_ai_builder_calls.length().to(str),  # type: ignore[union-attr]
+                                    " runtime invocations)",
+                                    font_size="11px",
+                                    color="var(--gray-a9)",
+                                ),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.box(
+                                _data_table(
+                                    [
+                                        "Model · host topic",
+                                        "Output variable",
+                                        "Turn",
+                                        "In tok",
+                                        "Out tok",
+                                        "Credits",
+                                        "Output preview",
+                                    ],
+                                    "2fr 2fr 2fr 0.7fr 0.7fr 0.7fr 4fr",
+                                    State.mcs_tools_ai_builder_calls,
+                                    _mcs_tools_ai_builder_call_row,
+                                ),
+                                width="100%",
+                            ),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                        padding_top="8px",
+                    ),
                 ),
                 width="100%",
             ),
@@ -2404,35 +2546,386 @@ def _mcs_ks_coverage_row(item: dict) -> rx.Component:
     )
 
 
-def _mcs_knowledge_attribution_row(item: dict) -> rx.Component:
-    """Per-turn knowledge attribution row. Mirrors the orchestrator-search
-    card shape but reflects the higher-level `KnowledgeTraceData` view: one
-    row per answered turn with cited sources + completion state."""
+# Outcome → border-colour map for search cards. Same vocabulary as the
+# turn-strip chips so a green border on a card matches a green chip in
+# the strip at the top of the tab.
+_TONE_BORDER_COLOR: dict[str, str] = {
+    "good": "var(--green-9)",
+    "info": "var(--blue-9)",
+    "warn": "var(--amber-9)",
+    "bad": "var(--red-9)",
+    "neutral": "var(--gray-a4)",
+}
+
+# Tone → chip background for the turn-strip header.
+_TONE_CHIP_BG: dict[str, str] = {
+    "good": "var(--green-a4)",
+    "info": "var(--blue-a4)",
+    "warn": "var(--amber-a4)",
+    "bad": "var(--red-a4)",
+    "neutral": "var(--gray-a3)",
+}
+
+
+def _mcs_knowledge_tier_legend() -> rx.Component:
+    """Persistent legend strip explaining the tier + quality icons on
+    every search-result row. Each chip is hover-wrapped with a Reflex
+    tooltip that surfaces a paragraph-length explanation of where the
+    evidence comes from and how to interpret it."""
+    # (icon, short_label, long_tooltip) tuples. Long form is shown on
+    # hover so the legend strip stays compact for scanners.
+    bits: list[tuple[str, str, str]] = [
+        (
+            "📎",
+            "grounded snippet",
+            "Tier 1 — the bot's runtime captured the full source document "
+            "text for this result via Global.CBResponse.Text.CitationSources[].Text. "
+            "Typically 2,000–5,000 characters per citation. This is the gold-"
+            "standard evidence: you're seeing the actual snippet the bot used "
+            "to compose its answer. Appears for turns that went through the "
+            "Conversational boosting topic's SearchAndSummarizeContent node — "
+            "the only Copilot Studio path in this export that preserves snippet "
+            "bodies in the trace.",
+        ),
+        (
+            "📚",
+            "cited source (KTD)",
+            "Tier 2 — the runtime recorded that this knowledge source was "
+            "cited via KnowledgeTraceData.citedKnowledgeSources, but did NOT "
+            "trace the snippet text. The URL on this row is the SharePoint "
+            "root from your bot's botContent.yml (KnowledgeSourceComponent."
+            "source.site), not the specific document the AI Builder model "
+            "consumed. Common for turns that took the orchestrator + AI "
+            "Builder code path — the snippets flowed into the model's prompt "
+            "internally but were dropped from the export.",
+        ),
+        (
+            "🔗",
+            "reply-extracted URL",
+            "Tier 3 — this URL was found inside the bot's final reply text "
+            "by a markdown-link regex matching [label](url). It's an "
+            "INFERRED citation: the bot decided to surface this URL in its "
+            "answer, but the original source content isn't in the export. "
+            "Useful fallback when neither CBResponse nor KTD attribution "
+            "captured the source. Treat with caution: bot hallucinations "
+            "(e.g. home.htmld instead of home.html) surface here verbatim, "
+            "which is exactly the case the original 'incorrect URL' report "
+            "was about.",
+        ),
+        (
+            "🟢",
+            "snippet ≥200 chars",
+            "Snippet-length quality indicator. Green = substantial passage "
+            "(≥200 chars). High-confidence grounded evidence — you can audit "
+            "the source content directly. Driven by len(SearchResult.text).",
+        ),
+        (
+            "🟡",
+            "50–199 chars",
+            "Snippet-length quality indicator. Yellow = fragmentary (50–199 "
+            "chars). Source was cited but the captured text is too short to "
+            "fully audit the bot's claim. Treat with caution.",
+        ),
+        (
+            "🔴",
+            "<50 chars",
+            "Snippet-length quality indicator. Red = near-miss (<50 chars). "
+            "Likely a header, label, or near-empty result — the bot probably "
+            "didn't use this passage to ground its answer.",
+        ),
+        (
+            "⚫",
+            "no snippet body",
+            "No snippet body at all. Common for Tier 2 (KTD attribution) "
+            "and Tier 3 (reply-extracted URL) rows where only the source "
+            "URL was recoverable. Not a failure — just an honest 'we know "
+            "which source was queried but Microsoft didn't trace what came "
+            "back'. To see actual snippets, look at the Citations card "
+            "above (📎 rows).",
+        ),
+    ]
+    children = []
+    for icon, short_label, long_tooltip in bits:
+        chip = rx.hstack(
+            rx.text(icon, font_size="13px"),
+            rx.text(short_label, font_size="11px", color="var(--gray-a9)"),
+            spacing="1",
+            align="center",
+            cursor="help",
+            border_bottom="1px dotted var(--gray-a5)",
+            padding_bottom="1px",
+        )
+        children.append(
+            rx.tooltip(
+                chip,
+                content=long_tooltip,
+                side="bottom",
+                align="start",
+                delay_duration=200,
+            )
+        )
+    return rx.box(
+        rx.hstack(
+            rx.text("Legend", font_size="11px", color="var(--gray-a9)", font_weight="700"),
+            *children,
+            spacing="3",
+            flex_wrap="wrap",
+            align="center",
+        ),
+        padding="8px 12px",
+        background="var(--gray-a2)",
+        border="1px solid var(--gray-a4)",
+        border_radius="6px",
+        width="100%",
+    )
+
+
+def _mcs_knowledge_turn_chip(item: dict) -> rx.Component:
+    """One status chip in the turn-strip header. Click → anchor-scrolls to
+    the matching search card."""
+    return rx.link(
+        rx.box(
+            rx.hstack(
+                rx.text(item["index"], font_size="10px", color="var(--gray-a9)", font_weight="700"),
+                rx.text(item["short_label"], font_size="11px", color="var(--gray-12)"),
+                spacing="1",
+                align="center",
+            ),
+            background=rx.match(
+                item["tone"],
+                ("good", _TONE_CHIP_BG["good"]),
+                ("info", _TONE_CHIP_BG["info"]),
+                ("warn", _TONE_CHIP_BG["warn"]),
+                ("bad", _TONE_CHIP_BG["bad"]),
+                _TONE_CHIP_BG["neutral"],
+            ),
+            border="1px solid var(--gray-a4)",
+            border_radius="999px",
+            padding="4px 10px",
+            white_space="nowrap",
+        ),
+        href=item["anchor_href"],
+        title=item["full_label"],
+    )
+
+
+def _mcs_knowledge_cluster_card(item: dict) -> rx.Component:
+    """Phase 3a — a cluster card for turns sharing the same normalized
+    user question. Surfaces "asked N times, M grounded" so the user can
+    spot inconsistent answers across repeats."""
+    return card(
+        rx.vstack(
+            rx.hstack(
+                rx.icon("layers", size=14, color=PRIMARY),
+                rx.text(
+                    item["representative_turn"],
+                    font_size="13px",
+                    font_weight="600",
+                    color="var(--gray-12)",
+                    flex="1",
+                ),
+                rx.badge(item["occurrences"], "× asked", color_scheme="amber", variant="soft", size="1"),
+                rx.badge(item["with_citation"], " grounded", color_scheme="green", variant="soft", size="1"),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            rx.text(
+                item["turn_list_text"],
+                font_size="11px",
+                color="var(--gray-a8)",
+                font_style="italic",
+            ),
+            spacing="1",
+            width="100%",
+        ),
+        width="100%",
+    )
+
+
+def _mcs_knowledge_heatmap_row(item: dict) -> rx.Component:
+    """Phase 3b — one row of the source × turn coverage heatmap. Cells
+    are pre-rendered as an emoji string in the populator to avoid the
+    nested-foreach typing trap (list[dict] inside list[dict] confuses
+    Reflex's type inference)."""
+    return rx.hstack(
+        rx.text(
+            item["source_name"],
+            font_size="11px",
+            color="var(--gray-12)",
+            font_weight="600",
+            min_width="180px",
+            word_break="break-word",
+        ),
+        rx.text(
+            item["cells_str"],
+            font_size="14px",
+            font_family=_MONO,
+            letter_spacing="1px",
+            flex="1",
+        ),
+        rx.text(
+            item["summary"],
+            font_size="10px",
+            color="var(--gray-a9)",
+            min_width="160px",
+        ),
+        align="center",
+        spacing="2",
+        width="100%",
+    )
+
+
+def _mcs_knowledge_composed_answer_card(item: dict) -> rx.Component:
+    """One bot composed-answer card — turn header + 600-char markdown
+    preview + expandable full body. Sources from `CBResponse.Text.
+    MarkdownContent`: the actual answer the runtime composed for this turn
+    before bot-message rendering picked it up."""
+    return card(
+        rx.vstack(
+            rx.hstack(
+                rx.icon("scroll-text", size=14, color=PRIMARY),
+                rx.text(item["turn_message"], font_size="12px", font_weight="600", color="var(--gray-12)", flex="1"),
+                rx.badge(item["char_count"], " chars", color_scheme="green", variant="soft", size="1"),
+                rx.cond(
+                    item["is_sydney_summarised"] == "Yes",
+                    rx.badge("Sydney summarised", color_scheme="purple", variant="soft", size="1"),
+                ),
+                align="center",
+                spacing="2",
+                width="100%",
+            ),
+            rx.text(item["preview"], font_size="12px", color="var(--gray-a9)", font_style="italic"),
+            rx.accordion.root(
+                rx.accordion.item(
+                    header=rx.text("Full markdown answer", font_size="11px", color="var(--gray-a9)"),
+                    content=rx.el.pre(
+                        item["markdown_full"],
+                        font_size="11px",
+                        color="var(--gray-11)",
+                        white_space="pre-wrap",
+                        word_break="break-word",
+                        font_family=_MONO,
+                        background="var(--gray-a2)",
+                        border="1px solid var(--gray-a4)",
+                        border_radius="6px",
+                        padding="10px",
+                        max_height="400px",
+                        overflow_y="auto",
+                    ),
+                ),
+                collapsible=True,
+                variant="ghost",
+                width="100%",
+            ),
+            spacing="2",
+            width="100%",
+        ),
+        width="100%",
+    )
+
+
+def _mcs_knowledge_turn_context_row(item: dict) -> rx.Component:
+    """One per-turn runtime-context row. Shows language, the queries the
+    runtime ultimately used (which may differ from the orchestrator's
+    bound search_query), and the ticket-eligibility classifier outputs.
+    Drives the "Per-turn runtime context" card."""
     return _grid_row(
         [
-            rx.text(item["turn_message"], font_size="13px", color="var(--gray-12)"),
-            _status_badge(item["completion_state"], item["completion_tone"]),
-            rx.text(item["is_searched"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
-            rx.text(item["cited_count"], font_size="12px", color="var(--gray-11)", text_align="right"),
-            rx.text(item["cited_sources_str"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["turn_message"], font_size="12px", color="var(--gray-12)"),
+            rx.text(item["language"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["keyword_search_query"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["search_query"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["ticket_eligibility_kb"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["ticket_eligibility_cb"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
         ],
-        template="3fr 1fr 0.5fr 0.5fr 3fr",
+        template="3fr 1fr 2fr 2fr 1fr 1fr",
+    )
+
+
+def _mcs_knowledge_attribution_row(item: dict) -> rx.Component:
+    """Per-turn knowledge attribution row. The turn-message cell is a
+    link that anchor-scrolls to the matching search card below; the
+    metrics strip (model · tokens · credits) shows on the right when
+    available."""
+    turn_cell = rx.cond(
+        item["has_anchor"] != "",
+        rx.link(
+            item["turn_message"],
+            href=item["anchor_href"],
+            font_size="13px",
+            color=PRIMARY,
+            text_decoration="underline",
+            _hover={"text_decoration": "none"},
+        ),
+        rx.text(item["turn_message"], font_size="13px", color="var(--gray-12)"),
+    )
+    return rx.vstack(
+        _grid_row(
+            [
+                turn_cell,
+                _status_badge(item["completion_state"], item["completion_tone"]),
+                rx.text(item["is_searched"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+                rx.text(item["cited_count"], font_size="12px", color="var(--gray-11)", text_align="right"),
+                rx.text(item["cited_sources_str"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+            ],
+            template="3fr 1fr 0.5fr 0.5fr 3fr",
+        ),
+        rx.cond(
+            item["metrics_strip"] != "",
+            rx.text(
+                item["metrics_strip"],
+                font_size="10px",
+                color="var(--gray-a8)",
+                font_family=_MONO,
+                padding_left="6px",
+            ),
+        ),
+        spacing="0",
+        width="100%",
     )
 
 
 def _mcs_knowledge_citation_card(item: dict) -> rx.Component:
-    """One citation snippet card — turn header · linked source · char-count
-    badge · 400-char preview · expandable full body. Flat layout so Reflex
-    can typecheck cleanly without nested `rx.foreach`."""
+    """One citation snippet card — source name + URL, char-count badge,
+    "cited in N turns" badge, 400-char preview, expandable full body.
+    Flat layout so Reflex can typecheck without nested `rx.foreach`."""
     return card(
         rx.vstack(
             rx.hstack(
                 rx.icon("paperclip", size=14, color=PRIMARY),
-                rx.text(item["turn_message"], font_size="12px", font_weight="600", color="var(--gray-12)", flex="1"),
+                rx.text(item["cited_turns_text"], font_size="12px", font_weight="600", color="var(--gray-12)", flex="1"),
+                rx.badge(
+                    "cited in ",
+                    item["cited_turn_count"],
+                    " turn(s)",
+                    color_scheme="amber",
+                    variant="soft",
+                    size="1",
+                ),
                 rx.badge(item["char_count"], " chars", color_scheme="blue", variant="soft", size="1"),
+                # Pass A: file-type badge (📄 pdf / 📄 aspx / etc.). Only
+                # rendered when the runtime appended the metadata tail to
+                # the snippet body (parsed by _CITATION_TAIL_RE).
+                rx.cond(
+                    item["file_type"] != "",
+                    rx.badge("📄 ", item["file_type"], color_scheme="gray", variant="soft", size="1"),
+                ),
                 align="center",
                 spacing="2",
                 width="100%",
+            ),
+            # Description (from the same metadata tail) is rendered as a
+            # subtitle when present. Often empty in this fixture but
+            # populated in others.
+            rx.cond(
+                item["description"] != "",
+                rx.text(
+                    item["description"],
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                ),
             ),
             rx.cond(
                 item["url"] != "",
@@ -2494,34 +2987,245 @@ def _mcs_ks_item(item: dict) -> rx.Component:
 
 
 def _mcs_ks_search_card(item: dict) -> rx.Component:
-    return card(
-        rx.vstack(
-            # Header
-            rx.hstack(
-                rx.badge(f"#{item['index']}", color_scheme="green", variant="soft", size="1"),
-                rx.text(item["query"], font_size="13px", font_weight="600", color="var(--gray-12)", flex="1"),
-                _status_badge(item["grounding_label"], item["grounding_tone"]),
-                width="100%",
-                align="center",
-                spacing="2",
-            ),
-            # Meta row
-            rx.hstack(
-                rx.cond(
-                    item["keywords"] != "—",
-                    rx.text(item["keywords"], font_size="12px", color="var(--gray-a9)", font_style="italic"),
-                ),
-                rx.spacer(),
+    return rx.box(
+        card(
+            rx.vstack(
+                # Header
                 rx.hstack(
-                    rx.text(item["sources"], font_size="11px", color="var(--gray-a8)"),
-                    rx.text("·", color="var(--gray-a6)"),
-                    rx.text(item["duration"], font_size="12px", color="var(--gray-a8)", font_family=_MONO),
+                    rx.badge("#", item["index"], color_scheme="green", variant="soft", size="1"),
+                    rx.text(item["query"], font_size="13px", font_weight="600", color="var(--gray-12)", flex="1"),
+                    _status_badge(item["grounding_label"], item["grounding_tone"]),
+                    # Path-taken badge with lengthy tooltip explaining the
+                    # runtime code path. Wraps in rx.tooltip so hover gives
+                    # the longer prose explanation of what the path means
+                    # and what's lost from the export.
+                    rx.tooltip(
+                        rx.badge(
+                            "🛣️ ",
+                            item["path_label"],
+                            color_scheme=rx.match(
+                                item["path_color_scheme"],
+                                ("green", "green"),
+                                ("amber", "amber"),
+                                ("blue", "blue"),
+                                ("red", "red"),
+                                "gray",
+                            ),
+                            variant="soft",
+                            size="1",
+                        ),
+                        content=item["path_tooltip"],
+                        side="bottom",
+                        align="end",
+                        delay_duration=200,
+                    ),
+                    width="100%",
+                    align="center",
                     spacing="2",
+                ),
+                # Meta row — keywords + duration only. The 11-source spam
+                # is now collapsed into an accordion below (Phase 1b).
+                rx.hstack(
+                    rx.cond(
+                        item["keywords"] != "—",
+                        rx.text(item["keywords"], font_size="12px", color="var(--gray-a9)", font_style="italic"),
+                    ),
+                    rx.spacer(),
+                    rx.text(item["duration"], font_size="12px", color="var(--gray-a8)", font_family=_MONO),
+                    width="100%",
                     align="center",
                 ),
-                width="100%",
-                align="center",
-            ),
+                # Query-rewrite callout: shows the user's literal question
+                # next to the orchestrator's derived search query +
+                # keywords. Powered by `rewrite_html` (pre-rendered).
+                rx.cond(
+                    item["rewrite_html"] != "",
+                    rx.html(item["rewrite_html"]),
+                ),
+                # Phase 2a — token/cost/latency strip per turn.
+                rx.cond(
+                    item["metrics_strip"] != "",
+                    rx.text(
+                        item["metrics_strip"],
+                        font_size="10px",
+                        color="var(--gray-a8)",
+                        font_family=_MONO,
+                    ),
+                ),
+                # Phase 1b — collapsed list of the orchestrator's queried
+                # knowledge sources. Default closed so a single card
+                # doesn't fill the screen with the 11-source spam.
+                rx.cond(
+                    item["sources"] != "—",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("library", size=12, color="var(--gray-a9)"),
+                                rx.text(
+                                    item["source_count"],
+                                    " sources searched",
+                                    font_size="11px",
+                                    color="var(--gray-a9)",
+                                ),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.text(
+                                item["sources"],
+                                font_size="11px",
+                                color="var(--gray-a8)",
+                                font_family=_MONO,
+                                white_space="normal",
+                                word_break="break-word",
+                            ),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                # Phase 1c — collapsed bot-reply accordion. The user can
+                # validate "did the bot's answer actually use these
+                # sources?" without flipping to the Conversation tab.
+                rx.cond(
+                    item["bot_reply_text"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("message-square", size=12, color="var(--gray-a9)"),
+                                rx.text("Final bot reply", font_size="11px", color="var(--gray-a9)"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.el.pre(
+                                item["bot_reply_text"],
+                                font_size="11px",
+                                color="var(--gray-11)",
+                                white_space="pre-wrap",
+                                word_break="break-word",
+                                font_family=_MONO,
+                                background="var(--gray-a2)",
+                                border="1px solid var(--gray-a4)",
+                                border_radius="6px",
+                                padding="10px",
+                                max_height="320px",
+                                overflow_y="auto",
+                            ),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                # Pass A: AI Builder model output(s) per turn. Distinct
+                # from "Final bot reply" — these are the intermediate LLM
+                # invocations (ticket-eligibility classifier, response
+                # composer, language detector, …) the runtime ran while
+                # building the answer. Lets the user audit each LLM
+                # call's contribution.
+                rx.cond(
+                    item["model_text"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("brain", size=12, color="var(--gray-a9)"),
+                                rx.text("Model output", font_size="11px", color="var(--gray-a9)"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.el.pre(
+                                item["model_text"],
+                                font_size="11px",
+                                color="var(--gray-11)",
+                                white_space="pre-wrap",
+                                word_break="break-word",
+                                font_family=_MONO,
+                                background="var(--gray-a2)",
+                                border="1px solid var(--gray-a4)",
+                                border_radius="6px",
+                                padding="10px",
+                                max_height="320px",
+                                overflow_y="auto",
+                            ),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                # Pass A: thought-steps reasoning trace per turn (often
+                # empty in this export but populated in others).
+                rx.cond(
+                    item["model_thought_steps"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("activity", size=12, color="var(--gray-a9)"),
+                                rx.text("Model thought steps", font_size="11px", color="var(--gray-a9)"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.el.pre(
+                                item["model_thought_steps"],
+                                font_size="11px",
+                                color="var(--gray-11)",
+                                white_space="pre-wrap",
+                                word_break="break-word",
+                                font_family=_MONO,
+                                background="var(--gray-a2)",
+                                border="1px solid var(--gray-a4)",
+                                border_radius="6px",
+                                padding="10px",
+                                max_height="320px",
+                                overflow_y="auto",
+                            ),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                # 🔬 Data flow for this turn — pre-rendered HTML pipeline
+                # narrative explaining the runtime steps and what was /
+                # wasn't preserved in the export. Drops into rx.html(...)
+                # so Reflex doesn't typecheck nested components.
+                rx.cond(
+                    item["data_flow_html"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("workflow", size=12, color="var(--gray-a9)"),
+                                rx.text("Data flow for this turn", font_size="11px", color="var(--gray-a9)"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.html(item["data_flow_html"]),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                # 📜 View raw trace events — activity-by-activity dump for
+                # the bounding user turn. The auditable receipt for
+                # everything else on this card.
+                rx.cond(
+                    item["raw_trace_html"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("scroll", size=12, color="var(--gray-a9)"),
+                                rx.text("View raw trace events", font_size="11px", color="var(--gray-a9)"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.html(item["raw_trace_html"]),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
             # Thought
             rx.cond(
                 item["thought"] != "",
@@ -2560,9 +3264,14 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                     padding="4px 8px",
                 ),
             ),
-            # Results
+            # Results — rendered as raw HTML so each tier and quality
+            # icon can carry a native `title=` tooltip explaining the
+            # provenance and quality grade. Reflex's nested-foreach
+            # typing constraints rule out a per-result component tree, so
+            # the populator pre-renders the section as a string of div
+            # rows.
             rx.cond(
-                item["results_text"] != "",
+                item["results_html"] != "",
                 rx.box(
                     rx.hstack(
                         rx.text(item["result_count"], font_size="11px", color="var(--gray-a9)", font_weight="600"),
@@ -2571,17 +3280,7 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                         align="center",
                         margin_bottom="4px",
                     ),
-                    rx.el.pre(
-                        item["results_text"],
-                        font_size="11px",
-                        color="var(--gray-11)",
-                        white_space="pre-wrap",
-                        word_break="break-all",
-                        overflow_wrap="anywhere",
-                        font_family=_MONO,
-                        line_height="1.6",
-                        margin="0",
-                    ),
+                    rx.html(item["results_html"]),
                     background="var(--gray-a2)",
                     border=f"1px solid {SURFACE_BORDER}",
                     border_radius="6px",
@@ -2608,6 +3307,14 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
         ),
         width="100%",
         padding="14px",
+        ),
+        # Phase 1f anchor target + Phase 1d coloured left border. The
+        # `border_left_css` string is pre-computed in the populator so the
+        # match-on-tone doesn't need to live in a render function.
+        id=item["anchor_id"],
+        border_left=item["border_left_css"],
+        scroll_margin_top="80px",
+        width="100%",
     )
 
 
@@ -3373,6 +4080,50 @@ def _mcs_knowledge_panel() -> rx.Component:
             gap="10px",
             width="100%",
         ),
+        # Phase 2c — horizontal turn-strip header. One chip per turn,
+        # colour-coded by outcome tone, anchor-linked to the matching
+        # search card. Visual TOC of the conversation.
+        rx.cond(
+            State.mcs_knowledge_turn_strip.length() > 0,  # type: ignore[union-attr]
+            rx.box(
+                rx.hstack(
+                    rx.text("Turns:", font_size="11px", color="var(--gray-a9)", font_weight="600"),
+                    rx.hstack(
+                        rx.foreach(State.mcs_knowledge_turn_strip, _mcs_knowledge_turn_chip),
+                        spacing="1",
+                        flex_wrap="wrap",
+                    ),
+                    spacing="2",
+                    align="start",
+                    width="100%",
+                ),
+                padding="8px",
+                background="var(--gray-a2)",
+                border="1px solid var(--gray-a4)",
+                border_radius="6px",
+                width="100%",
+            ),
+        ),
+        # Phase 1a — tier-badge legend. Tells the user what 📎/📚/🔗 and
+        # 🟢/🟡/🔴/⚫ mean before they scroll into the search-result
+        # rows that use those symbols.
+        _mcs_knowledge_tier_legend(),
+        # Phase 3c — CSV export button for citations. Wired to
+        # UploadMixin.download_citations_csv added by the export agent.
+        rx.cond(
+            State.mcs_knowledge_citations.length() > 0,  # type: ignore[union-attr]
+            rx.hstack(
+                rx.spacer(),
+                rx.button(
+                    rx.icon("download", size=12),
+                    "Citations (CSV)",
+                    on_click=State.download_citations_csv,
+                    size="1",
+                    variant="soft",
+                ),
+                width="100%",
+            ),
+        ),
         # General knowledge badge
         rx.hstack(
             rx.text("General Knowledge:", font_size="13px", color="var(--gray-a9)", font_weight="600"),
@@ -3586,6 +4337,134 @@ def _mcs_knowledge_panel() -> rx.Component:
                 width="100%",
             ),
         ),
+        # Composed Answers — `CBResponse.Text.MarkdownContent` per turn.
+        # Sits below Citations because it pairs with them: the citations
+        # are what fed into the answer, the composed answer is what
+        # came out.
+        rx.cond(
+            State.mcs_knowledge_composed_answers.length() > 0,  # type: ignore[union-attr]
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("scroll-text", size=16, color=PRIMARY),
+                    section_heading("Composed Answers"),
+                    rx.badge(
+                        State.mcs_knowledge_composed_answers.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="green",
+                        variant="soft",
+                        size="1",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "The bot's final composed answer per turn, harvested from "
+                    "CBResponse.Text.MarkdownContent. Expand to see the full "
+                    "markdown body with section headers and citation markers.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                ),
+                rx.foreach(
+                    State.mcs_knowledge_composed_answers,
+                    _mcs_knowledge_composed_answer_card,
+                ),
+                spacing="3",
+                width="100%",
+            ),
+        ),
+        # Per-turn runtime context — language, queries, ticket-eligibility.
+        # Auxiliary signals harvested from VariableAssignment events that
+        # cluster around each user turn.
+        rx.cond(
+            State.mcs_knowledge_turn_contexts.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("info", size=16, color=PRIMARY),
+                    section_heading("Per-turn runtime context"),
+                    rx.spacer(),
+                    rx.badge(
+                        State.mcs_knowledge_turn_contexts.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="blue",
+                        variant="soft",
+                        size="1",
+                    ),
+                    width="100%",
+                    align="center",
+                ),
+                rx.text(
+                    "Auxiliary signals the runtime emitted around each turn: "
+                    "detected language, keyword/search queries the bot ended "
+                    "up using, ticket-eligibility classifier verdicts.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                    padding_bottom="8px",
+                ),
+                _data_table(
+                    ["Turn", "Lang", "Keyword query", "Search query", "Ticket KB", "Ticket CB"],
+                    "3fr 1fr 2fr 2fr 1fr 1fr",
+                    State.mcs_knowledge_turn_contexts,
+                    _mcs_knowledge_turn_context_row,
+                ),
+                width="100%",
+            ),
+        ),
+        # Phase 3a — repeated-question clusters. Shown only when the user
+        # asked the same question more than once.
+        rx.cond(
+            State.mcs_knowledge_clusters.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("layers", size=16, color=PRIMARY),
+                    section_heading("Repeated questions"),
+                    rx.spacer(),
+                    rx.badge(
+                        State.mcs_knowledge_clusters.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="amber",
+                        variant="soft",
+                        size="1",
+                    ),
+                    width="100%",
+                    align="center",
+                ),
+                rx.text(
+                    "User questions asked multiple times in this conversation. "
+                    "Watch the 'grounded' column to spot inconsistent answers.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                    padding_bottom="6px",
+                ),
+                rx.foreach(State.mcs_knowledge_clusters, _mcs_knowledge_cluster_card),
+                width="100%",
+            ),
+        ),
+        # Phase 3b — source-coverage heatmap. Matrix of source × turn.
+        rx.cond(
+            State.mcs_knowledge_heatmap.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("grid-3x3", size=16, color=PRIMARY),
+                    section_heading("Source × turn coverage"),
+                    width="100%",
+                    align="center",
+                ),
+                rx.text(
+                    "Each column is a turn (left → right). Green = source contributed; "
+                    "amber = searched but didn't contribute; grey = not searched.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                    padding_bottom="8px",
+                ),
+                rx.vstack(
+                    rx.foreach(State.mcs_knowledge_heatmap, _mcs_knowledge_heatmap_row),
+                    spacing="1",
+                    width="100%",
+                ),
+                width="100%",
+            ),
+        ),
         # Search Results
         rx.cond(
             State.mcs_knowledge_searches.length() > 0,  # type: ignore[union-attr]
@@ -3621,82 +4500,102 @@ def _mcs_knowledge_panel() -> rx.Component:
                 width="100%",
             ),
         ),
-        # Topic-level generative answer traces
-        rx.cond(
-            State.mcs_generative_traces.length() > 0,  # type: ignore[union-attr]
-            rx.vstack(
-                rx.hstack(
-                    rx.icon("brain-circuit", size=16, color=PRIMARY),
-                    section_heading("Topic-Level Generative Answers"),
-                    rx.badge(
-                        State.mcs_generative_traces.length(),  # type: ignore[union-attr]
-                        color_scheme="green",
-                        variant="soft",
-                        size="1",
-                    ),
+        # Phase 1g — Diagnostics fold. Two specialised panels
+        # (Topic-Level Generative Answers + Citation Verification) only
+        # apply to bots that emit `GenerativeAnswersSupportData` events.
+        # For everything else they're empty stubs — fold them out of the
+        # primary scan path.
+        rx.accordion.root(
+            rx.accordion.item(
+                header=rx.hstack(
+                    rx.icon("microscope", size=14, color="var(--gray-a9)"),
+                    rx.text("Parser diagnostics (stubbed panels)", font_size="12px", color="var(--gray-a9)"),
                     spacing="2",
                     align="center",
                 ),
-                rx.text(
-                    "SearchAndSummarizeContent invoked directly inside a topic — "
-                    "captures the full query rewriting chain, token usage, ranked results, citations, and safety pipeline.",
-                    font_size="11px",
-                    color="var(--gray-a9)",
-                    font_style="italic",
-                ),
-                rx.foreach(State.mcs_generative_traces, _mcs_generative_trace_card),
-                spacing="3",
-                width="100%",
-            ),
-            _empty_panel(
-                "Topic-Level Generative Answers",
-                "brain-circuit",
-                "The parser matched no `valueType=GenerativeAnswersSupportData` events in this dialog. "
-                "If your topics use SearchAndSummarizeContent and you expected traces here, the export may use a "
-                "different signature — see Raw Events.",
-            ),
-        ),
-        # Citation Verification panel — flat audit table of every citation
-        # across all generative-answer traces with answer/completion state
-        # and safety flags. Hidden when no citations exist.
-        rx.cond(
-            State.mcs_knowledge_citation_panel.length() > 0,  # type: ignore[union-attr]
-            card(
-                rx.hstack(
-                    rx.icon("badge-check", size=16, color=PRIMARY),
-                    section_heading("Citation Verification"),
-                    rx.spacer(),
-                    rx.badge(
-                        State.mcs_knowledge_citation_panel.length().to(str),  # type: ignore[union-attr]
-                        color_scheme="green",
-                        variant="soft",
-                        size="1",
+                content=rx.vstack(
+                    # Topic-level generative answer traces
+                    rx.cond(
+                        State.mcs_generative_traces.length() > 0,  # type: ignore[union-attr]
+                        rx.vstack(
+                            rx.hstack(
+                                rx.icon("brain-circuit", size=16, color=PRIMARY),
+                                section_heading("Topic-Level Generative Answers"),
+                                rx.badge(
+                                    State.mcs_generative_traces.length(),  # type: ignore[union-attr]
+                                    color_scheme="green",
+                                    variant="soft",
+                                    size="1",
+                                ),
+                                spacing="2",
+                                align="center",
+                            ),
+                            rx.text(
+                                "SearchAndSummarizeContent invoked directly inside a topic — "
+                                "captures the full query rewriting chain, token usage, ranked results, citations, and safety pipeline.",
+                                font_size="11px",
+                                color="var(--gray-a9)",
+                                font_style="italic",
+                            ),
+                            rx.foreach(State.mcs_generative_traces, _mcs_generative_trace_card),
+                            spacing="3",
+                            width="100%",
+                        ),
+                        _empty_panel(
+                            "Topic-Level Generative Answers",
+                            "brain-circuit",
+                            "The parser matched no `valueType=GenerativeAnswersSupportData` events in this dialog. "
+                            "If your topics use SearchAndSummarizeContent and you expected traces here, the export may use a "
+                            "different signature — see Raw Events.",
+                        ),
                     ),
-                    align="center",
+                    # Citation Verification panel
+                    rx.cond(
+                        State.mcs_knowledge_citation_panel.length() > 0,  # type: ignore[union-attr]
+                        card(
+                            rx.hstack(
+                                rx.icon("badge-check", size=16, color=PRIMARY),
+                                section_heading("Citation Verification"),
+                                rx.spacer(),
+                                rx.badge(
+                                    State.mcs_knowledge_citation_panel.length().to(str),  # type: ignore[union-attr]
+                                    color_scheme="green",
+                                    variant="soft",
+                                    size="1",
+                                ),
+                                align="center",
+                                width="100%",
+                            ),
+                            rx.text(
+                                "Every citation referenced in the conversation, with the trace's "
+                                "gptAnswerState / completionState and content moderation + provenance "
+                                "flags. Click a row to open the source.",
+                                font_size="11px",
+                                color="var(--gray-a8)",
+                                font_style="italic",
+                            ),
+                            rx.vstack(
+                                rx.foreach(State.mcs_knowledge_citation_panel, _mcs_citation_panel_row),
+                                spacing="2",
+                                width="100%",
+                                padding_top="8px",
+                            ),
+                            width="100%",
+                        ),
+                        _empty_panel(
+                            "Citation Verification",
+                            "badge-check",
+                            "Citation Verification reads from the same generative-answer traces as the panel above — without those, "
+                            "there are no citations to audit.",
+                        ),
+                    ),
+                    spacing="3",
                     width="100%",
                 ),
-                rx.text(
-                    "Every citation referenced in the conversation, with the trace's "
-                    "gptAnswerState / completionState and content moderation + provenance "
-                    "flags. Click a row to open the source.",
-                    font_size="11px",
-                    color="var(--gray-a8)",
-                    font_style="italic",
-                ),
-                rx.vstack(
-                    rx.foreach(State.mcs_knowledge_citation_panel, _mcs_citation_panel_row),
-                    spacing="2",
-                    width="100%",
-                    padding_top="8px",
-                ),
-                width="100%",
             ),
-            _empty_panel(
-                "Citation Verification",
-                "badge-check",
-                "Citation Verification reads from the same generative-answer traces as the panel above — without those, "
-                "there are no citations to audit.",
-            ),
+            collapsible=True,
+            variant="ghost",
+            width="100%",
         ),
         # (Knowledge Source Effectiveness merged into "Knowledge Sources"
         # card above — the unified card renders config + runtime stats

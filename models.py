@@ -31,6 +31,11 @@ class ComponentSummary(BaseModel):
     has_external_calls: bool = False
     source_kind: str | None = None
     source_site: str | None = None
+    # KnowledgeSourceComponent extras: search-term augmentation and the
+    # last-modified timestamp from auditInfo. Useful for spotting stale
+    # sources and recall-tuning configuration.
+    additional_search_terms: str | None = None
+    modified_at: str | None = None
     # Tool classification (TaskDialog/AgentDialog)
     tool_type: str | None = None
     connection_reference: str | None = None
@@ -79,6 +84,9 @@ class InlinePrompt(BaseModel):
     response_capture_type: str | None = None
     knowledge_sources_mode: str | None = None
     auto_send: bool | None = None
+    moderation_level: str | None = None
+    latency_message: str | None = None
+    file_search_mode: str | None = None
 
 
 class AIBuilderPromptModel(BaseModel):
@@ -332,6 +340,76 @@ class KnowledgeAttribution(BaseModel):
     failed_source_types: list[str] = Field(default_factory=list)
 
 
+class TurnPromptMetrics(BaseModel):
+    """Per-turn LLM resource accounting harvested from VariableAssignment
+    events whose `newValue` is a JSON blob shaped like
+    ``{"modelName": ..., "promptTokens": ..., "completionTokens": ...,
+    "costAsCopilotCredits": ...}``. Detection is shape-based, not name-based,
+    so it survives the various variable names Copilot Studio uses
+    (`Global.PromptResponse`, `Topic.TicketEligiblePromptKN`, etc.)."""
+
+    position: int = 0
+    timestamp: str | None = None
+    triggering_user_message: str | None = None
+    variable_name: str = ""
+    model_name: str | None = None
+    model_type: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    finish_reason: str | None = None
+    copilot_credits: float | None = None
+    ai_builder_credits: float | None = None
+    images_count: int | None = None
+    # `text` is the AI Builder model's composed output for this invocation —
+    # the actual answer text in the case of answer-composer prompts, or a
+    # short classifier verdict like "Not Eligible" for ticket-eligibility
+    # prompts. Surfacing it pairs the cost metrics with what the bot did
+    # with the tokens.
+    text: str | None = None
+    # `thought_steps` carries the model's reasoning trace when the runtime
+    # captures it. Often empty in exports, populated in others.
+    thought_steps: str | None = None
+
+
+class BotComposedAnswer(BaseModel):
+    """The bot's final composed answer per turn, harvested from
+    `Global.CBResponse.Text` (`Content` = plain text, `MarkdownContent` =
+    structured markdown with section headers). Distinct from
+    `TurnPromptMetrics.text`: that one captures each LLM invocation's
+    output; this one captures the runtime's combined per-turn reply
+    after the custom-RAG pipeline finished composing it.
+
+    Only fires for turns that went through the `SearchAndSummarizeContent`
+    topic path (3 of 13 search turns in the employee_hr_uat fixture).
+    """
+
+    position: int = 0
+    timestamp: str | None = None
+    triggering_user_message: str | None = None
+    markdown_content: str | None = None
+    plain_content: str | None = None
+    is_sydney_summarised: bool = False
+
+
+class TurnContext(BaseModel):
+    """Per-turn runtime context harvested from auxiliary VariableAssignment
+    events. Aggregates language detection, previous-question memory, the
+    keyword/search query strings the bot ultimately used, and the
+    "should we create a support ticket?" classifier outputs.
+
+    One row per user turn that produced at least one such signal.
+    """
+
+    triggering_user_message: str | None = None
+    language: str | None = None
+    previous_question: str | None = None
+    keyword_search_query: str | None = None
+    search_query: str | None = None
+    ticket_eligibility_kb: str | None = None
+    ticket_eligibility_cb: str | None = None
+
+
 class CitationSource(BaseModel):
     """A single citation entry harvested from a runtime variable carrying a
     `Text.CitationSources[]` blob — typically the bot's custom-RAG output
@@ -352,6 +430,14 @@ class CitationSource(BaseModel):
     url: str | None = None
     text: str | None = None
     source_variable: str = "Global.CBResponse"
+    # Embedded snippet-tail metadata. Many CitationSources.Text values end
+    # with a literal "…. Filename: FAQ-Parking-EN.pdf, File Type: pdf
+    # (, Description: …)" suffix. The harvester regex-strips this tail
+    # into structured fields so the UI can show file-type badges and the
+    # description without re-parsing the snippet on every render.
+    filename: str | None = None
+    file_type: str | None = None
+    description: str | None = None
 
 
 # --- Tool call analysis models ---
@@ -432,6 +518,9 @@ class ConversationTimeline(BaseModel):
     custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)
     knowledge_attributions: list[KnowledgeAttribution] = Field(default_factory=list)
     citation_sources: list[CitationSource] = Field(default_factory=list)
+    turn_prompt_metrics: list[TurnPromptMetrics] = Field(default_factory=list)
+    composed_answers: list[BotComposedAnswer] = Field(default_factory=list)
+    turn_contexts: list[TurnContext] = Field(default_factory=list)
     tool_calls: list[ToolCall] = Field(default_factory=list)
     generative_answer_traces: list[GenerativeAnswerTrace] = Field(default_factory=list)
     # Per-activity audit table — what valueTypes / actionTypes / attachment

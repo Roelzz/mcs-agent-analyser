@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from models import (
     BotProfile,
+    BotComposedAnswer,
     CitationSource,
     ConversationTimeline,
     CreditEstimate,
@@ -20,6 +21,8 @@ from models import (
     TimelineEvent,
     ToolCall,
     ToolCallObservation,
+    TurnContext,
+    TurnPromptMetrics,
 )
 
 
@@ -43,6 +46,28 @@ def _clean_source(s: str) -> str:
 # carry it as a structured field.
 _UUID_IN_TEXT_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 
+# CitationSources.Text often ends with a trailing metadata blob the runtime
+# appends: "…. Filename: FAQ-Parking-EN.pdf, File Type: pdf, Description: …".
+# Parses the tail into structured fields without losing the rest of the snippet.
+_CITATION_TAIL_RE = re.compile(
+    r"\.\s*Filename:\s*(?P<fn>[^,]+?)"
+    r"(?:,\s*File Type:\s*(?P<ft>[^,]+?))?"
+    r"(?:,\s*Description:\s*(?P<desc>.+))?$",
+    re.DOTALL,
+)
+
+# Runtime variables that carry per-turn auxiliary context. Detection is
+# substring-based on `var_id` so renames in different bot exports still
+# match (e.g. Global.Initiallanguage / Topic.Initiallanguage / etc.).
+_TURN_CONTEXT_VAR_PATTERNS: dict[str, str] = {
+    "Initiallanguage": "language",
+    "previousQuestion": "previous_question",
+    "KeywordSearchQueryVar": "keyword_search_query",
+    "SearchQueryVar": "search_query",
+    "TicketEligibilityKB": "ticket_eligibility_kb",
+    "TicketEligibilityCB": "ticket_eligibility_cb",
+}
+
 
 @dataclass
 class _TimelineState:
@@ -54,6 +79,12 @@ class _TimelineState:
     knowledge_searches: list[KnowledgeSearchInfo] = field(default_factory=list)
     knowledge_attributions: list[KnowledgeAttribution] = field(default_factory=list)
     citation_sources: list[CitationSource] = field(default_factory=list)
+    turn_prompt_metrics: list[TurnPromptMetrics] = field(default_factory=list)
+    composed_answers: list[BotComposedAnswer] = field(default_factory=list)
+    # Per-turn aggregation buffer for `TurnContext`. Keyed on triggering
+    # user message; emitted into a flat list at the end of build_timeline.
+    turn_context_buf: dict[str, dict] = field(default_factory=dict)
+    turn_contexts: list[TurnContext] = field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = field(default_factory=list)
     pending_ks_query: dict | None = None
     pending_ks_info: KnowledgeSearchInfo | None = None
@@ -303,6 +334,171 @@ def _finalize_knowledge_search(state: _TimelineState) -> None:
         state.pending_ks_execution_time = None
         state.pending_ks_results = []
         state.pending_ks_errors = []
+
+
+def _attach_citations_to_searches(state: _TimelineState) -> None:
+    """Cross-link citations to orchestrator searches by triggering user turn.
+
+    Modern Copilot Studio exports ship empty `fullResults` in every
+    `UniversalSearchToolTraceData` event, so each `KnowledgeSearchInfo`
+    arrives with `search_results=[]`. The grounded snippet content for the
+    same turn lives in `CBResponse.Text.CitationSources[]` (harvested into
+    `state.citation_sources`).
+
+    This pass walks each search and attaches every citation from the same
+    turn as a synthetic `SearchResult` tagged `result_type="citation"`.
+    Result: each search card on the dashboard now renders the actual
+    snippet text the bot received, instead of "No Grounding".
+    """
+    if not state.citation_sources:
+        return
+
+    # Index citations by triggering user message — same key both streams
+    # already use, so a direct lookup matches without normalisation.
+    citations_by_turn: dict[str | None, list[CitationSource]] = {}
+    for c in state.citation_sources:
+        citations_by_turn.setdefault(c.triggering_user_message, []).append(c)
+
+    for ks in state.knowledge_searches:
+        if ks.search_results:
+            # An export that actually shipped result rows wins — don't
+            # overwrite real data with our backfill.
+            continue
+        bucket = citations_by_turn.get(ks.triggering_user_message) or []
+        if not bucket:
+            continue
+        ks.search_results = [
+            SearchResult(
+                name=c.name,
+                url=c.url,
+                text=c.text,
+                result_type="citation",
+            )
+            for c in bucket
+        ]
+
+
+def _attach_kt_attribution_urls(state: _TimelineState, profile: "BotProfile") -> None:
+    """Tier-2 enrichment: turn each `KnowledgeTraceData.citedKnowledgeSources`
+    name into a clickable row by looking up its source root URL on the
+    matching `KnowledgeSourceComponent` from the YAML.
+
+    Most Path A turns (orchestrator + AI Builder, no CBResponse) have KTD
+    attribution but no snippet body. This gives those turns *something*
+    clickable — the SharePoint root where the cited source lives — so the
+    user can audit the actual document themselves.
+    """
+    if not state.knowledge_attributions or not state.knowledge_searches:
+        return
+
+    # name → source_site lookup from profile.components.
+    name_to_url: dict[str, str] = {}
+    for comp in profile.components:
+        if comp.kind != "KnowledgeSourceComponent" or not comp.source_site:
+            continue
+        # Same cleaning the KTD handler applies, so the keys match.
+        name_to_url[_clean_source(comp.schema_name)] = comp.source_site
+
+    # Aggregate cited names per triggering user turn.
+    names_by_turn: dict[str | None, list[str]] = {}
+    for attr in state.knowledge_attributions:
+        bucket = names_by_turn.setdefault(attr.triggering_user_message, [])
+        for name in attr.cited_source_names:
+            if name not in bucket:
+                bucket.append(name)
+
+    for ks in state.knowledge_searches:
+        names = names_by_turn.get(ks.triggering_user_message) or []
+        if not names:
+            continue
+        existing_urls = {r.url for r in ks.search_results if r.url}
+        existing_names = {r.name for r in ks.search_results if r.name}
+        for name in names:
+            if name in existing_names:
+                continue
+            url = name_to_url.get(name)
+            if not url or url in existing_urls:
+                continue
+            existing_urls.add(url)
+            ks.search_results.append(
+                SearchResult(
+                    name=name,
+                    url=url,
+                    text=None,
+                    result_type="kt_attribution",
+                )
+            )
+
+
+_BOT_REPLY_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
+
+
+def _extract_bot_reply_links(text: str) -> list[tuple[str, str]]:
+    """Extract `(label, url)` pairs from markdown links inside a bot reply.
+
+    Deduplicates by URL — the same source often appears multiple times in
+    the bot's composed answer. Returns the labels as the bot wrote them
+    (preserving "Parental Leave Policy", "Workday", etc.) so the audit
+    panel mirrors what the user saw.
+    """
+    if not text:
+        return []
+    seen: dict[str, str] = {}
+    for match in _BOT_REPLY_MD_LINK_RE.finditer(text):
+        label = (match.group(1) or "").strip()
+        url = (match.group(2) or "").strip()
+        if not url or url in seen:
+            continue
+        seen[url] = label or url
+    return [(label, url) for url, label in seen.items()]
+
+
+def _attach_bot_reply_links(state: _TimelineState) -> None:
+    """Tier-3 enrichment: extract markdown links from the bot's composed
+    reply text and attach them as `SearchResult(result_type="bot_reply_link")`
+    on the matching turn's knowledge search.
+
+    These are *inferred* citations — the AI Builder model received snippet
+    content internally and decided which URLs to surface in its final
+    answer. The snippet body itself isn't in the export, but the URLs are.
+    Caps at 20 per turn so a verbose answer can't drown the panel.
+    """
+    if not state.knowledge_searches:
+        return
+
+    # Walk events in order, attributing each BOT_MESSAGE to the most
+    # recent USER_MESSAGE turn.
+    current_turn: str | None = None
+    bot_text_by_turn: dict[str | None, list[str]] = {}
+    user_prefix_re = re.compile(r'^User: "(.*)"$')
+    for ev in state.events:
+        if ev.event_type == EventType.USER_MESSAGE:
+            m = user_prefix_re.match(ev.summary or "")
+            current_turn = m.group(1) if m else (ev.summary or "").removeprefix("User: ").strip().strip('"')
+        elif ev.event_type == EventType.BOT_MESSAGE and current_turn is not None:
+            text = (ev.summary or "").removeprefix("Bot: ").strip()
+            if text:
+                bot_text_by_turn.setdefault(current_turn, []).append(text)
+
+    for ks in state.knowledge_searches:
+        turn_text = ks.triggering_user_message
+        replies = bot_text_by_turn.get(turn_text) or []
+        if not replies:
+            continue
+        existing_urls = {r.url for r in ks.search_results if r.url}
+        for reply in replies:
+            for label, url in _extract_bot_reply_links(reply):
+                if url in existing_urls:
+                    continue
+                existing_urls.add(url)
+                ks.search_results.append(
+                    SearchResult(
+                        name=label,
+                        url=url,
+                        text=None,
+                        result_type="bot_reply_link",
+                    )
+                )
 
 
 def _build_phase(
@@ -934,13 +1130,14 @@ def _process_trace_event(
                 )
             )
 
-            # Citation harvest: many custom-RAG bots (e.g. the user's
-            # Conversational boosting topic) write a JSON blob with a
-            # `Text.CitationSources[]` array into a runtime variable. The
-            # orchestrator-search trace ships empty `fullResults` in modern
-            # exports, so this is the only place the grounded snippet text
-            # survives. Detection is shape-based, not name-based, so it
-            # survives variable renames.
+            # Citation harvest + composed-answer harvest: many custom-RAG
+            # bots (e.g. the Conversational boosting topic) write a JSON
+            # blob shaped like `{Text: {Content, MarkdownContent,
+            # CitationSources: [...]}, IsSydneySummarized: bool}` into a
+            # runtime variable. The orchestrator-search trace ships empty
+            # `fullResults` in modern exports, so this is the only place
+            # both the grounded snippets AND the final composed answer
+            # survive. Detection is shape-based, not name-based.
             raw_value = value.get("newValue")
             if isinstance(raw_value, str) and "CitationSources" in raw_value:
                 try:
@@ -949,10 +1146,36 @@ def _process_trace_event(
                     parsed = None
                 if isinstance(parsed, dict):
                     text_block = parsed.get("Text") if isinstance(parsed.get("Text"), dict) else {}
+                    # Composed answer (Content + MarkdownContent) lives on
+                    # the same Text block. Surface it as a first-class
+                    # `BotComposedAnswer` for the dashboard.
+                    if text_block.get("Content") or text_block.get("MarkdownContent"):
+                        state.composed_answers.append(
+                            BotComposedAnswer(
+                                position=position,
+                                timestamp=timestamp,
+                                triggering_user_message=state.latest_user_text,
+                                markdown_content=text_block.get("MarkdownContent"),
+                                plain_content=text_block.get("Content"),
+                                is_sydney_summarised=bool(parsed.get("IsSydneySummarized")),
+                            )
+                        )
                     sources = text_block.get("CitationSources") or []
                     for s in sources:
                         if not isinstance(s, dict):
                             continue
+                        # Snippet-tail metadata: many sources end with
+                        # "…. Filename: X, File Type: Y (, Description: Z)".
+                        # Regex-strip into structured fields and trim the
+                        # tail from the snippet body for cleaner display.
+                        snippet_text = s.get("Text") or ""
+                        fn = ft = desc = None
+                        if snippet_text:
+                            tail_match = _CITATION_TAIL_RE.search(snippet_text)
+                            if tail_match:
+                                fn = (tail_match.group("fn") or "").strip() or None
+                                ft = (tail_match.group("ft") or "").strip() or None
+                                desc = (tail_match.group("desc") or "").strip() or None
                         state.citation_sources.append(
                             CitationSource(
                                 position=position,
@@ -961,10 +1184,86 @@ def _process_trace_event(
                                 citation_id=str(s.get("Id") or ""),
                                 name=s.get("Name"),
                                 url=s.get("Url"),
-                                text=s.get("Text"),
+                                text=snippet_text,
                                 source_variable=var_id or "Global.CBResponse",
+                                filename=fn,
+                                file_type=ft,
+                                description=desc,
                             )
                         )
+
+            # Prompt-metrics harvest: a separate shape sharing the same
+            # VariableAssignment carrier. The newValue is a JSON blob with
+            # `modelName` + `promptTokens` (and friends). Variable names
+            # vary (Global.PromptResponse, Topic.TicketEligiblePromptKN, …)
+            # so detection is keyed on the payload shape, not the id.
+            if isinstance(raw_value, str) and "modelName" in raw_value and "promptTokens" in raw_value:
+                try:
+                    metrics_parsed = json.loads(raw_value)
+                except (json.JSONDecodeError, TypeError):
+                    metrics_parsed = None
+                if (
+                    isinstance(metrics_parsed, dict)
+                    and "modelName" in metrics_parsed
+                    and "promptTokens" in metrics_parsed
+                ):
+                    prompt_tokens = metrics_parsed.get("promptTokens")
+                    completion_tokens = metrics_parsed.get("completionTokens")
+                    total_tokens = metrics_parsed.get("totalTokens")
+                    images_count = metrics_parsed.get("imagesCount")
+                    copilot_credits = metrics_parsed.get("costAsCopilotCredits")
+                    ai_builder_credits = metrics_parsed.get("costAsAiBuilderCredits")
+                    # `thoughtSteps` can arrive as a JSON-stringified list,
+                    # an inline list, or an empty string; coerce to a str
+                    # for uniform downstream rendering.
+                    raw_thought = metrics_parsed.get("thoughtSteps")
+                    if isinstance(raw_thought, (list, dict)):
+                        try:
+                            thought_steps_str = json.dumps(raw_thought, indent=2, default=str)
+                        except (TypeError, ValueError):
+                            thought_steps_str = str(raw_thought)
+                    else:
+                        thought_steps_str = raw_thought or None
+                    state.turn_prompt_metrics.append(
+                        TurnPromptMetrics(
+                            position=position,
+                            timestamp=timestamp,
+                            triggering_user_message=state.latest_user_text,
+                            variable_name=var_id or "",
+                            model_name=metrics_parsed.get("modelName"),
+                            model_type=metrics_parsed.get("modelType"),
+                            prompt_tokens=int(prompt_tokens) if isinstance(prompt_tokens, (int, float)) else None,
+                            completion_tokens=int(completion_tokens)
+                            if isinstance(completion_tokens, (int, float))
+                            else None,
+                            total_tokens=int(total_tokens) if isinstance(total_tokens, (int, float)) else None,
+                            finish_reason=metrics_parsed.get("finishReason"),
+                            copilot_credits=float(copilot_credits)
+                            if isinstance(copilot_credits, (int, float))
+                            else None,
+                            ai_builder_credits=float(ai_builder_credits)
+                            if isinstance(ai_builder_credits, (int, float))
+                            else None,
+                            images_count=int(images_count) if isinstance(images_count, (int, float)) else None,
+                            text=metrics_parsed.get("text"),
+                            thought_steps=thought_steps_str,
+                        )
+                    )
+
+            # Turn-context aggregation: stash per-turn auxiliary signals
+            # keyed on the current user turn. One row per turn after the
+            # final flush at the end of build_timeline.
+            for needle, slot_key in _TURN_CONTEXT_VAR_PATTERNS.items():
+                if needle in var_id:
+                    turn_key = state.latest_user_text or ""
+                    slot = state.turn_context_buf.setdefault(turn_key, {})
+                    # Last-write-wins inside a single turn — runtimes set
+                    # these once per turn, but defensively we keep the
+                    # most recent. Skip empty/falsy values.
+                    incoming = value.get("newValue")
+                    if isinstance(incoming, str) and incoming:
+                        slot[slot_key] = incoming
+                    break
 
         elif value_type == "DialogRedirect":
             target_id = value.get("targetDialogId", "")
@@ -1186,8 +1485,20 @@ def _synthesize_orchestrator_phases(state: _TimelineState) -> None:
         state.phases.append(phase)
 
 
-def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> ConversationTimeline:
-    """Build a ConversationTimeline from sorted activities and schema name lookup."""
+def build_timeline(
+    activities: list[dict],
+    schema_lookup: dict[str, str],
+    profile: "BotProfile | None" = None,
+) -> ConversationTimeline:
+    """Build a ConversationTimeline from sorted activities and schema name lookup.
+
+    `profile` is optional; when provided, the Tier-2 enrichment pass uses
+    `profile.components` to resolve `KnowledgeTraceData.citedKnowledgeSources`
+    names into clickable source-root URLs on each turn's search results.
+    Callers that don't have profile context (CLI transcript-only mode)
+    simply get the existing Tier-1 (citation) + Tier-3 (bot-reply link)
+    enrichments.
+    """
     state = _TimelineState()
 
     for activity in activities:
@@ -1306,7 +1617,30 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
             _process_trace_event(activity, state, schema_lookup, timestamp, position)
 
     _finalize_knowledge_search(state)
+    _attach_citations_to_searches(state)
+    if profile is not None:
+        _attach_kt_attribution_urls(state, profile)
+    _attach_bot_reply_links(state)
     _synthesize_orchestrator_phases(state)
+
+    # Flush per-turn context buffers into the timeline's flat list. One
+    # TurnContext per unique triggering user turn that produced at least
+    # one auxiliary signal (language detection, ticket-eligibility,
+    # keyword/search query, previous-question memory).
+    for turn_key, slot in state.turn_context_buf.items():
+        if not slot:
+            continue
+        state.turn_contexts.append(
+            TurnContext(
+                triggering_user_message=turn_key or None,
+                language=slot.get("language"),
+                previous_question=slot.get("previous_question"),
+                keyword_search_query=slot.get("keyword_search_query"),
+                search_query=slot.get("search_query"),
+                ticket_eligibility_kb=slot.get("ticket_eligibility_kb"),
+                ticket_eligibility_cb=slot.get("ticket_eligibility_cb"),
+            )
+        )
 
     total_elapsed = _ms_between(state.first_timestamp, state.last_timestamp)
 
@@ -1323,6 +1657,9 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         knowledge_searches=state.knowledge_searches,
         knowledge_attributions=state.knowledge_attributions,
         citation_sources=state.citation_sources,
+        turn_prompt_metrics=state.turn_prompt_metrics,
+        composed_answers=state.composed_answers,
+        turn_contexts=state.turn_contexts,
         custom_search_steps=state.custom_search_steps,
         tool_calls=state.tool_calls,
         generative_answer_traces=state.generative_answer_traces,

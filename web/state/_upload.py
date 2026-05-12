@@ -6,8 +6,10 @@ from pathlib import Path
 import reflex as rx
 from loguru import logger
 
+from exports.citations_csv import render_citations_csv  # noqa: E402
 from instruction_store import save_snapshot  # noqa: E402
 from model_comparison import _MODEL_CATALOGUE, _resolve_catalogue_key  # noqa: E402
+from models import ConversationTimeline  # noqa: E402
 from parser import detect_trigger_overlaps, parse_dialog_json, parse_yaml, validate_connections  # noqa: E402
 from renderer import render_instruction_drift, render_report, render_transcript_report  # noqa: E402
 from renderer._helpers import _format_duration, _parse_execution_time_ms, _pct  # noqa: E402
@@ -287,7 +289,7 @@ class UploadMixin(rx.State, mixin=True):
 
             profile, schema_lookup = parse_yaml(yaml_files[0])
             activities = parse_dialog_json(json_files[0])
-            timeline = build_timeline(activities, schema_lookup)
+            timeline = build_timeline(activities, schema_lookup, profile=profile)
             self._finalize_full_analysis(profile, timeline)
 
     async def _process_bot_files(self, files: list[rx.UploadFile]):
@@ -317,7 +319,7 @@ class UploadMixin(rx.State, mixin=True):
 
             profile, schema_lookup = parse_yaml(yml_path)
             activities = parse_dialog_json(json_path)
-            timeline = build_timeline(activities, schema_lookup)
+            timeline = build_timeline(activities, schema_lookup, profile=profile)
             self._finalize_full_analysis(profile, timeline)
 
     async def _process_yml_plus_paste(self, yml_file: rx.UploadFile, paste_text: str):
@@ -333,7 +335,7 @@ class UploadMixin(rx.State, mixin=True):
 
             profile, schema_lookup = parse_yaml(yml_path)
             activities = parse_dialog_json(json_path)
-            timeline = build_timeline(activities, schema_lookup)
+            timeline = build_timeline(activities, schema_lookup, profile=profile)
             self._finalize_full_analysis(profile, timeline)
 
     async def _process_transcript(self, files: list[rx.UploadFile]):
@@ -1070,12 +1072,401 @@ class UploadMixin(rx.State, mixin=True):
 
     def _populate_knowledge_data(self, profile, timeline) -> None:
         """Extract structured data for the Knowledge tab."""
+        from models import EventType
+
         ks_comps = [c for c in profile.components if c.kind == "KnowledgeSourceComponent"]
         file_comps = [c for c in profile.components if c.kind == "FileAttachmentComponent"]
         searches = timeline.knowledge_searches if timeline is not None else []
         attributions = getattr(timeline, "knowledge_attributions", []) if timeline is not None else []
         custom_steps = getattr(timeline, "custom_search_steps", []) if timeline is not None else []
+        citations = getattr(timeline, "citation_sources", []) if timeline is not None else []
+        metrics = getattr(timeline, "turn_prompt_metrics", []) if timeline is not None else []
         answered_turns = sum(1 for a in attributions if (a.completion_state or "").lower() == "answered")
+
+        # --- Build per-turn bot-reply text map (Phase 1c) ---
+        # Walk timeline events in order, attributing each BOT_MESSAGE to the
+        # most recent USER_MESSAGE turn. Same walk also builds
+        # `events_by_turn` for the per-card raw-trace accordion.
+        import re as _re
+        bot_reply_by_turn: dict[str, str] = {}
+        events_by_turn: dict[str, list] = {}
+        current_turn: str | None = None
+        user_re = _re.compile(r'^User: "(.*)"$')
+        for ev in getattr(timeline, "events", []) or []:
+            if ev.event_type == EventType.USER_MESSAGE:
+                m = user_re.match(ev.summary or "")
+                current_turn = m.group(1) if m else (ev.summary or "").removeprefix("User: ").strip().strip('"')
+            if current_turn is not None:
+                events_by_turn.setdefault(current_turn, []).append(ev)
+            if ev.event_type == EventType.BOT_MESSAGE and current_turn is not None:
+                text = (ev.summary or "").removeprefix("Bot: ").strip()
+                if text:
+                    existing = bot_reply_by_turn.get(current_turn, "")
+                    combined = (existing + "\n\n" + text) if existing else text
+                    bot_reply_by_turn[current_turn] = combined
+
+        # --- Build per-turn aggregated prompt metrics (Phase 2a) ---
+        # Group `TurnPromptMetrics` by triggering_user_message and pre-format
+        # the strip-string the UI will render (model · tokens-in · tokens-out
+        # · credits). Pre-formatting in the populator avoids any str+Var
+        # arithmetic in Reflex foreach bodies.
+        metrics_by_turn: dict[str, dict] = {}
+        # Per-turn concatenated model text + thought steps so the UI can
+        # show the AI Builder model's actual output for a turn under the
+        # search-card "Bot reply" accordion (paired with the final reply).
+        model_text_by_turn: dict[str, list[str]] = {}
+        thought_steps_by_turn: dict[str, list[str]] = {}
+        for m_obj in metrics:
+            key = m_obj.triggering_user_message or ""
+            if not key:
+                continue
+            slot = metrics_by_turn.setdefault(
+                key,
+                {"prompt_in": 0, "completion_out": 0, "credits": 0.0, "models": set()},
+            )
+            slot["prompt_in"] += m_obj.prompt_tokens or 0
+            slot["completion_out"] += m_obj.completion_tokens or 0
+            slot["credits"] += m_obj.copilot_credits or 0.0
+            if m_obj.model_name:
+                slot["models"].add(m_obj.model_name)
+            if m_obj.text:
+                model_text_by_turn.setdefault(key, []).append(
+                    f"[{m_obj.variable_name}] {m_obj.text}"
+                )
+            if m_obj.thought_steps:
+                thought_steps_by_turn.setdefault(key, []).append(
+                    f"[{m_obj.variable_name}] {m_obj.thought_steps}"
+                )
+
+        def _metrics_strip_for(turn: str) -> str:
+            slot = metrics_by_turn.get(turn)
+            if not slot:
+                return ""
+            bits: list[str] = []
+            if slot["models"]:
+                bits.append(" · ".join(sorted(slot["models"])))
+            if slot["prompt_in"]:
+                bits.append(f"{slot['prompt_in']:,} in")
+            if slot["completion_out"]:
+                bits.append(f"{slot['completion_out']:,} out")
+            if slot["credits"]:
+                bits.append(f"{slot['credits']:.1f} credits")
+            return " · ".join(bits)
+
+        # --- Per-turn knowledge-attribution + per-turn LLM-call lookups ---
+        # `ktd_by_turn` lets the data-flow narrative cite "runtime cited
+        # Source X" without re-walking the attributions list.
+        # `metrics_calls_by_turn` keeps each LLM invocation as a distinct
+        # entry (the existing `metrics_by_turn` is an aggregate-only sum).
+        ktd_by_turn: dict[str, list] = {}
+        for a_obj in attributions:
+            ktd_by_turn.setdefault(a_obj.triggering_user_message or "", []).append(a_obj)
+        metrics_calls_by_turn: dict[str, list] = {}
+        for m_obj in metrics:
+            metrics_calls_by_turn.setdefault(m_obj.triggering_user_message or "", []).append(m_obj)
+
+        # --- Outcome tone per turn (Phase 1d) ---
+        # Drives the colored left border on each search card and the
+        # turn-strip chips above. Computed once and reused.
+        _tone_to_color = {
+            "good": "var(--green-9)",
+            "info": "var(--blue-9)",
+            "warn": "var(--amber-9)",
+            "bad": "var(--red-9)",
+            "neutral": "var(--gray-a4)",
+        }
+        def _outcome_border_css(tone: str) -> str:
+            return f"4px solid {_tone_to_color.get(tone, _tone_to_color['neutral'])}"
+
+        def _outcome_tone(ks) -> str:
+            state_low = ""
+            for a in attributions:
+                if a.triggering_user_message == ks.triggering_user_message:
+                    state_low = (a.completion_state or "").lower()
+                    break
+            if "notfound" in state_low.replace(" ", ""):
+                return "bad"
+            if any(r.result_type == "citation" for r in ks.search_results):
+                return "good"
+            if any(r.result_type == "kt_attribution" for r in ks.search_results):
+                return "warn"
+            if any(r.result_type == "bot_reply_link" for r in ks.search_results):
+                return "info"
+            return "neutral"
+
+        # --- Path classifier per card ---
+        # The runtime has three distinct grounded-answer code paths. We
+        # can't read them out of the trace directly, but we can derive
+        # which one fired by inspecting the result-row provenance.
+        def _path_for(ks) -> tuple[str, str, str]:
+            """Returns (badge_label, badge_tooltip, badge_color_scheme)."""
+            has_citation = any(r.result_type == "citation" for r in ks.search_results)
+            has_kt = any(r.result_type == "kt_attribution" for r in ks.search_results)
+            has_reply = any(r.result_type == "bot_reply_link" for r in ks.search_results)
+            if has_citation:
+                return (
+                    "Path B · CBResponse SAS",
+                    "The runtime took the Conversational boosting topic's "
+                    "SearchAndSummarizeContent node. Search hits were written "
+                    "to Global.CBResponse.Text.CitationSources[] so the full "
+                    "snippet bodies are preserved in the export. This is the "
+                    "gold-standard path — you see what the bot saw.",
+                    "green",
+                )
+            if has_kt:
+                return (
+                    "Path A · orchestrator + LLM",
+                    "The orchestrator's UniversalSearchTool ran the search "
+                    "and an AI Builder model composed the answer. The "
+                    "runtime's trace ships the cited source name(s) via "
+                    "KnowledgeTraceData but Microsoft did not preserve the "
+                    "snippet bodies (fullResults[] is empty). The model "
+                    "consumed them in-flight; they are gone from the export.",
+                    "amber",
+                )
+            if has_reply:
+                return (
+                    "Path C · reply-link only",
+                    "Neither CBResponse nor KnowledgeTraceData fired for "
+                    "this turn. The only grounding evidence comes from "
+                    "URLs the bot embedded in its final reply text. "
+                    "Inferred citation — treat with caution.",
+                    "blue",
+                )
+            return (
+                "Path X · no evidence",
+                "No KTD attribution, no CBResponse citations, no markdown "
+                "links in the bot's reply text. Either the runtime didn't "
+                "answer with knowledge (e.g. the AnswerNotFoundInSearchResults "
+                "case) or every signal was dropped by the export.",
+                "red",
+            )
+
+        # --- Pre-rendered per-turn HTML helpers ---
+        # All three of these are HTML strings so the rendered card can
+        # use `rx.html(...)` and bypass Reflex's nested-foreach typing
+        # constraints (lessons from PR #28).
+        import html as _html_esc
+
+        def _rewrite_strip_html(ks) -> str:
+            user_msg = ks.triggering_user_message or ""
+            q = ks.search_query or ""
+            kw = ks.search_keywords or ""
+            if not (q or kw):
+                return ""
+            parts = []
+            if user_msg:
+                parts.append(
+                    f'<span style="color:var(--gray-a9)">💬</span> '
+                    f'<em>{_html_esc.escape(user_msg)}</em>'
+                )
+            if q:
+                arrow = " <span style=\"color:var(--gray-a7)\">→</span> " if parts else ""
+                parts.append(
+                    f'{arrow}<span style="color:var(--gray-a9)">🔎</span> '
+                    f'<strong>{_html_esc.escape(q)}</strong>'
+                )
+            html = (
+                '<div style="font-size:11px;color:var(--gray-11);'
+                'line-height:1.5;margin:4px 0;word-break:break-word">'
+                + "".join(parts)
+                + "</div>"
+            )
+            if kw:
+                html += (
+                    '<div style="font-size:10px;color:var(--gray-a8);'
+                    'line-height:1.4;margin:0 0 4px 16px;font-style:italic">'
+                    + f"keywords: {_html_esc.escape(kw)}"
+                    + "</div>"
+                )
+            return html
+
+        def _data_flow_html(ks) -> str:
+            """Render the per-turn pipeline narrative: user question →
+            orchestrator rewrite → search → cite → LLM compose → reply,
+            with explicit 'what's missing from the export' callouts.
+
+            Pre-rendered HTML so Reflex's `rx.html(...)` can drop it in
+            without us building a nested-foreach component tree.
+            """
+            turn = ks.triggering_user_message or ""
+            user_msg = turn
+            q = ks.search_query or ""
+            kw = ks.search_keywords or ""
+            ks_count = len(ks.knowledge_sources) if ks.knowledge_sources else 0
+            ktds = ktd_by_turn.get(turn, [])
+            cited_names = sorted(
+                {name for a in ktds for name in (a.cited_source_names or [])}
+            )
+            cited_state = (ktds[0].completion_state if ktds else "") or ""
+            calls = metrics_calls_by_turn.get(turn, [])
+            citations_this_turn = [
+                r for r in ks.search_results if r.result_type == "citation"
+            ]
+            reply_link_rows = [
+                r for r in ks.search_results if r.result_type == "bot_reply_link"
+            ]
+
+            def step(emoji: str, title: str, body: str) -> str:
+                return (
+                    '<div style="margin:6px 0;padding:6px 8px;'
+                    "background:var(--gray-a2);border-left:3px solid var(--gray-a5);"
+                    'border-radius:4px">'
+                    f'<div style="font-size:11px;font-weight:700;color:var(--gray-12)">'
+                    f"{emoji} {_html_esc.escape(title)}</div>"
+                    f'<div style="font-size:11px;color:var(--gray-11);'
+                    'line-height:1.5;margin-top:2px">'
+                    f"{body}</div></div>"
+                )
+
+            blocks: list[str] = []
+            if user_msg:
+                blocks.append(step("👤", "USER asked", f'"{_html_esc.escape(user_msg)}"'))
+            if q or kw:
+                rewrite_body = ""
+                if q:
+                    rewrite_body += (
+                        f"<code>search_query</code>: <strong>{_html_esc.escape(q)}</strong><br/>"
+                    )
+                if kw:
+                    rewrite_body += (
+                        f"<code>keywords</code>: {_html_esc.escape(kw)}"
+                    )
+                blocks.append(
+                    step(
+                        "🔀",
+                        "Orchestrator rewrote the question",
+                        rewrite_body,
+                    )
+                )
+            if ks_count:
+                blocks.append(
+                    step(
+                        "🔎",
+                        f"UniversalSearchTool searched {ks_count} sources",
+                        '<span style="color:var(--amber-11)">⚠ Microsoft\'s trace '
+                        "shipped <code>fullResults: []</code> — the runtime did "
+                        "search and got hits, but the actual document text was "
+                        "not preserved in the export for this code path.</span>",
+                    )
+                )
+            if ktds:
+                body = (
+                    f"<strong>{_html_esc.escape(cited_state or 'Answered')}</strong> · "
+                    f"cited {len(cited_names)} source"
+                    f"{'s' if len(cited_names) != 1 else ''}: "
+                    + ", ".join(f"<code>{_html_esc.escape(n)}</code>" for n in cited_names)
+                )
+                blocks.append(
+                    step(
+                        "📎",
+                        "Runtime attribution (KnowledgeTraceData)",
+                        body,
+                    )
+                )
+            for call in calls:
+                model = call.model_name or "(unknown model)"
+                in_t = call.prompt_tokens or 0
+                out_t = call.completion_tokens or 0
+                out_text = (call.text or "").strip().replace("\n", " ")
+                if len(out_text) > 220:
+                    out_text_short = out_text[:220] + " …"
+                else:
+                    out_text_short = out_text
+                label = call.variable_name or "(LLM call)"
+                # Distinguish the answer composer from the classifier
+                # heuristically by looking at the variable name.
+                if "TicketEligibility" in label:
+                    headline = "Ticket-eligibility classifier"
+                elif "lang" in label.lower() or "detectedlang" in label.lower():
+                    headline = "Language detector"
+                else:
+                    headline = "Answer composer"
+                body = (
+                    f"<strong>{_html_esc.escape(label)}</strong> · "
+                    f"model: <code>{_html_esc.escape(model)}</code> · "
+                    f"<code>{in_t:,}</code> in / <code>{out_t:,}</code> out tokens"
+                    + (
+                        f'<div style="margin-top:4px;font-style:italic">'
+                        f"⇒ {_html_esc.escape(out_text_short or '(empty output)')}"
+                        f"</div>"
+                        if out_text_short
+                        else ""
+                    )
+                )
+                blocks.append(step("🤖", headline + " (AI Builder)", body))
+            if citations_this_turn:
+                cs_body = (
+                    f"{len(citations_this_turn)} grounded snippet citation"
+                    f"{'s' if len(citations_this_turn) != 1 else ''} preserved in the "
+                    "export via <code>CBResponse.Text.CitationSources</code>. "
+                    "See the Citations card above for the full snippet bodies."
+                )
+                blocks.append(step("📚", "Citation snippets recovered", cs_body))
+            if reply_link_rows:
+                blocks.append(
+                    step(
+                        "🔗",
+                        f"{len(reply_link_rows)} URL"
+                        f"{'s' if len(reply_link_rows) != 1 else ''} mentioned in bot reply",
+                        "Inferred citations: URLs the answer composer chose to "
+                        "include in its markdown answer. Not authoritative — "
+                        "treat as a fallback when CBResponse / KTD didn't fire.",
+                    )
+                )
+            # Always close with an explicit "what's missing" block.
+            missing_bits: list[str] = []
+            if ks_count and not citations_this_turn:
+                missing_bits.append(
+                    "Actual SharePoint document snippets the answer composer "
+                    "read (this code path doesn't trace them)."
+                )
+            if not ktds:
+                missing_bits.append("Runtime attribution (KnowledgeTraceData).")
+            if missing_bits:
+                blocks.append(
+                    step(
+                        "❓",
+                        "What's missing from the export",
+                        "<ul style=\"margin:0 0 0 16px;padding:0\">"
+                        + "".join(f"<li>{m}</li>" for m in missing_bits)
+                        + "</ul>",
+                    )
+                )
+            return (
+                '<div style="font-family:var(--default-font-family);'
+                'font-size:12px">'
+                + "".join(blocks)
+                + "</div>"
+            )
+
+        def _raw_trace_html(ks) -> str:
+            """Render the activity-by-activity event log for the bounding
+            user turn. One line per event with type + summary. Trimmed
+            to events from the current turn only."""
+            turn = ks.triggering_user_message or ""
+            evs = events_by_turn.get(turn, [])
+            if not evs:
+                return ""
+            rows: list[str] = []
+            for ev in evs:
+                t = ev.event_type.value if ev.event_type else "?"
+                summary = (ev.summary or "").replace("\n", " ")
+                rows.append(
+                    f'<div style="font-family:var(--font-mono);font-size:11px;'
+                    'line-height:1.5;display:grid;grid-template-columns:1.5fr 6fr;'
+                    'gap:8px;padding:2px 0;border-bottom:1px dashed var(--gray-a3);'
+                    'word-break:break-word">'
+                    f'<span style="color:var(--gray-a9)">{_html_esc.escape(t)}</span>'
+                    f'<span style="color:var(--gray-11)">{_html_esc.escape(summary)}</span>'
+                    "</div>"
+                )
+            return (
+                '<div style="background:var(--gray-a2);border:1px solid var(--gray-a4);'
+                'border-radius:6px;padding:8px 10px;max-height:420px;overflow:auto">'
+                + "".join(rows)
+                + "</div>"
+            )
 
         self.mcs_knowledge_kpis = [  # type: ignore[attr-defined]
             {
@@ -1191,19 +1582,121 @@ class UploadMixin(rx.State, mixin=True):
             dur_ms = _parse_execution_time_ms(ks.execution_time)
             dur = _format_duration(dur_ms) if dur_ms is not None else (ks.execution_time or "—")
             eff = _source_efficiency(ks)
-            # Flatten results into a displayable summary string
+            # Flatten results into a displayable summary string. Each row
+            # gets a *tier* prefix indicating the provenance of the
+            # evidence:
+            #   📎  Tier 1 — full snippet body from CBResponse.CitationSources
+            #   📚  Tier 2 — source-name attribution from KTD, URL resolved
+            #              against profile.components (no snippet body)
+            #   🔗  Tier 3 — markdown link extracted from the bot's reply
+            #              text (no snippet body, inferred citation)
+            # plus the existing quality icon (🟢/🟡/🔴) for snippet length.
+            #
+            # Each row is built as an HTML string with `title=` attributes
+            # on the tier + quality icons so the browser shows a native
+            # tooltip when the user hovers over them. This works around
+            # Reflex's nested-foreach typing trap — we can't put a list of
+            # per-result dicts inside the search-row dict, but we can
+            # pre-render the section as raw HTML and render with rx.html.
+            import html as _html
             result_count = len(ks.search_results)
             result_lines: list[str] = []
             url_parts: list[str] = []
-            for j, r in enumerate(ks.search_results[:5], 1):
+            html_rows: list[str] = []
+            tier_prefix_for = {
+                "citation": "📎",
+                "kt_attribution": "📚",
+                "bot_reply_link": "🔗",
+            }
+            tier_tooltip_for = {
+                "citation": (
+                    "Tier 1 — full snippet body from CBResponse.CitationSources. "
+                    "Gold-standard grounded evidence; you're seeing the actual "
+                    "source text the bot consumed."
+                ),
+                "kt_attribution": (
+                    "Tier 2 — source name from KnowledgeTraceData. The URL is "
+                    "the SharePoint root from botContent.yml, not the specific "
+                    "document. No snippet body — AI Builder consumed it internally "
+                    "and didn't write it back to the trace."
+                ),
+                "bot_reply_link": (
+                    "Tier 3 — URL extracted from the bot's reply text via a "
+                    "markdown-link regex. Inferred citation; treat with caution. "
+                    "Bot hallucinations (e.g. home.htmld vs home.html) appear here "
+                    "verbatim."
+                ),
+            }
+            quality_tooltip_for = {
+                "🟢": "Snippet ≥200 chars — substantial grounded passage.",
+                "🟡": "Snippet 50–199 chars — fragmentary, treat with caution.",
+                "🔴": "Snippet <50 chars — near-empty result.",
+                "⚫": (
+                    "No snippet body. Common for Tier 2/3 rows where only "
+                    "the source URL was recoverable from the export."
+                ),
+            }
+            for j, r in enumerate(ks.search_results, 1):
                 title = r.name or r.url or f"Result {j}"
                 snippet_len = len(r.text or "")
-                quality_icon = "🟢" if snippet_len >= 200 else ("🟡" if snippet_len >= 50 else "🔴")
+                if snippet_len >= 200:
+                    quality_icon = "🟢"
+                elif snippet_len >= 50:
+                    quality_icon = "🟡"
+                elif snippet_len > 0:
+                    quality_icon = "🔴"
+                else:
+                    quality_icon = "⚫"
+                tier_badge = tier_prefix_for.get(r.result_type or "", "")
+                tier_tt = tier_tooltip_for.get(r.result_type or "", "")
+                quality_tt = quality_tooltip_for.get(quality_icon, "")
                 snippet = (r.text or "").replace("\n", " ")
-                result_lines.append(f"{quality_icon} {j}. {title}" + (f" — {snippet}" if snippet else ""))
+                result_lines.append(
+                    f"{tier_badge} {quality_icon} {j}. {title}"
+                    + (f" — {snippet}" if snippet else "")
+                )
+                # HTML version: tier + quality icons wrapped in <span title="…">
+                # for native browser tooltips. Snippet body is rendered in
+                # full — no preview cap — per user requirement.
+                title_html = _html.escape(title)
+                if r.url:
+                    title_html = (
+                        f'<a href="{_html.escape(r.url)}" target="_blank" '
+                        f'style="color:inherit;text-decoration:underline">'
+                        f"{title_html}</a>"
+                    )
+                snippet_html = ""
+                if snippet:
+                    snippet_html = " — " + _html.escape(snippet)
+                # Honest one-line cause for empty (⚫) rows — promote the
+                # tooltip text to a visible subline so the user doesn't
+                # have to hover to learn why a row shows no snippet.
+                cause_subline = ""
+                if quality_icon == "⚫":
+                    cause_subline = (
+                        f'<div style="font-family:var(--default-font-family);'
+                        f"font-size:10px;color:var(--gray-a8);"
+                        f"margin-left:24px;line-height:1.5;font-style:italic;"
+                        f'word-break:break-word">'
+                        f"↳ {_html.escape(quality_tt)}"
+                        f"</div>"
+                    )
+                html_rows.append(
+                    f'<div style="font-family:monospace;font-size:11px;'
+                    f"color:var(--gray-11);line-height:1.6;margin:2px 0;"
+                    f'word-break:break-word">'
+                    f'<span title="{_html.escape(tier_tt)}" '
+                    f'style="cursor:help">{tier_badge}</span>'
+                    f' <span title="{_html.escape(quality_tt)}" '
+                    f'style="cursor:help">{quality_icon}</span>'
+                    f" {j}. {title_html}{snippet_html}"
+                    f"</div>"
+                    + cause_subline
+                )
                 if r.url:
                     url_parts.append(r.url)
             results_text = "\n".join(result_lines) if result_lines else ""
+            results_html = "".join(html_rows) if html_rows else ""
             # Clean up efficiency string (strip markdown)
             eff_clean = ""
             if eff:
@@ -1220,9 +1713,13 @@ class UploadMixin(rx.State, mixin=True):
                     "kind": "search",
                     "user_message": "",
                     "index": str(i),
+                    # `anchor_id` lets attribution-row click-throughs scroll
+                    # straight to the matching search card.
+                    "anchor_id": f"search-{i}",
                     "query": ks.search_query or "—",
                     "keywords": ks.search_keywords or "—",
                     "sources": ", ".join(ks.knowledge_sources) if ks.knowledge_sources else "—",
+                    "source_count": str(len(ks.knowledge_sources)) if ks.knowledge_sources else "0",
                     "duration": dur,
                     "grounding_label": f"{badge} {label}",
                     "grounding_tone": grounding_tone,
@@ -1232,52 +1729,180 @@ class UploadMixin(rx.State, mixin=True):
                     "errors": "; ".join(ks.search_errors) if ks.search_errors else "",
                     "result_count": str(result_count),
                     "results_text": results_text,
+                    "results_html": results_html,
                     "has_urls": ", ".join(url_parts) if url_parts else "",
+                    # Phase 1c: inline the matching bot-reply text so the
+                    # user sees what the bot actually said next to the
+                    # evidence that grounded it.
+                    "bot_reply_text": bot_reply_by_turn.get(ks.triggering_user_message or "", ""),
+                    # AI Builder model output(s) for this turn (joined
+                    # across the multiple LLM invocations a turn may
+                    # produce: ticket-eligibility check, response
+                    # composer, etc.). Distinct from `bot_reply_text`
+                    # (the final composed reply emitted to the user).
+                    "model_text": "\n\n".join(
+                        model_text_by_turn.get(ks.triggering_user_message or "", [])
+                    ),
+                    "model_thought_steps": "\n\n".join(
+                        thought_steps_by_turn.get(ks.triggering_user_message or "", [])
+                    ),
+                    # Phase 1d: tone keyword + pre-rendered CSS string for
+                    # the card's coloured left border. Pre-rendering here
+                    # keeps the Reflex render function free of Var-keyed
+                    # `rx.match` (which can't be composed with style
+                    # dicts).
+                    "outcome_tone": _outcome_tone(ks),
+                    "border_left_css": _outcome_border_css(_outcome_tone(ks)),
+                    # Data-flow cockpit fields. Path badge classifies the
+                    # runtime code path that handled this turn; tooltip
+                    # carries the longer explanation. Rewrite strip pairs
+                    # the user's literal text with the orchestrator's
+                    # derived search query. data_flow_html is the
+                    # narrative pipeline; raw_trace_html dumps every
+                    # `state.events` entry for the turn.
+                    "path_label": _path_for(ks)[0],
+                    "path_tooltip": _path_for(ks)[1],
+                    "path_color_scheme": _path_for(ks)[2],
+                    "rewrite_html": _rewrite_strip_html(ks),
+                    "data_flow_html": _data_flow_html(ks),
+                    "raw_trace_html": _raw_trace_html(ks),
+                    # Phase 2a: pre-formatted token/cost strip.
+                    "metrics_strip": _metrics_strip_for(ks.triggering_user_message or ""),
                 }
             )
         self.mcs_knowledge_searches = search_rows  # type: ignore[attr-defined]
 
         # Per-turn knowledge attribution rows. One row per answered turn that
         # touched knowledge — distinct from orchestrator search traces above.
+        # Each row carries the matching anchor id so the dashboard can scroll
+        # to the corresponding search card on click.
+        anchor_by_turn: dict[str, str] = {}
+        for row in search_rows:
+            if row["kind"] == "search":
+                # The matching turn is the most recent group header.
+                pass
+        # Re-derive anchor map by walking searches list (cheaper than walking
+        # search_rows which has interleaved headers).
+        for i, ks in enumerate(searches, 1):
+            anchor_by_turn.setdefault(ks.triggering_user_message or "", f"search-{i}")
+
         attribution_rows: list[dict] = []
         for a in attributions:
             state_lower = (a.completion_state or "").lower()
             cited_str = ", ".join(a.cited_source_names) if a.cited_source_names else "—"
+            turn = a.triggering_user_message or "(system-initiated)"
             attribution_rows.append(
                 {
-                    "turn_message": a.triggering_user_message or "(system-initiated)",
+                    "turn_message": turn,
                     "completion_state": a.completion_state or "Unknown",
                     "completion_tone": "good" if state_lower == "answered" else "bad",
                     "is_searched": "Yes" if a.is_searched else "No",
                     "cited_count": str(len(a.cited_source_names)),
                     "cited_sources_str": cited_str,
                     "failed_types_str": ", ".join(a.failed_source_types) if a.failed_source_types else "",
+                    "bot_reply_text": bot_reply_by_turn.get(a.triggering_user_message or "", ""),
+                    "metrics_strip": _metrics_strip_for(a.triggering_user_message or ""),
+                    "anchor_href": "#" + anchor_by_turn.get(a.triggering_user_message or "", ""),
+                    "has_anchor": "yes" if anchor_by_turn.get(a.triggering_user_message or "") else "",
                 }
             )
         self.mcs_knowledge_attributions = attribution_rows  # type: ignore[attr-defined]
 
-        # Citation rows — one dict per harvested `Text.CitationSources[]`
-        # entry, flat shape so the dashboard `rx.foreach` doesn't have to
-        # walk a nested list. Snippet body is preserved verbatim; the UI
-        # decides truncation at render time.
-        citations = getattr(timeline, "citation_sources", []) if timeline is not None else []
+        # Citation rows — Phase 1e: deduplicate by (name, url) so FAQ-Parking-
+        # EN.pdf appearing in turns 15+18 collapses to one card with a
+        # "cited in N turns" badge. Snippet body is preserved verbatim; the
+        # UI handles preview truncation. Pre-formatting the "cited in" string
+        # keeps the rx.foreach body free of str+Var arithmetic.
         citation_rows: list[dict] = []
+        seen_key_to_row: dict[tuple[str, str], dict] = {}
         for c in citations:
+            key = (c.name or "", c.url or "")
             snippet = (c.text or "").strip()
-            preview = snippet[:400].replace("\n", " ")
-            if len(snippet) > 400:
-                preview += " …"
-            citation_rows.append(
+            # Preview = full snippet (user explicitly disallowed truncation).
+            preview = snippet.replace("\n", " ")
+            turn = c.triggering_user_message or "(system-initiated)"
+            existing = seen_key_to_row.get(key)
+            if existing is not None:
+                # Same source name + URL cited again on another turn: append
+                # the turn message to the badge text.
+                if turn not in existing["_turn_set"]:
+                    existing["_turn_set"].append(turn)
+                    existing["cited_turns_text"] = "; ".join(existing["_turn_set"])
+                    existing["cited_turn_count"] = str(len(existing["_turn_set"]))
+                continue
+            row = {
+                "turn_message": turn,
+                "name": c.name or c.url or "Citation",
+                "url": c.url or "",
+                "snippet_preview": preview,
+                "snippet_full": snippet,
+                "char_count": str(len(snippet)),
+                "cited_turn_count": "1",
+                "cited_turns_text": turn,
+                "_turn_set": [turn],
+                # Pass A: structured tail-metadata extracted from the
+                # snippet body. Empty strings (not None) so Reflex's
+                # `!= ""` conds work uniformly downstream.
+                "filename": c.filename or "",
+                "file_type": c.file_type or "",
+                "description": c.description or "",
+            }
+            seen_key_to_row[key] = row
+            citation_rows.append(row)
+        # Strip the internal `_turn_set` accumulator — Reflex state must be
+        # JSON-serialisable + lists of dicts.
+        for row in citation_rows:
+            row.pop("_turn_set", None)
+        self.mcs_knowledge_citations = citation_rows  # type: ignore[attr-defined]
+
+        # Composed-answer rows (CBResponse.Text.MarkdownContent + Content).
+        # Each row carries a 600-char preview + full markdown body for an
+        # expandable accordion. Surfacing this lets the auditor see what the
+        # runtime ultimately returned, paired with the citations on the same
+        # turn.
+        composed_answer_rows: list[dict] = []
+        for ca in getattr(timeline, "composed_answers", []) or []:
+            md = (ca.markdown_content or "").strip()
+            # Preview = full markdown body (no truncation).
+            preview = md.replace("\n", " ")
+            composed_answer_rows.append(
                 {
-                    "turn_message": c.triggering_user_message or "(system-initiated)",
-                    "name": c.name or c.url or "Citation",
-                    "url": c.url or "",
-                    "snippet_preview": preview,
-                    "snippet_full": snippet,
-                    "char_count": str(len(snippet)),
+                    "turn_message": ca.triggering_user_message or "(system-initiated)",
+                    "preview": preview,
+                    "markdown_full": md,
+                    "char_count": str(len(md)),
+                    "is_sydney_summarised": "Yes" if ca.is_sydney_summarised else "No",
                 }
             )
-        self.mcs_knowledge_citations = citation_rows  # type: ignore[attr-defined]
+        self.mcs_knowledge_composed_answers = composed_answer_rows  # type: ignore[attr-defined]
+
+        # Per-turn runtime context rows. Filter to only turns that captured
+        # at least one auxiliary signal so the table doesn't show empty rows.
+        turn_context_rows: list[dict] = []
+        for tc in getattr(timeline, "turn_contexts", []) or []:
+            # Language values are JSON-stringified OptionDataValues — extract
+            # the human-readable label when possible, fall back to raw.
+            lang_label = tc.language or ""
+            if lang_label and lang_label.startswith("{"):
+                # Best-effort: pull the `"value":"..."` substring.
+                import re as _lang_re
+                match = _lang_re.search(r'"value"\s*:\s*"([^"]+)"', lang_label)
+                if match:
+                    lang_label = match.group(1)
+            row = {
+                "turn_message": tc.triggering_user_message or "(system-initiated)",
+                "language": lang_label,
+                "previous_question": tc.previous_question or "",
+                "keyword_search_query": tc.keyword_search_query or "",
+                "search_query": tc.search_query or "",
+                "ticket_eligibility_kb": tc.ticket_eligibility_kb or "",
+                "ticket_eligibility_cb": tc.ticket_eligibility_cb or "",
+            }
+            # Skip rows where every signal is empty (defensive — shouldn't
+            # happen since flush already drops empty buckets).
+            if any(v for k, v in row.items() if k != "turn_message"):
+                turn_context_rows.append(row)
+        self.mcs_knowledge_turn_contexts = turn_context_rows  # type: ignore[attr-defined]
 
         if attributions:
             citation_suffix = (
@@ -1290,6 +1915,109 @@ class UploadMixin(rx.State, mixin=True):
             )
         else:
             self.mcs_knowledge_attribution_summary = ""  # type: ignore[attr-defined]
+
+        # --- Turn-strip header (Phase 2c) ---
+        # Horizontal status chip per turn at the very top of the Knowledge
+        # tab. Reuses the same outcome-tone vocabulary as the search-card
+        # left border so the user sees a visual TOC of the conversation.
+        turn_strip: list[dict] = []
+        seen_turns: list[str] = []
+        for ks in searches:
+            t = ks.triggering_user_message or ""
+            if t and t not in seen_turns:
+                seen_turns.append(t)
+                tone = _outcome_tone(ks)
+                # Short label: index + first 24 chars of the turn text.
+                # Full label — no chip truncation; chips wrap to multi-line.
+                short = t
+                turn_strip.append(
+                    {
+                        "index": str(len(turn_strip) + 1),
+                        "short_label": short,
+                        "full_label": t,
+                        "tone": tone,
+                        "anchor_href": "#" + anchor_by_turn.get(t, ""),
+                    }
+                )
+        self.mcs_knowledge_turn_strip = turn_strip  # type: ignore[attr-defined]
+
+        # --- Cross-turn comparison clusters (Phase 3a) ---
+        # Group searches by *normalized* user message so multiple-attempt
+        # turns ("What parking rules apply at ING?" × 7) collapse into a
+        # cluster card. Normalization: strip whitespace + punctuation + lowercase.
+        import re as _re2
+        def _norm(s: str) -> str:
+            return _re2.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+        cluster_map: dict[str, dict] = {}
+        for ks in searches:
+            key = _norm(ks.triggering_user_message or "")
+            if not key:
+                continue
+            slot = cluster_map.setdefault(key, {
+                "representative_turn": ks.triggering_user_message or "",
+                "turn_messages": [],
+                "search_count": 0,
+                "with_citation_count": 0,
+            })
+            if ks.triggering_user_message and ks.triggering_user_message not in slot["turn_messages"]:
+                slot["turn_messages"].append(ks.triggering_user_message)
+            slot["search_count"] += 1
+            if any(r.result_type == "citation" for r in ks.search_results):
+                slot["with_citation_count"] += 1
+        cluster_rows: list[dict] = []
+        for key, slot in cluster_map.items():
+            if slot["search_count"] < 2:
+                continue  # not a cluster — single-search turns are uninteresting.
+            cluster_rows.append({
+                "representative_turn": slot["representative_turn"],
+                "occurrences": str(slot["search_count"]),
+                "with_citation": str(slot["with_citation_count"]),
+                "turn_list_text": "; ".join(slot["turn_messages"]),
+            })
+        # Sort by frequency descending so the most-repeated question is first.
+        cluster_rows.sort(key=lambda r: int(r["occurrences"]), reverse=True)
+        self.mcs_knowledge_clusters = cluster_rows  # type: ignore[attr-defined]
+
+        # --- Source-coverage heatmap (Phase 3b) ---
+        # Matrix of (source × turn) with cell tone: cited (good) / searched
+        # but not cited (warn) / not searched (neutral). Pre-formatted as a
+        # flat list[dict], one row per source, with `cells` as a list of
+        # turn-keyed dicts the UI iterates.
+        source_names = [c.display_name for c in ks_comps]
+        # Pre-render each row's cells as a single emoji string. Avoids
+        # the nested-foreach trap (`list[dict]` inside `list[dict]` —
+        # Reflex can't typecheck through it).
+        heatmap_rows: list[dict] = []
+        for src_name in source_names:
+            clean_src = src_name.replace(" ", "").replace("-", "")
+            cells_chars: list[str] = []
+            cited_count = 0
+            searched_count = 0
+            for ks in searches:
+                cited = any(
+                    (r.name or "").lower() == src_name.lower()
+                    or clean_src.lower() in (r.name or "").lower()
+                    for r in ks.search_results
+                    if r.result_type in ("kt_attribution", "citation")
+                )
+                searched_here = any(
+                    src_name.lower() in s.lower() or clean_src.lower() in s.lower()
+                    for s in (ks.knowledge_sources or [])
+                )
+                if cited:
+                    cells_chars.append("🟩")
+                    cited_count += 1
+                elif searched_here:
+                    cells_chars.append("🟨")
+                    searched_count += 1
+                else:
+                    cells_chars.append("⬜")
+            heatmap_rows.append({
+                "source_name": src_name,
+                "cells_str": "".join(cells_chars),
+                "summary": f"cited {cited_count}x · searched only {searched_count}x",
+            })
+        self.mcs_knowledge_heatmap = heatmap_rows  # type: ignore[attr-defined]
 
         # Custom search steps
         self.mcs_knowledge_custom_steps = [  # type: ignore[attr-defined]
@@ -1841,6 +2569,125 @@ class UploadMixin(rx.State, mixin=True):
         else:
             self.mcs_topics_mermaid = ""  # type: ignore[attr-defined]
 
+        # ── AI Builder Calls aggregation (Tools tab) ──────────────────
+        # Static side: profile.ai_builder_models (the 4 aIModelDefinitions
+        # from YAML) + profile.ai_builder_call_sites (8 entries showing
+        # where each model is invoked).
+        # Runtime side: timeline.turn_prompt_metrics — every LLM call the
+        # runtime executed, keyed by the output variable_name.
+        #
+        # Mapping: each call-site has output_bindings.predictionOutput
+        # = "<variable name>". Each metric has variable_name. Match the
+        # two so we can show "this runtime call invoked Model X via topic Y".
+        ai_models = list(getattr(profile, "ai_builder_models", []) or [])
+        ai_call_sites = list(getattr(profile, "ai_builder_call_sites", []) or [])
+        metrics_list = list(getattr(timeline, "turn_prompt_metrics", []) or []) if timeline else []
+
+        # var_name -> (model_id, host_topic_display). When the same
+        # variable is bound from multiple call-sites (rare), last write
+        # wins — acceptable for surface labels.
+        var_to_site: dict[str, tuple[str, str]] = {}
+        for cs in ai_call_sites:
+            for bind_value in (cs.output_bindings or {}).values():
+                if bind_value:
+                    var_to_site[bind_value] = (cs.model_id, cs.host_topic_display)
+
+        # model_id -> aggregator
+        from collections import Counter as _Counter
+        runtime_by_model: dict[str, dict] = {}
+        for m in metrics_list:
+            site = var_to_site.get(m.variable_name)
+            if not site:
+                continue
+            model_id, host = site
+            slot = runtime_by_model.setdefault(
+                model_id,
+                {
+                    "calls": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "credits": 0.0,
+                    "ai_builder_credits": 0.0,
+                    "models_used": set(),
+                    "topics": _Counter(),
+                },
+            )
+            slot["calls"] += 1
+            slot["prompt_tokens"] += m.prompt_tokens or 0
+            slot["completion_tokens"] += m.completion_tokens or 0
+            slot["total_tokens"] += (
+                m.total_tokens or ((m.prompt_tokens or 0) + (m.completion_tokens or 0))
+            )
+            slot["credits"] += m.copilot_credits or 0.0
+            slot["ai_builder_credits"] += m.ai_builder_credits or 0.0
+            if m.model_name:
+                slot["models_used"].add(m.model_name)
+            if host:
+                slot["topics"][host] += 1
+
+        static_call_count_by_model: _Counter = _Counter(cs.model_id for cs in ai_call_sites)
+
+        # Summary rows — one per defined AI Builder model. We render even
+        # models with zero runtime invocations so the user can see the
+        # full static inventory.
+        summary_rows: list[dict] = []
+        for m in ai_models:
+            slot = runtime_by_model.get(m.id) or {}
+            calls = int(slot.get("calls", 0))
+            prompt_t = int(slot.get("prompt_tokens", 0))
+            comp_t = int(slot.get("completion_tokens", 0))
+            credits = float(slot.get("credits", 0.0))
+            ai_credits = float(slot.get("ai_builder_credits", 0.0))
+            models_used = sorted(slot.get("models_used") or set())
+            topic_counter: _Counter = slot.get("topics") or _Counter()
+            topics_str = ", ".join(
+                f"{topic} ×{count}" for topic, count in topic_counter.most_common()
+            )
+            summary_rows.append(
+                {
+                    "name": m.name or "(unnamed)",
+                    "id": m.id,
+                    "call_site_count": str(static_call_count_by_model.get(m.id, 0)),
+                    "runtime_call_count": str(calls),
+                    "prompt_tokens": f"{prompt_t:,}",
+                    "completion_tokens": f"{comp_t:,}",
+                    "credits": f"{credits:.1f}",
+                    "ai_builder_credits": f"{ai_credits:.1f}",
+                    "models_used": ", ".join(models_used) if models_used else "—",
+                    "topics_text": topics_str or "—",
+                }
+            )
+        self.mcs_tools_ai_builder_summary = summary_rows  # type: ignore[attr-defined]
+
+        # Per-call detail rows — flat list, one row per runtime
+        # invocation that maps to an AI Builder model. Sorted by turn so
+        # the user can see classifier + composer firing in order.
+        model_name_by_id = {m.id: m.name for m in ai_models}
+        call_rows: list[dict] = []
+        for m in metrics_list:
+            site = var_to_site.get(m.variable_name)
+            if not site:
+                continue
+            model_id, host = site
+            output_text = (m.text or "").strip().replace("\n", " ")
+            call_rows.append(
+                {
+                    "model_display": model_name_by_id.get(model_id) or model_id,
+                    "model_id": model_id,
+                    "variable_name": m.variable_name or "—",
+                    "host_topic": host or "—",
+                    "turn_message": m.triggering_user_message or "(system-initiated)",
+                    "model_name_runtime": m.model_name or "—",
+                    "prompt_tokens": f"{m.prompt_tokens or 0:,}",
+                    "completion_tokens": f"{m.completion_tokens or 0:,}",
+                    "credits": f"{m.copilot_credits or 0.0:.2f}",
+                    "finish_reason": m.finish_reason or "—",
+                    "output_preview": output_text,
+                }
+            )
+        self.mcs_tools_ai_builder_calls = call_rows  # type: ignore[attr-defined]
+
     # ── Model tab data extraction ────────────────────────────────────────────
 
     def _populate_model_data(self, profile) -> None:
@@ -2363,6 +3210,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_tools_kpis = []  # type: ignore[attr-defined]
         self.mcs_tools_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_tools_external_calls = []  # type: ignore[attr-defined]
+        self.mcs_tools_ai_builder_summary = []  # type: ignore[attr-defined]
+        self.mcs_tools_ai_builder_calls = []  # type: ignore[attr-defined]
         self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
         self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
         self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]
@@ -2375,6 +3224,11 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_knowledge_attributions = []  # type: ignore[attr-defined]
         self.mcs_knowledge_attribution_summary = ""  # type: ignore[attr-defined]
         self.mcs_knowledge_citations = []  # type: ignore[attr-defined]
+        self.mcs_knowledge_composed_answers = []  # type: ignore[attr-defined]
+        self.mcs_knowledge_turn_contexts = []  # type: ignore[attr-defined]
+        self.mcs_knowledge_turn_strip = []  # type: ignore[attr-defined]
+        self.mcs_knowledge_clusters = []  # type: ignore[attr-defined]
+        self.mcs_knowledge_heatmap = []  # type: ignore[attr-defined]
         self.mcs_knowledge_custom_steps = []  # type: ignore[attr-defined]
         self.mcs_knowledge_general_enabled = False  # type: ignore[attr-defined]
         self.mcs_knowledge_citation_panel = []  # type: ignore[attr-defined]
@@ -2433,6 +3287,30 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_ins_latency_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
         self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
+
+    @rx.event
+    def download_citations_csv(self):
+        timeline_json: str = self.timeline_json  # type: ignore[attr-defined]
+        if not timeline_json:
+            self.upload_error = "No analysis loaded — upload a bot export first."
+            return
+
+        try:
+            timeline = ConversationTimeline.model_validate_json(timeline_json)
+        except Exception as e:
+            logger.warning("Citations CSV: failed to rehydrate timeline: {}", e)
+            self.upload_error = "Could not load citations from the current analysis."
+            return
+
+        csv_str = render_citations_csv(timeline)
+
+        # Slug the visible bot/report title for the filename so the download
+        # is recognisable when the user analyses several bots in one session.
+        title = (self.report_title or "report").strip()  # type: ignore[attr-defined]
+        slug = "".join(c if (c.isalnum() or c in ("-", "_")) else "-" for c in title) or "report"
+        filename = f"citations-{slug}.csv"
+
+        yield rx.download(data=csv_str, filename=filename)
 
     def new_upload(self):
         self.report_markdown = ""  # type: ignore[attr-defined]

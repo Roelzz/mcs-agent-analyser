@@ -42,7 +42,7 @@ def _process_folder(folder: Path, output: Path | None = None) -> Path:
     activities = parse_dialog_json(json_path)
     logger.info(f"Dialog: {len(activities)} activities")
 
-    timeline = build_timeline(activities, schema_lookup)
+    timeline = build_timeline(activities, schema_lookup, profile=profile)
     logger.info(
         f"Timeline: {len(timeline.events)} events, {len(timeline.phases)} phases, {len(timeline.errors)} errors"
     )
