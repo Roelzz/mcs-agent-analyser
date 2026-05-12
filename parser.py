@@ -119,6 +119,13 @@ def _walk_prompt_artifacts(
             text = action.get("additionalInstructions")
             if isinstance(text, str) and text.strip():
                 ks = action.get("knowledgeSources", {}) or {}
+                # Latency / file-search / moderation knobs are sibling
+                # fields on the same SAS action. Surfacing them lets the
+                # Profile tab show the full configuration without an
+                # extra YAML walk.
+                latency_settings = action.get("latencyMessageSettings") or {}
+                file_search = action.get("fileSearchDataSource") or {}
+                file_search_mode_block = file_search.get("searchFilesMode") or {}
                 inline_prompts.append(
                     InlinePrompt(
                         kind=kind,
@@ -131,6 +138,13 @@ def _walk_prompt_artifacts(
                         response_capture_type=action.get("responseCaptureType"),
                         knowledge_sources_mode=ks.get("kind") if isinstance(ks, dict) else None,
                         auto_send=action.get("autoSend"),
+                        moderation_level=action.get("moderationLevel"),
+                        latency_message=latency_settings.get("latencyMessage")
+                        if isinstance(latency_settings, dict)
+                        else None,
+                        file_search_mode=file_search_mode_block.get("kind")
+                        if isinstance(file_search_mode_block, dict)
+                        else None,
                     )
                 )
 
@@ -419,6 +433,8 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
     source_kind = None
     source_site = None
     trigger_condition_raw = None
+    additional_search_terms = None
+    modified_at = None
     if kind == "KnowledgeSourceComponent":
         ks_config = comp.get("configuration", {}) or {}
         source = ks_config.get("source", {}) or {}
@@ -429,6 +445,16 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
         source_site = source.get("site") or source.get("siteName") or source.get("siteUrl")
         tc = source.get("triggerCondition")
         trigger_condition_raw = str(tc) if tc is not None else None
+        # Search-term augmentation (recall tuning) + last-modified timestamp
+        # (staleness analysis). Both are normalised to strings for uniform
+        # downstream rendering.
+        ast = source.get("additionalSearchTerms")
+        if ast:
+            additional_search_terms = str(ast) if not isinstance(ast, list) else ", ".join(map(str, ast))
+        audit = comp.get("auditInfo") or {}
+        mtime = audit.get("modifiedTimeUtc")
+        if mtime is not None:
+            modified_at = str(mtime)
 
     # CustomEntityComponent: entity kind + item count
     entity_kind = None
@@ -479,6 +505,8 @@ def _parse_component(comp: dict) -> tuple[ComponentSummary, bool]:
         file_type=file_type,
         variable_scope=variable_scope,
         trigger_condition_raw=trigger_condition_raw,
+        additional_search_terms=additional_search_terms,
+        modified_at=modified_at,
         raw_dialog=raw_dialog,
     )
 

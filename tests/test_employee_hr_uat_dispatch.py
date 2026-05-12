@@ -199,6 +199,96 @@ def test_bot_reply_links_extracted(timeline) -> None:
     )
 
 
+def test_prompt_response_text_harvested(timeline) -> None:
+    """Every PromptResponse-shaped variable assignment in the fixture
+    carries a `text` field — that's the AI Builder model's actual output
+    for that LLM invocation. Locked at 27 entries (one per metrics row)."""
+    _, tl = timeline
+    with_text = [m for m in tl.turn_prompt_metrics if m.text]
+    assert len(with_text) >= 27, f"expected ≥27 metrics with text, got {len(with_text)}"
+    # Find a chat-model metric with a substantive text body.
+    chat_metric = next((m for m in with_text if m.model_name and m.model_name.startswith("gpt-5-chat")), None)
+    assert chat_metric is not None
+    assert chat_metric.text and len(chat_metric.text) > 0
+
+
+def test_composed_answers_extracted(timeline) -> None:
+    """`CBResponse.Text.MarkdownContent` per turn — the bot's final composed
+    answer. 3 entries in the fixture (the 3 turns that went through the
+    Conversational boosting topic)."""
+    _, tl = timeline
+    assert len(tl.composed_answers) == 3
+    md = " ".join((a.markdown_content or "") for a in tl.composed_answers)
+    assert "Summary" in md
+    # is_sydney_summarised should be False for every entry in this fixture.
+    assert all(a.is_sydney_summarised is False for a in tl.composed_answers)
+
+
+def test_citation_filename_metadata_extracted(timeline) -> None:
+    """Citation snippet tails ("Filename: …, File Type: …") are regex-
+    parsed into structured fields."""
+    _, tl = timeline
+    faq = next((c for c in tl.citation_sources if c.name == "FAQ-Parking-EN.pdf"), None)
+    assert faq is not None
+    assert faq.filename == "FAQ-Parking-EN.pdf"
+    assert faq.file_type == "pdf"
+
+
+def test_turn_context_harvested(timeline) -> None:
+    """Per-turn auxiliary signals (language, queries, ticket eligibility)
+    aggregate into `TurnContext` rows."""
+    _, tl = timeline
+    assert len(tl.turn_contexts) >= 10
+    # At least one row should carry a language signal.
+    assert any(tc.language for tc in tl.turn_contexts)
+    # At least one row should carry a keyword search query.
+    assert any(tc.keyword_search_query for tc in tl.turn_contexts)
+
+
+def test_inline_prompt_extra_fields(timeline) -> None:
+    """The Conversational boosting InlinePrompt now carries moderation,
+    latency, and file-search-mode configuration from the SAS node."""
+    profile, _ = timeline
+    cb = next(
+        ip
+        for ip in profile.inline_prompts
+        if ip.host_topic_display == "Conversational boosting"
+    )
+    assert cb.moderation_level == "Medium"
+    assert cb.latency_message is not None and "moment" in cb.latency_message.lower()
+    assert cb.file_search_mode == "DoNotSearchFiles"
+
+
+def test_knowledge_source_extra_fields(timeline) -> None:
+    """KnowledgeSourceComponent rows now carry modified_at + (when present)
+    additional_search_terms."""
+    profile, _ = timeline
+    ks_comps = [c for c in profile.components if c.kind == "KnowledgeSourceComponent"]
+    # Every KS in this fixture has a modifiedTimeUtc audit timestamp.
+    assert all(c.modified_at for c in ks_comps)
+
+
+def test_dashboard_state_exposes_composed_answers(timeline) -> None:
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _StateStub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _StateStub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)
+    assert len(stub.mcs_knowledge_composed_answers) == 3
+    first = stub.mcs_knowledge_composed_answers[0]
+    assert first["preview"]
+    assert int(first["char_count"]) > 100
+    # Turn-context rows surface too.
+    assert len(stub.mcs_knowledge_turn_contexts) >= 10
+    # Citation rows now carry filename + file_type.
+    faq_row = next(r for r in stub.mcs_knowledge_citations if r["name"] == "FAQ-Parking-EN.pdf")
+    assert faq_row["file_type"] == "pdf"
+
+
 def test_dashboard_knowledge_ux_overhaul_fields(timeline) -> None:
     """Lock the new state-row fields powering the Knowledge tab redesign:
     outcome border, bot-reply inline, metrics strip, anchor href, turn

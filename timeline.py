@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from models import (
     BotProfile,
+    BotComposedAnswer,
     CitationSource,
     ConversationTimeline,
     CreditEstimate,
@@ -20,6 +21,7 @@ from models import (
     TimelineEvent,
     ToolCall,
     ToolCallObservation,
+    TurnContext,
     TurnPromptMetrics,
 )
 
@@ -44,6 +46,28 @@ def _clean_source(s: str) -> str:
 # carry it as a structured field.
 _UUID_IN_TEXT_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 
+# CitationSources.Text often ends with a trailing metadata blob the runtime
+# appends: "…. Filename: FAQ-Parking-EN.pdf, File Type: pdf, Description: …".
+# Parses the tail into structured fields without losing the rest of the snippet.
+_CITATION_TAIL_RE = re.compile(
+    r"\.\s*Filename:\s*(?P<fn>[^,]+?)"
+    r"(?:,\s*File Type:\s*(?P<ft>[^,]+?))?"
+    r"(?:,\s*Description:\s*(?P<desc>.+))?$",
+    re.DOTALL,
+)
+
+# Runtime variables that carry per-turn auxiliary context. Detection is
+# substring-based on `var_id` so renames in different bot exports still
+# match (e.g. Global.Initiallanguage / Topic.Initiallanguage / etc.).
+_TURN_CONTEXT_VAR_PATTERNS: dict[str, str] = {
+    "Initiallanguage": "language",
+    "previousQuestion": "previous_question",
+    "KeywordSearchQueryVar": "keyword_search_query",
+    "SearchQueryVar": "search_query",
+    "TicketEligibilityKB": "ticket_eligibility_kb",
+    "TicketEligibilityCB": "ticket_eligibility_cb",
+}
+
 
 @dataclass
 class _TimelineState:
@@ -56,6 +80,11 @@ class _TimelineState:
     knowledge_attributions: list[KnowledgeAttribution] = field(default_factory=list)
     citation_sources: list[CitationSource] = field(default_factory=list)
     turn_prompt_metrics: list[TurnPromptMetrics] = field(default_factory=list)
+    composed_answers: list[BotComposedAnswer] = field(default_factory=list)
+    # Per-turn aggregation buffer for `TurnContext`. Keyed on triggering
+    # user message; emitted into a flat list at the end of build_timeline.
+    turn_context_buf: dict[str, dict] = field(default_factory=dict)
+    turn_contexts: list[TurnContext] = field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = field(default_factory=list)
     pending_ks_query: dict | None = None
     pending_ks_info: KnowledgeSearchInfo | None = None
@@ -1103,13 +1132,14 @@ def _process_trace_event(
                 )
             )
 
-            # Citation harvest: many custom-RAG bots (e.g. the user's
-            # Conversational boosting topic) write a JSON blob with a
-            # `Text.CitationSources[]` array into a runtime variable. The
-            # orchestrator-search trace ships empty `fullResults` in modern
-            # exports, so this is the only place the grounded snippet text
-            # survives. Detection is shape-based, not name-based, so it
-            # survives variable renames.
+            # Citation harvest + composed-answer harvest: many custom-RAG
+            # bots (e.g. the Conversational boosting topic) write a JSON
+            # blob shaped like `{Text: {Content, MarkdownContent,
+            # CitationSources: [...]}, IsSydneySummarized: bool}` into a
+            # runtime variable. The orchestrator-search trace ships empty
+            # `fullResults` in modern exports, so this is the only place
+            # both the grounded snippets AND the final composed answer
+            # survive. Detection is shape-based, not name-based.
             raw_value = value.get("newValue")
             if isinstance(raw_value, str) and "CitationSources" in raw_value:
                 try:
@@ -1118,10 +1148,36 @@ def _process_trace_event(
                     parsed = None
                 if isinstance(parsed, dict):
                     text_block = parsed.get("Text") if isinstance(parsed.get("Text"), dict) else {}
+                    # Composed answer (Content + MarkdownContent) lives on
+                    # the same Text block. Surface it as a first-class
+                    # `BotComposedAnswer` for the dashboard.
+                    if text_block.get("Content") or text_block.get("MarkdownContent"):
+                        state.composed_answers.append(
+                            BotComposedAnswer(
+                                position=position,
+                                timestamp=timestamp,
+                                triggering_user_message=state.latest_user_text,
+                                markdown_content=text_block.get("MarkdownContent"),
+                                plain_content=text_block.get("Content"),
+                                is_sydney_summarised=bool(parsed.get("IsSydneySummarized")),
+                            )
+                        )
                     sources = text_block.get("CitationSources") or []
                     for s in sources:
                         if not isinstance(s, dict):
                             continue
+                        # Snippet-tail metadata: many sources end with
+                        # "…. Filename: X, File Type: Y (, Description: Z)".
+                        # Regex-strip into structured fields and trim the
+                        # tail from the snippet body for cleaner display.
+                        snippet_text = s.get("Text") or ""
+                        fn = ft = desc = None
+                        if snippet_text:
+                            tail_match = _CITATION_TAIL_RE.search(snippet_text)
+                            if tail_match:
+                                fn = (tail_match.group("fn") or "").strip() or None
+                                ft = (tail_match.group("ft") or "").strip() or None
+                                desc = (tail_match.group("desc") or "").strip() or None
                         state.citation_sources.append(
                             CitationSource(
                                 position=position,
@@ -1130,8 +1186,11 @@ def _process_trace_event(
                                 citation_id=str(s.get("Id") or ""),
                                 name=s.get("Name"),
                                 url=s.get("Url"),
-                                text=s.get("Text"),
+                                text=snippet_text,
                                 source_variable=var_id or "Global.CBResponse",
+                                filename=fn,
+                                file_type=ft,
+                                description=desc,
                             )
                         )
 
@@ -1152,9 +1211,21 @@ def _process_trace_event(
                 ):
                     prompt_tokens = metrics_parsed.get("promptTokens")
                     completion_tokens = metrics_parsed.get("completionTokens")
+                    total_tokens = metrics_parsed.get("totalTokens")
                     images_count = metrics_parsed.get("imagesCount")
                     copilot_credits = metrics_parsed.get("costAsCopilotCredits")
                     ai_builder_credits = metrics_parsed.get("costAsAiBuilderCredits")
+                    # `thoughtSteps` can arrive as a JSON-stringified list,
+                    # an inline list, or an empty string; coerce to a str
+                    # for uniform downstream rendering.
+                    raw_thought = metrics_parsed.get("thoughtSteps")
+                    if isinstance(raw_thought, (list, dict)):
+                        try:
+                            thought_steps_str = json.dumps(raw_thought, indent=2, default=str)
+                        except (TypeError, ValueError):
+                            thought_steps_str = str(raw_thought)
+                    else:
+                        thought_steps_str = raw_thought or None
                     state.turn_prompt_metrics.append(
                         TurnPromptMetrics(
                             position=position,
@@ -1167,6 +1238,7 @@ def _process_trace_event(
                             completion_tokens=int(completion_tokens)
                             if isinstance(completion_tokens, (int, float))
                             else None,
+                            total_tokens=int(total_tokens) if isinstance(total_tokens, (int, float)) else None,
                             finish_reason=metrics_parsed.get("finishReason"),
                             copilot_credits=float(copilot_credits)
                             if isinstance(copilot_credits, (int, float))
@@ -1175,8 +1247,25 @@ def _process_trace_event(
                             if isinstance(ai_builder_credits, (int, float))
                             else None,
                             images_count=int(images_count) if isinstance(images_count, (int, float)) else None,
+                            text=metrics_parsed.get("text"),
+                            thought_steps=thought_steps_str,
                         )
                     )
+
+            # Turn-context aggregation: stash per-turn auxiliary signals
+            # keyed on the current user turn. One row per turn after the
+            # final flush at the end of build_timeline.
+            for needle, slot_key in _TURN_CONTEXT_VAR_PATTERNS.items():
+                if needle in var_id:
+                    turn_key = state.latest_user_text or ""
+                    slot = state.turn_context_buf.setdefault(turn_key, {})
+                    # Last-write-wins inside a single turn — runtimes set
+                    # these once per turn, but defensively we keep the
+                    # most recent. Skip empty/falsy values.
+                    incoming = value.get("newValue")
+                    if isinstance(incoming, str) and incoming:
+                        slot[slot_key] = incoming[:200]
+                    break
 
         elif value_type == "DialogRedirect":
             target_id = value.get("targetDialogId", "")
@@ -1536,6 +1625,25 @@ def build_timeline(
     _attach_bot_reply_links(state)
     _synthesize_orchestrator_phases(state)
 
+    # Flush per-turn context buffers into the timeline's flat list. One
+    # TurnContext per unique triggering user turn that produced at least
+    # one auxiliary signal (language detection, ticket-eligibility,
+    # keyword/search query, previous-question memory).
+    for turn_key, slot in state.turn_context_buf.items():
+        if not slot:
+            continue
+        state.turn_contexts.append(
+            TurnContext(
+                triggering_user_message=turn_key or None,
+                language=slot.get("language"),
+                previous_question=slot.get("previous_question"),
+                keyword_search_query=slot.get("keyword_search_query"),
+                search_query=slot.get("search_query"),
+                ticket_eligibility_kb=slot.get("ticket_eligibility_kb"),
+                ticket_eligibility_cb=slot.get("ticket_eligibility_cb"),
+            )
+        )
+
     total_elapsed = _ms_between(state.first_timestamp, state.last_timestamp)
 
     from parser import build_raw_event_index
@@ -1552,6 +1660,8 @@ def build_timeline(
         knowledge_attributions=state.knowledge_attributions,
         citation_sources=state.citation_sources,
         turn_prompt_metrics=state.turn_prompt_metrics,
+        composed_answers=state.composed_answers,
+        turn_contexts=state.turn_contexts,
         custom_search_steps=state.custom_search_steps,
         tool_calls=state.tool_calls,
         generative_answer_traces=state.generative_answer_traces,

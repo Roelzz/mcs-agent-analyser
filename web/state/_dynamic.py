@@ -134,6 +134,15 @@ class DynamicMixin(rx.State, mixin=True):
     # `list[dict]` so the dashboard's `rx.foreach` can render it without
     # nested-typed-var dances (see PR #28 lessons).
     mcs_knowledge_citations: list[dict] = []
+    # Bot's final composed answer per turn (from CBResponse.Text). Surfaces
+    # the markdown + plain-text the runtime emitted before bot-message
+    # rendering — distinct from the per-LLM-invocation `model_text` shown
+    # inside individual search-card "Bot reply" accordions.
+    mcs_knowledge_composed_answers: list[dict] = []
+    # Per-turn runtime context (language, previous question, search query,
+    # ticket-eligibility flags). Surfaces the auxiliary signals that
+    # accumulate via VariableAssignment events around each user turn.
+    mcs_knowledge_turn_contexts: list[dict] = []
     # Phase 2c — horizontal turn-status strip (one chip per turn).
     mcs_knowledge_turn_strip: list[dict] = []
     # Phase 3a — clusters of turns with the same normalized user message.

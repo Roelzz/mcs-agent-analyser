@@ -2637,6 +2637,73 @@ def _mcs_knowledge_heatmap_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_knowledge_composed_answer_card(item: dict) -> rx.Component:
+    """One bot composed-answer card — turn header + 600-char markdown
+    preview + expandable full body. Sources from `CBResponse.Text.
+    MarkdownContent`: the actual answer the runtime composed for this turn
+    before bot-message rendering picked it up."""
+    return card(
+        rx.vstack(
+            rx.hstack(
+                rx.icon("scroll-text", size=14, color=PRIMARY),
+                rx.text(item["turn_message"], font_size="12px", font_weight="600", color="var(--gray-12)", flex="1"),
+                rx.badge(item["char_count"], " chars", color_scheme="green", variant="soft", size="1"),
+                rx.cond(
+                    item["is_sydney_summarised"] == "Yes",
+                    rx.badge("Sydney summarised", color_scheme="purple", variant="soft", size="1"),
+                ),
+                align="center",
+                spacing="2",
+                width="100%",
+            ),
+            rx.text(item["preview"], font_size="12px", color="var(--gray-a9)", font_style="italic"),
+            rx.accordion.root(
+                rx.accordion.item(
+                    header=rx.text("Full markdown answer", font_size="11px", color="var(--gray-a9)"),
+                    content=rx.el.pre(
+                        item["markdown_full"],
+                        font_size="11px",
+                        color="var(--gray-11)",
+                        white_space="pre-wrap",
+                        word_break="break-word",
+                        font_family=_MONO,
+                        background="var(--gray-a2)",
+                        border="1px solid var(--gray-a4)",
+                        border_radius="6px",
+                        padding="10px",
+                        max_height="400px",
+                        overflow_y="auto",
+                    ),
+                ),
+                collapsible=True,
+                variant="ghost",
+                width="100%",
+            ),
+            spacing="2",
+            width="100%",
+        ),
+        width="100%",
+    )
+
+
+def _mcs_knowledge_turn_context_row(item: dict) -> rx.Component:
+    """One per-turn runtime-context row. Shows language, the queries the
+    runtime ultimately used (which may differ from the orchestrator's
+    bound search_query), and the ticket-eligibility classifier outputs.
+    Drives the "Per-turn runtime context" card."""
+    return _grid_row(
+        [
+            rx.text(item["turn_message"], font_size="12px", color="var(--gray-12)"),
+            rx.text(item["language"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["keyword_search_query"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["search_query"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["ticket_eligibility_kb"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["ticket_eligibility_cb"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+        ],
+        template="3fr 1fr 2fr 2fr 1fr 1fr",
+    )
+
+
 def _mcs_knowledge_attribution_row(item: dict) -> rx.Component:
     """Per-turn knowledge attribution row. The turn-message cell is a
     link that anchor-scrolls to the matching search card below; the
@@ -2698,9 +2765,28 @@ def _mcs_knowledge_citation_card(item: dict) -> rx.Component:
                     size="1",
                 ),
                 rx.badge(item["char_count"], " chars", color_scheme="blue", variant="soft", size="1"),
+                # Pass A: file-type badge (📄 pdf / 📄 aspx / etc.). Only
+                # rendered when the runtime appended the metadata tail to
+                # the snippet body (parsed by _CITATION_TAIL_RE).
+                rx.cond(
+                    item["file_type"] != "",
+                    rx.badge("📄 ", item["file_type"], color_scheme="gray", variant="soft", size="1"),
+                ),
                 align="center",
                 spacing="2",
                 width="100%",
+            ),
+            # Description (from the same metadata tail) is rendered as a
+            # subtitle when present. Often empty in this fixture but
+            # populated in others.
+            rx.cond(
+                item["description"] != "",
+                rx.text(
+                    item["description"],
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                ),
             ),
             rx.cond(
                 item["url"] != "",
@@ -2837,12 +2923,80 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                         rx.accordion.item(
                             header=rx.hstack(
                                 rx.icon("message-square", size=12, color="var(--gray-a9)"),
-                                rx.text("Bot reply", font_size="11px", color="var(--gray-a9)"),
+                                rx.text("Final bot reply", font_size="11px", color="var(--gray-a9)"),
                                 spacing="1",
                                 align="center",
                             ),
                             content=rx.el.pre(
                                 item["bot_reply_text"],
+                                font_size="11px",
+                                color="var(--gray-11)",
+                                white_space="pre-wrap",
+                                word_break="break-word",
+                                font_family=_MONO,
+                                background="var(--gray-a2)",
+                                border="1px solid var(--gray-a4)",
+                                border_radius="6px",
+                                padding="10px",
+                                max_height="320px",
+                                overflow_y="auto",
+                            ),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                # Pass A: AI Builder model output(s) per turn. Distinct
+                # from "Final bot reply" — these are the intermediate LLM
+                # invocations (ticket-eligibility classifier, response
+                # composer, language detector, …) the runtime ran while
+                # building the answer. Lets the user audit each LLM
+                # call's contribution.
+                rx.cond(
+                    item["model_text"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("brain", size=12, color="var(--gray-a9)"),
+                                rx.text("Model output", font_size="11px", color="var(--gray-a9)"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.el.pre(
+                                item["model_text"],
+                                font_size="11px",
+                                color="var(--gray-11)",
+                                white_space="pre-wrap",
+                                word_break="break-word",
+                                font_family=_MONO,
+                                background="var(--gray-a2)",
+                                border="1px solid var(--gray-a4)",
+                                border_radius="6px",
+                                padding="10px",
+                                max_height="320px",
+                                overflow_y="auto",
+                            ),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                # Pass A: thought-steps reasoning trace per turn (often
+                # empty in this export but populated in others).
+                rx.cond(
+                    item["model_thought_steps"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("activity", size=12, color="var(--gray-a9)"),
+                                rx.text("Model thought steps", font_size="11px", color="var(--gray-a9)"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.el.pre(
+                                item["model_thought_steps"],
                                 font_size="11px",
                                 color="var(--gray-11)",
                                 white_space="pre-wrap",
@@ -3969,6 +4123,78 @@ def _mcs_knowledge_panel() -> rx.Component:
                 ),
                 rx.foreach(State.mcs_knowledge_citations, _mcs_knowledge_citation_card),
                 spacing="3",
+                width="100%",
+            ),
+        ),
+        # Composed Answers — `CBResponse.Text.MarkdownContent` per turn.
+        # Sits below Citations because it pairs with them: the citations
+        # are what fed into the answer, the composed answer is what
+        # came out.
+        rx.cond(
+            State.mcs_knowledge_composed_answers.length() > 0,  # type: ignore[union-attr]
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("scroll-text", size=16, color=PRIMARY),
+                    section_heading("Composed Answers"),
+                    rx.badge(
+                        State.mcs_knowledge_composed_answers.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="green",
+                        variant="soft",
+                        size="1",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "The bot's final composed answer per turn, harvested from "
+                    "CBResponse.Text.MarkdownContent. Expand to see the full "
+                    "markdown body with section headers and citation markers.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                ),
+                rx.foreach(
+                    State.mcs_knowledge_composed_answers,
+                    _mcs_knowledge_composed_answer_card,
+                ),
+                spacing="3",
+                width="100%",
+            ),
+        ),
+        # Per-turn runtime context — language, queries, ticket-eligibility.
+        # Auxiliary signals harvested from VariableAssignment events that
+        # cluster around each user turn.
+        rx.cond(
+            State.mcs_knowledge_turn_contexts.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("info", size=16, color=PRIMARY),
+                    section_heading("Per-turn runtime context"),
+                    rx.spacer(),
+                    rx.badge(
+                        State.mcs_knowledge_turn_contexts.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="blue",
+                        variant="soft",
+                        size="1",
+                    ),
+                    width="100%",
+                    align="center",
+                ),
+                rx.text(
+                    "Auxiliary signals the runtime emitted around each turn: "
+                    "detected language, keyword/search queries the bot ended "
+                    "up using, ticket-eligibility classifier verdicts.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                    padding_bottom="8px",
+                ),
+                _data_table(
+                    ["Turn", "Lang", "Keyword query", "Search query", "Ticket KB", "Ticket CB"],
+                    "3fr 1fr 2fr 2fr 1fr 1fr",
+                    State.mcs_knowledge_turn_contexts,
+                    _mcs_knowledge_turn_context_row,
+                ),
                 width="100%",
             ),
         ),

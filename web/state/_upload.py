@@ -1109,6 +1109,11 @@ class UploadMixin(rx.State, mixin=True):
         # · credits). Pre-formatting in the populator avoids any str+Var
         # arithmetic in Reflex foreach bodies.
         metrics_by_turn: dict[str, dict] = {}
+        # Per-turn concatenated model text + thought steps so the UI can
+        # show the AI Builder model's actual output for a turn under the
+        # search-card "Bot reply" accordion (paired with the final reply).
+        model_text_by_turn: dict[str, list[str]] = {}
+        thought_steps_by_turn: dict[str, list[str]] = {}
         for m_obj in metrics:
             key = m_obj.triggering_user_message or ""
             if not key:
@@ -1122,6 +1127,14 @@ class UploadMixin(rx.State, mixin=True):
             slot["credits"] += m_obj.copilot_credits or 0.0
             if m_obj.model_name:
                 slot["models"].add(m_obj.model_name)
+            if m_obj.text:
+                model_text_by_turn.setdefault(key, []).append(
+                    f"[{m_obj.variable_name}] {m_obj.text}"
+                )
+            if m_obj.thought_steps:
+                thought_steps_by_turn.setdefault(key, []).append(
+                    f"[{m_obj.variable_name}] {m_obj.thought_steps}"
+                )
 
         def _metrics_strip_for(turn: str) -> str:
             slot = metrics_by_turn.get(turn)
@@ -1424,6 +1437,17 @@ class UploadMixin(rx.State, mixin=True):
                     # user sees what the bot actually said next to the
                     # evidence that grounded it.
                     "bot_reply_text": bot_reply_by_turn.get(ks.triggering_user_message or "", ""),
+                    # AI Builder model output(s) for this turn (joined
+                    # across the multiple LLM invocations a turn may
+                    # produce: ticket-eligibility check, response
+                    # composer, etc.). Distinct from `bot_reply_text`
+                    # (the final composed reply emitted to the user).
+                    "model_text": "\n\n".join(
+                        model_text_by_turn.get(ks.triggering_user_message or "", [])
+                    ),
+                    "model_thought_steps": "\n\n".join(
+                        thought_steps_by_turn.get(ks.triggering_user_message or "", [])
+                    ),
                     # Phase 1d: tone keyword + pre-rendered CSS string for
                     # the card's coloured left border. Pre-rendering here
                     # keeps the Reflex render function free of Var-keyed
@@ -1506,6 +1530,12 @@ class UploadMixin(rx.State, mixin=True):
                 "cited_turn_count": "1",
                 "cited_turns_text": turn,
                 "_turn_set": [turn],
+                # Pass A: structured tail-metadata extracted from the
+                # snippet body. Empty strings (not None) so Reflex's
+                # `!= ""` conds work uniformly downstream.
+                "filename": c.filename or "",
+                "file_type": c.file_type or "",
+                "description": c.description or "",
             }
             seen_key_to_row[key] = row
             citation_rows.append(row)
@@ -1514,6 +1544,56 @@ class UploadMixin(rx.State, mixin=True):
         for row in citation_rows:
             row.pop("_turn_set", None)
         self.mcs_knowledge_citations = citation_rows  # type: ignore[attr-defined]
+
+        # Composed-answer rows (CBResponse.Text.MarkdownContent + Content).
+        # Each row carries a 600-char preview + full markdown body for an
+        # expandable accordion. Surfacing this lets the auditor see what the
+        # runtime ultimately returned, paired with the citations on the same
+        # turn.
+        composed_answer_rows: list[dict] = []
+        for ca in getattr(timeline, "composed_answers", []) or []:
+            md = (ca.markdown_content or "").strip()
+            preview = md[:600].replace("\n", " ")
+            if len(md) > 600:
+                preview += " …"
+            composed_answer_rows.append(
+                {
+                    "turn_message": ca.triggering_user_message or "(system-initiated)",
+                    "preview": preview,
+                    "markdown_full": md,
+                    "char_count": str(len(md)),
+                    "is_sydney_summarised": "Yes" if ca.is_sydney_summarised else "No",
+                }
+            )
+        self.mcs_knowledge_composed_answers = composed_answer_rows  # type: ignore[attr-defined]
+
+        # Per-turn runtime context rows. Filter to only turns that captured
+        # at least one auxiliary signal so the table doesn't show empty rows.
+        turn_context_rows: list[dict] = []
+        for tc in getattr(timeline, "turn_contexts", []) or []:
+            # Language values are JSON-stringified OptionDataValues — extract
+            # the human-readable label when possible, fall back to raw.
+            lang_label = tc.language or ""
+            if lang_label and lang_label.startswith("{"):
+                # Best-effort: pull the `"value":"..."` substring.
+                import re as _lang_re
+                match = _lang_re.search(r'"value"\s*:\s*"([^"]+)"', lang_label)
+                if match:
+                    lang_label = match.group(1)
+            row = {
+                "turn_message": tc.triggering_user_message or "(system-initiated)",
+                "language": lang_label,
+                "previous_question": tc.previous_question or "",
+                "keyword_search_query": tc.keyword_search_query or "",
+                "search_query": tc.search_query or "",
+                "ticket_eligibility_kb": tc.ticket_eligibility_kb or "",
+                "ticket_eligibility_cb": tc.ticket_eligibility_cb or "",
+            }
+            # Skip rows where every signal is empty (defensive — shouldn't
+            # happen since flush already drops empty buckets).
+            if any(v for k, v in row.items() if k != "turn_message"):
+                turn_context_rows.append(row)
+        self.mcs_knowledge_turn_contexts = turn_context_rows  # type: ignore[attr-defined]
 
         if attributions:
             citation_suffix = (
@@ -2714,6 +2794,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_knowledge_attributions = []  # type: ignore[attr-defined]
         self.mcs_knowledge_attribution_summary = ""  # type: ignore[attr-defined]
         self.mcs_knowledge_citations = []  # type: ignore[attr-defined]
+        self.mcs_knowledge_composed_answers = []  # type: ignore[attr-defined]
+        self.mcs_knowledge_turn_contexts = []  # type: ignore[attr-defined]
         self.mcs_knowledge_turn_strip = []  # type: ignore[attr-defined]
         self.mcs_knowledge_clusters = []  # type: ignore[attr-defined]
         self.mcs_knowledge_heatmap = []  # type: ignore[attr-defined]
