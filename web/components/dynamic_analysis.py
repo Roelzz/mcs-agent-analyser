@@ -2853,6 +2853,30 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                     rx.badge("#", item["index"], color_scheme="green", variant="soft", size="1"),
                     rx.text(item["query"], font_size="13px", font_weight="600", color="var(--gray-12)", flex="1"),
                     _status_badge(item["grounding_label"], item["grounding_tone"]),
+                    # Path-taken badge with lengthy tooltip explaining the
+                    # runtime code path. Wraps in rx.tooltip so hover gives
+                    # the longer prose explanation of what the path means
+                    # and what's lost from the export.
+                    rx.tooltip(
+                        rx.badge(
+                            "🛣️ ",
+                            item["path_label"],
+                            color_scheme=rx.match(
+                                item["path_color_scheme"],
+                                ("green", "green"),
+                                ("amber", "amber"),
+                                ("blue", "blue"),
+                                ("red", "red"),
+                                "gray",
+                            ),
+                            variant="soft",
+                            size="1",
+                        ),
+                        content=item["path_tooltip"],
+                        side="bottom",
+                        align="end",
+                        delay_duration=200,
+                    ),
                     width="100%",
                     align="center",
                     spacing="2",
@@ -2868,6 +2892,13 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                     rx.text(item["duration"], font_size="12px", color="var(--gray-a8)", font_family=_MONO),
                     width="100%",
                     align="center",
+                ),
+                # Query-rewrite callout: shows the user's literal question
+                # next to the orchestrator's derived search query +
+                # keywords. Powered by `rewrite_html` (pre-rendered).
+                rx.cond(
+                    item["rewrite_html"] != "",
+                    rx.html(item["rewrite_html"]),
                 ),
                 # Phase 2a — token/cost/latency strip per turn.
                 rx.cond(
@@ -3006,6 +3037,47 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                                 max_height="320px",
                                 overflow_y="auto",
                             ),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                # 🔬 Data flow for this turn — pre-rendered HTML pipeline
+                # narrative explaining the runtime steps and what was /
+                # wasn't preserved in the export. Drops into rx.html(...)
+                # so Reflex doesn't typecheck nested components.
+                rx.cond(
+                    item["data_flow_html"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("workflow", size=12, color="var(--gray-a9)"),
+                                rx.text("Data flow for this turn", font_size="11px", color="var(--gray-a9)"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.html(item["data_flow_html"]),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                    ),
+                ),
+                # 📜 View raw trace events — activity-by-activity dump for
+                # the bounding user turn. The auditable receipt for
+                # everything else on this card.
+                rx.cond(
+                    item["raw_trace_html"] != "",
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("scroll", size=12, color="var(--gray-a9)"),
+                                rx.text("View raw trace events", font_size="11px", color="var(--gray-a9)"),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.html(item["raw_trace_html"]),
                         ),
                         collapsible=True,
                         variant="ghost",

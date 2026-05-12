@@ -199,6 +199,131 @@ def test_bot_reply_links_extracted(timeline) -> None:
     )
 
 
+def test_path_label_per_card(timeline) -> None:
+    """Each search card carries a path classifier: B = CBResponse-driven,
+    A = orchestrator + AI Builder (no snippets in export), C = inferred
+    from bot reply only."""
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _Stub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _Stub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)
+    searches = [r for r in stub.mcs_knowledge_searches if r.get("kind") == "search"]
+
+    parking_cards = [r for r in searches if "parking policy" in r["query"].lower()]
+    assert parking_cards, "expected at least one parking-policy search card"
+    assert any("Path B" in r["path_label"] for r in parking_cards), (
+        "at least one parking card should classify as Path B (CBResponse)"
+    )
+
+    parental_first = next(r for r in searches if "parental leave policy" in r["query"].lower())
+    assert "Path A" in parental_first["path_label"], (
+        f"first parental-leave card should be Path A; got {parental_first['path_label']}"
+    )
+    assert parental_first["path_color_scheme"] == "amber"
+
+
+def test_rewrite_strip_populated(timeline) -> None:
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _Stub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _Stub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)
+    card = next(
+        r
+        for r in stub.mcs_knowledge_searches
+        if r.get("kind") == "search" and "parental leave policy" in r["query"].lower()
+    )
+    rewrite = card["rewrite_html"]
+    # Both the user's literal question AND the orchestrator's derived
+    # search query must appear in the rewrite-strip block.
+    assert "How does parental leave work" in rewrite
+    assert "parental leave policy at ING" in rewrite
+
+
+def test_data_flow_html_mentions_missing_snippet_cause(timeline) -> None:
+    """Path A cards must explain in plain language that snippet bodies
+    aren't preserved in this export."""
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _Stub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _Stub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)
+    card = next(
+        r
+        for r in stub.mcs_knowledge_searches
+        if r.get("kind") == "search" and "parental leave policy" in r["query"].lower()
+    )
+    flow = card["data_flow_html"]
+    assert "fullResults" in flow
+    assert "not preserved" in flow or "not in export" in flow
+    # The KTD attribution + the answer composer should both appear.
+    assert "KnowledgeTraceData" in flow
+    assert "AI Builder" in flow
+
+
+def test_raw_trace_html_lists_step_events(timeline) -> None:
+    """Raw-trace accordion content should include the key activities for
+    a Path A card: plan step trigger, USTD/KTD, variable assignments,
+    bot message."""
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _Stub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _Stub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)
+    card = next(
+        r
+        for r in stub.mcs_knowledge_searches
+        if r.get("kind") == "search" and "parental leave policy" in r["query"].lower()
+    )
+    trace = card["raw_trace_html"]
+    # Each event type ends up rendered with its name in the trace.
+    assert "StepTriggered" in trace
+    assert "KnowledgeSearch" in trace
+    assert "BotMessage" in trace
+    assert "VariableAssignment" in trace
+
+
+def test_empty_row_cause_subline_present(timeline) -> None:
+    """Every ⚫ (no snippet body) row gets an inline cause subline so the
+    user doesn't have to hover the icon to learn why."""
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _Stub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _Stub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)
+    card = next(
+        r
+        for r in stub.mcs_knowledge_searches
+        if r.get("kind") == "search" and "parental leave policy" in r["query"].lower()
+    )
+    html = card["results_html"]
+    # Subline marker "↳" appears whenever a row has no snippet body.
+    assert "↳" in html
+    low = html.lower()
+    assert "no snippet body" in low or "from the export" in low
+
+
 def test_prompt_response_text_harvested(timeline) -> None:
     """Every PromptResponse-shaped variable assignment in the fixture
     carries a `text` field — that's the AI Builder model's actual output

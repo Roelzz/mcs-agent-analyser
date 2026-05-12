@@ -1085,18 +1085,20 @@ class UploadMixin(rx.State, mixin=True):
 
         # --- Build per-turn bot-reply text map (Phase 1c) ---
         # Walk timeline events in order, attributing each BOT_MESSAGE to the
-        # most recent USER_MESSAGE turn. Cap reply text per turn at 800 chars
-        # for the inline preview; the full body still lives in the
-        # Conversation tab. Reflex state-var size matters for hot paths.
+        # most recent USER_MESSAGE turn. Same walk also builds
+        # `events_by_turn` for the per-card raw-trace accordion.
         import re as _re
         bot_reply_by_turn: dict[str, str] = {}
+        events_by_turn: dict[str, list] = {}
         current_turn: str | None = None
         user_re = _re.compile(r'^User: "(.*)"$')
         for ev in getattr(timeline, "events", []) or []:
             if ev.event_type == EventType.USER_MESSAGE:
                 m = user_re.match(ev.summary or "")
                 current_turn = m.group(1) if m else (ev.summary or "").removeprefix("User: ").strip().strip('"')
-            elif ev.event_type == EventType.BOT_MESSAGE and current_turn is not None:
+            if current_turn is not None:
+                events_by_turn.setdefault(current_turn, []).append(ev)
+            if ev.event_type == EventType.BOT_MESSAGE and current_turn is not None:
                 text = (ev.summary or "").removeprefix("Bot: ").strip()
                 if text:
                     existing = bot_reply_by_turn.get(current_turn, "")
@@ -1151,6 +1153,18 @@ class UploadMixin(rx.State, mixin=True):
                 bits.append(f"{slot['credits']:.1f} credits")
             return " · ".join(bits)
 
+        # --- Per-turn knowledge-attribution + per-turn LLM-call lookups ---
+        # `ktd_by_turn` lets the data-flow narrative cite "runtime cited
+        # Source X" without re-walking the attributions list.
+        # `metrics_calls_by_turn` keeps each LLM invocation as a distinct
+        # entry (the existing `metrics_by_turn` is an aggregate-only sum).
+        ktd_by_turn: dict[str, list] = {}
+        for a_obj in attributions:
+            ktd_by_turn.setdefault(a_obj.triggering_user_message or "", []).append(a_obj)
+        metrics_calls_by_turn: dict[str, list] = {}
+        for m_obj in metrics:
+            metrics_calls_by_turn.setdefault(m_obj.triggering_user_message or "", []).append(m_obj)
+
         # --- Outcome tone per turn (Phase 1d) ---
         # Drives the colored left border on each search card and the
         # turn-strip chips above. Computed once and reused.
@@ -1179,6 +1193,280 @@ class UploadMixin(rx.State, mixin=True):
             if any(r.result_type == "bot_reply_link" for r in ks.search_results):
                 return "info"
             return "neutral"
+
+        # --- Path classifier per card ---
+        # The runtime has three distinct grounded-answer code paths. We
+        # can't read them out of the trace directly, but we can derive
+        # which one fired by inspecting the result-row provenance.
+        def _path_for(ks) -> tuple[str, str, str]:
+            """Returns (badge_label, badge_tooltip, badge_color_scheme)."""
+            has_citation = any(r.result_type == "citation" for r in ks.search_results)
+            has_kt = any(r.result_type == "kt_attribution" for r in ks.search_results)
+            has_reply = any(r.result_type == "bot_reply_link" for r in ks.search_results)
+            if has_citation:
+                return (
+                    "Path B · CBResponse SAS",
+                    "The runtime took the Conversational boosting topic's "
+                    "SearchAndSummarizeContent node. Search hits were written "
+                    "to Global.CBResponse.Text.CitationSources[] so the full "
+                    "snippet bodies are preserved in the export. This is the "
+                    "gold-standard path — you see what the bot saw.",
+                    "green",
+                )
+            if has_kt:
+                return (
+                    "Path A · orchestrator + LLM",
+                    "The orchestrator's UniversalSearchTool ran the search "
+                    "and an AI Builder model composed the answer. The "
+                    "runtime's trace ships the cited source name(s) via "
+                    "KnowledgeTraceData but Microsoft did not preserve the "
+                    "snippet bodies (fullResults[] is empty). The model "
+                    "consumed them in-flight; they are gone from the export.",
+                    "amber",
+                )
+            if has_reply:
+                return (
+                    "Path C · reply-link only",
+                    "Neither CBResponse nor KnowledgeTraceData fired for "
+                    "this turn. The only grounding evidence comes from "
+                    "URLs the bot embedded in its final reply text. "
+                    "Inferred citation — treat with caution.",
+                    "blue",
+                )
+            return (
+                "Path X · no evidence",
+                "No KTD attribution, no CBResponse citations, no markdown "
+                "links in the bot's reply text. Either the runtime didn't "
+                "answer with knowledge (e.g. the AnswerNotFoundInSearchResults "
+                "case) or every signal was dropped by the export.",
+                "red",
+            )
+
+        # --- Pre-rendered per-turn HTML helpers ---
+        # All three of these are HTML strings so the rendered card can
+        # use `rx.html(...)` and bypass Reflex's nested-foreach typing
+        # constraints (lessons from PR #28).
+        import html as _html_esc
+
+        def _rewrite_strip_html(ks) -> str:
+            user_msg = ks.triggering_user_message or ""
+            q = ks.search_query or ""
+            kw = ks.search_keywords or ""
+            if not (q or kw):
+                return ""
+            parts = []
+            if user_msg:
+                parts.append(
+                    f'<span style="color:var(--gray-a9)">💬</span> '
+                    f'<em>{_html_esc.escape(user_msg)}</em>'
+                )
+            if q:
+                arrow = " <span style=\"color:var(--gray-a7)\">→</span> " if parts else ""
+                parts.append(
+                    f'{arrow}<span style="color:var(--gray-a9)">🔎</span> '
+                    f'<strong>{_html_esc.escape(q)}</strong>'
+                )
+            html = (
+                '<div style="font-size:11px;color:var(--gray-11);'
+                'line-height:1.5;margin:4px 0;word-break:break-word">'
+                + "".join(parts)
+                + "</div>"
+            )
+            if kw:
+                html += (
+                    '<div style="font-size:10px;color:var(--gray-a8);'
+                    'line-height:1.4;margin:0 0 4px 16px;font-style:italic">'
+                    + f"keywords: {_html_esc.escape(kw)}"
+                    + "</div>"
+                )
+            return html
+
+        def _data_flow_html(ks) -> str:
+            """Render the per-turn pipeline narrative: user question →
+            orchestrator rewrite → search → cite → LLM compose → reply,
+            with explicit 'what's missing from the export' callouts.
+
+            Pre-rendered HTML so Reflex's `rx.html(...)` can drop it in
+            without us building a nested-foreach component tree.
+            """
+            turn = ks.triggering_user_message or ""
+            user_msg = turn
+            q = ks.search_query or ""
+            kw = ks.search_keywords or ""
+            ks_count = len(ks.knowledge_sources) if ks.knowledge_sources else 0
+            ktds = ktd_by_turn.get(turn, [])
+            cited_names = sorted(
+                {name for a in ktds for name in (a.cited_source_names or [])}
+            )
+            cited_state = (ktds[0].completion_state if ktds else "") or ""
+            calls = metrics_calls_by_turn.get(turn, [])
+            citations_this_turn = [
+                r for r in ks.search_results if r.result_type == "citation"
+            ]
+            reply_link_rows = [
+                r for r in ks.search_results if r.result_type == "bot_reply_link"
+            ]
+
+            def step(emoji: str, title: str, body: str) -> str:
+                return (
+                    '<div style="margin:6px 0;padding:6px 8px;'
+                    "background:var(--gray-a2);border-left:3px solid var(--gray-a5);"
+                    'border-radius:4px">'
+                    f'<div style="font-size:11px;font-weight:700;color:var(--gray-12)">'
+                    f"{emoji} {_html_esc.escape(title)}</div>"
+                    f'<div style="font-size:11px;color:var(--gray-11);'
+                    'line-height:1.5;margin-top:2px">'
+                    f"{body}</div></div>"
+                )
+
+            blocks: list[str] = []
+            if user_msg:
+                blocks.append(step("👤", "USER asked", f'"{_html_esc.escape(user_msg)}"'))
+            if q or kw:
+                rewrite_body = ""
+                if q:
+                    rewrite_body += (
+                        f"<code>search_query</code>: <strong>{_html_esc.escape(q)}</strong><br/>"
+                    )
+                if kw:
+                    rewrite_body += (
+                        f"<code>keywords</code>: {_html_esc.escape(kw)}"
+                    )
+                blocks.append(
+                    step(
+                        "🔀",
+                        "Orchestrator rewrote the question",
+                        rewrite_body,
+                    )
+                )
+            if ks_count:
+                blocks.append(
+                    step(
+                        "🔎",
+                        f"UniversalSearchTool searched {ks_count} sources",
+                        '<span style="color:var(--amber-11)">⚠ Microsoft\'s trace '
+                        "shipped <code>fullResults: []</code> — the runtime did "
+                        "search and got hits, but the actual document text was "
+                        "not preserved in the export for this code path.</span>",
+                    )
+                )
+            if ktds:
+                body = (
+                    f"<strong>{_html_esc.escape(cited_state or 'Answered')}</strong> · "
+                    f"cited {len(cited_names)} source"
+                    f"{'s' if len(cited_names) != 1 else ''}: "
+                    + ", ".join(f"<code>{_html_esc.escape(n)}</code>" for n in cited_names)
+                )
+                blocks.append(
+                    step(
+                        "📎",
+                        "Runtime attribution (KnowledgeTraceData)",
+                        body,
+                    )
+                )
+            for call in calls:
+                model = call.model_name or "(unknown model)"
+                in_t = call.prompt_tokens or 0
+                out_t = call.completion_tokens or 0
+                out_text = (call.text or "").strip().replace("\n", " ")
+                if len(out_text) > 220:
+                    out_text_short = out_text[:220] + " …"
+                else:
+                    out_text_short = out_text
+                label = call.variable_name or "(LLM call)"
+                # Distinguish the answer composer from the classifier
+                # heuristically by looking at the variable name.
+                if "TicketEligibility" in label:
+                    headline = "Ticket-eligibility classifier"
+                elif "lang" in label.lower() or "detectedlang" in label.lower():
+                    headline = "Language detector"
+                else:
+                    headline = "Answer composer"
+                body = (
+                    f"<strong>{_html_esc.escape(label)}</strong> · "
+                    f"model: <code>{_html_esc.escape(model)}</code> · "
+                    f"<code>{in_t:,}</code> in / <code>{out_t:,}</code> out tokens"
+                    + (
+                        f'<div style="margin-top:4px;font-style:italic">'
+                        f"⇒ {_html_esc.escape(out_text_short or '(empty output)')}"
+                        f"</div>"
+                        if out_text_short
+                        else ""
+                    )
+                )
+                blocks.append(step("🤖", headline + " (AI Builder)", body))
+            if citations_this_turn:
+                cs_body = (
+                    f"{len(citations_this_turn)} grounded snippet citation"
+                    f"{'s' if len(citations_this_turn) != 1 else ''} preserved in the "
+                    "export via <code>CBResponse.Text.CitationSources</code>. "
+                    "See the Citations card above for the full snippet bodies."
+                )
+                blocks.append(step("📚", "Citation snippets recovered", cs_body))
+            if reply_link_rows:
+                blocks.append(
+                    step(
+                        "🔗",
+                        f"{len(reply_link_rows)} URL"
+                        f"{'s' if len(reply_link_rows) != 1 else ''} mentioned in bot reply",
+                        "Inferred citations: URLs the answer composer chose to "
+                        "include in its markdown answer. Not authoritative — "
+                        "treat as a fallback when CBResponse / KTD didn't fire.",
+                    )
+                )
+            # Always close with an explicit "what's missing" block.
+            missing_bits: list[str] = []
+            if ks_count and not citations_this_turn:
+                missing_bits.append(
+                    "Actual SharePoint document snippets the answer composer "
+                    "read (this code path doesn't trace them)."
+                )
+            if not ktds:
+                missing_bits.append("Runtime attribution (KnowledgeTraceData).")
+            if missing_bits:
+                blocks.append(
+                    step(
+                        "❓",
+                        "What's missing from the export",
+                        "<ul style=\"margin:0 0 0 16px;padding:0\">"
+                        + "".join(f"<li>{m}</li>" for m in missing_bits)
+                        + "</ul>",
+                    )
+                )
+            return (
+                '<div style="font-family:var(--default-font-family);'
+                'font-size:12px">'
+                + "".join(blocks)
+                + "</div>"
+            )
+
+        def _raw_trace_html(ks) -> str:
+            """Render the activity-by-activity event log for the bounding
+            user turn. One line per event with type + summary. Trimmed
+            to events from the current turn only."""
+            turn = ks.triggering_user_message or ""
+            evs = events_by_turn.get(turn, [])
+            if not evs:
+                return ""
+            rows: list[str] = []
+            for ev in evs:
+                t = ev.event_type.value if ev.event_type else "?"
+                summary = (ev.summary or "").replace("\n", " ")
+                rows.append(
+                    f'<div style="font-family:var(--font-mono);font-size:11px;'
+                    'line-height:1.5;display:grid;grid-template-columns:1.5fr 6fr;'
+                    'gap:8px;padding:2px 0;border-bottom:1px dashed var(--gray-a3);'
+                    'word-break:break-word">'
+                    f'<span style="color:var(--gray-a9)">{_html_esc.escape(t)}</span>'
+                    f'<span style="color:var(--gray-11)">{_html_esc.escape(summary)}</span>'
+                    "</div>"
+                )
+            return (
+                '<div style="background:var(--gray-a2);border:1px solid var(--gray-a4);'
+                'border-radius:6px;padding:8px 10px;max-height:420px;overflow:auto">'
+                + "".join(rows)
+                + "</div>"
+            )
 
         self.mcs_knowledge_kpis = [  # type: ignore[attr-defined]
             {
@@ -1380,6 +1668,19 @@ class UploadMixin(rx.State, mixin=True):
                 snippet_html = ""
                 if snippet:
                     snippet_html = " — " + _html.escape(snippet)
+                # Honest one-line cause for empty (⚫) rows — promote the
+                # tooltip text to a visible subline so the user doesn't
+                # have to hover to learn why a row shows no snippet.
+                cause_subline = ""
+                if quality_icon == "⚫":
+                    cause_subline = (
+                        f'<div style="font-family:var(--default-font-family);'
+                        f"font-size:10px;color:var(--gray-a8);"
+                        f"margin-left:24px;line-height:1.5;font-style:italic;"
+                        f'word-break:break-word">'
+                        f"↳ {_html.escape(quality_tt)}"
+                        f"</div>"
+                    )
                 html_rows.append(
                     f'<div style="font-family:monospace;font-size:11px;'
                     f"color:var(--gray-11);line-height:1.6;margin:2px 0;"
@@ -1390,6 +1691,7 @@ class UploadMixin(rx.State, mixin=True):
                     f'style="cursor:help">{quality_icon}</span>'
                     f" {j}. {title_html}{snippet_html}"
                     f"</div>"
+                    + cause_subline
                 )
                 if r.url:
                     url_parts.append(r.url)
@@ -1451,6 +1753,19 @@ class UploadMixin(rx.State, mixin=True):
                     # dicts).
                     "outcome_tone": _outcome_tone(ks),
                     "border_left_css": _outcome_border_css(_outcome_tone(ks)),
+                    # Data-flow cockpit fields. Path badge classifies the
+                    # runtime code path that handled this turn; tooltip
+                    # carries the longer explanation. Rewrite strip pairs
+                    # the user's literal text with the orchestrator's
+                    # derived search query. data_flow_html is the
+                    # narrative pipeline; raw_trace_html dumps every
+                    # `state.events` entry for the turn.
+                    "path_label": _path_for(ks)[0],
+                    "path_tooltip": _path_for(ks)[1],
+                    "path_color_scheme": _path_for(ks)[2],
+                    "rewrite_html": _rewrite_strip_html(ks),
+                    "data_flow_html": _data_flow_html(ks),
+                    "raw_trace_html": _raw_trace_html(ks),
                     # Phase 2a: pre-formatted token/cost strip.
                     "metrics_strip": _metrics_strip_for(ks.triggering_user_message or ""),
                 }
