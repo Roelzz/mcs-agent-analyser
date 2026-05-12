@@ -332,6 +332,28 @@ class KnowledgeAttribution(BaseModel):
     failed_source_types: list[str] = Field(default_factory=list)
 
 
+class TurnPromptMetrics(BaseModel):
+    """Per-turn LLM resource accounting harvested from VariableAssignment
+    events whose `newValue` is a JSON blob shaped like
+    ``{"modelName": ..., "promptTokens": ..., "completionTokens": ...,
+    "costAsCopilotCredits": ...}``. Detection is shape-based, not name-based,
+    so it survives the various variable names Copilot Studio uses
+    (`Global.PromptResponse`, `Topic.TicketEligiblePromptKN`, etc.)."""
+
+    position: int = 0
+    timestamp: str | None = None
+    triggering_user_message: str | None = None
+    variable_name: str = ""
+    model_name: str | None = None
+    model_type: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    finish_reason: str | None = None
+    copilot_credits: float | None = None
+    ai_builder_credits: float | None = None
+    images_count: int | None = None
+
+
 class CitationSource(BaseModel):
     """A single citation entry harvested from a runtime variable carrying a
     `Text.CitationSources[]` blob — typically the bot's custom-RAG output
@@ -432,6 +454,7 @@ class ConversationTimeline(BaseModel):
     custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)
     knowledge_attributions: list[KnowledgeAttribution] = Field(default_factory=list)
     citation_sources: list[CitationSource] = Field(default_factory=list)
+    turn_prompt_metrics: list[TurnPromptMetrics] = Field(default_factory=list)
     tool_calls: list[ToolCall] = Field(default_factory=list)
     generative_answer_traces: list[GenerativeAnswerTrace] = Field(default_factory=list)
     # Per-activity audit table — what valueTypes / actionTypes / attachment

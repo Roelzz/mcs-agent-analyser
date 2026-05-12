@@ -20,6 +20,7 @@ from models import (
     TimelineEvent,
     ToolCall,
     ToolCallObservation,
+    TurnPromptMetrics,
 )
 
 
@@ -54,6 +55,7 @@ class _TimelineState:
     knowledge_searches: list[KnowledgeSearchInfo] = field(default_factory=list)
     knowledge_attributions: list[KnowledgeAttribution] = field(default_factory=list)
     citation_sources: list[CitationSource] = field(default_factory=list)
+    turn_prompt_metrics: list[TurnPromptMetrics] = field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = field(default_factory=list)
     pending_ks_query: dict | None = None
     pending_ks_info: KnowledgeSearchInfo | None = None
@@ -1133,6 +1135,49 @@ def _process_trace_event(
                             )
                         )
 
+            # Prompt-metrics harvest: a separate shape sharing the same
+            # VariableAssignment carrier. The newValue is a JSON blob with
+            # `modelName` + `promptTokens` (and friends). Variable names
+            # vary (Global.PromptResponse, Topic.TicketEligiblePromptKN, …)
+            # so detection is keyed on the payload shape, not the id.
+            if isinstance(raw_value, str) and "modelName" in raw_value and "promptTokens" in raw_value:
+                try:
+                    metrics_parsed = json.loads(raw_value)
+                except (json.JSONDecodeError, TypeError):
+                    metrics_parsed = None
+                if (
+                    isinstance(metrics_parsed, dict)
+                    and "modelName" in metrics_parsed
+                    and "promptTokens" in metrics_parsed
+                ):
+                    prompt_tokens = metrics_parsed.get("promptTokens")
+                    completion_tokens = metrics_parsed.get("completionTokens")
+                    images_count = metrics_parsed.get("imagesCount")
+                    copilot_credits = metrics_parsed.get("costAsCopilotCredits")
+                    ai_builder_credits = metrics_parsed.get("costAsAiBuilderCredits")
+                    state.turn_prompt_metrics.append(
+                        TurnPromptMetrics(
+                            position=position,
+                            timestamp=timestamp,
+                            triggering_user_message=state.latest_user_text,
+                            variable_name=var_id or "",
+                            model_name=metrics_parsed.get("modelName"),
+                            model_type=metrics_parsed.get("modelType"),
+                            prompt_tokens=int(prompt_tokens) if isinstance(prompt_tokens, (int, float)) else None,
+                            completion_tokens=int(completion_tokens)
+                            if isinstance(completion_tokens, (int, float))
+                            else None,
+                            finish_reason=metrics_parsed.get("finishReason"),
+                            copilot_credits=float(copilot_credits)
+                            if isinstance(copilot_credits, (int, float))
+                            else None,
+                            ai_builder_credits=float(ai_builder_credits)
+                            if isinstance(ai_builder_credits, (int, float))
+                            else None,
+                            images_count=int(images_count) if isinstance(images_count, (int, float)) else None,
+                        )
+                    )
+
         elif value_type == "DialogRedirect":
             target_id = value.get("targetDialogId", "")
             state.events.append(
@@ -1506,6 +1551,7 @@ def build_timeline(
         knowledge_searches=state.knowledge_searches,
         knowledge_attributions=state.knowledge_attributions,
         citation_sources=state.citation_sources,
+        turn_prompt_metrics=state.turn_prompt_metrics,
         custom_search_steps=state.custom_search_steps,
         tool_calls=state.tool_calls,
         generative_answer_traces=state.generative_answer_traces,

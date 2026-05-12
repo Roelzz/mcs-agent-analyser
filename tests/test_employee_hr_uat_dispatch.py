@@ -254,6 +254,30 @@ def test_dashboard_state_exposes_citations(timeline) -> None:
     assert "citation" in stub.mcs_knowledge_attribution_summary
 
 
+def test_turn_prompt_metrics_extracted(timeline) -> None:
+    _, tl = timeline
+    assert len(tl.turn_prompt_metrics) >= 7, (
+        f"Expected ≥7 turn-prompt-metrics rows, got {len(tl.turn_prompt_metrics)}"
+    )
+    first = tl.turn_prompt_metrics[0]
+    assert first.model_name == "gpt-5-chat-2025-07-14"
+    assert first.prompt_tokens is not None and first.prompt_tokens > 1000
+    assert first.completion_tokens is not None and first.completion_tokens >= 1
+    assert first.copilot_credits is not None and first.copilot_credits >= 0
+
+
+def test_turn_prompt_metrics_bound_to_turn(timeline) -> None:
+    _, tl = timeline
+    assert all(
+        m.triggering_user_message is None or m.triggering_user_message
+        for m in tl.turn_prompt_metrics
+    )
+    assert any(
+        m.triggering_user_message and "parental leave" in m.triggering_user_message.lower()
+        for m in tl.turn_prompt_metrics
+    )
+
+
 def test_dashboard_state_exposes_knowledge_attributions(timeline) -> None:
     """The dashboard Knowledge tab pulls from `mcs_knowledge_attributions`.
     If the timeline has the data but the state copy is empty, the tab
