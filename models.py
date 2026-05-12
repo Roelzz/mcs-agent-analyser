@@ -63,6 +63,48 @@ class GptInfo(BaseModel):
     conversation_starters: list[dict] = Field(default_factory=list)
 
 
+class InlinePrompt(BaseModel):
+    """A free-text prompt that lives inline in a topic action (currently only
+    `SearchAndSummarizeContent.additionalInstructions`). Distinct from
+    `AIBuilderPromptModel` whose template lives in Dataverse, not the YAML.
+    """
+
+    kind: str = "SearchAndSummarizeContent"
+    host_topic_schema: str
+    host_topic_display: str
+    action_id: str | None = None
+    text: str
+    user_input: str | None = None
+    output_variable: str | None = None
+    response_capture_type: str | None = None
+    knowledge_sources_mode: str | None = None
+    auto_send: bool | None = None
+
+
+class AIBuilderPromptModel(BaseModel):
+    """A prompt model declared at the YAML root under `aIModelDefinitions`.
+    The prompt template body is held in Dataverse and is NOT in the export,
+    so we surface the contract (name + I/O shapes) and the call-sites instead.
+    """
+
+    id: str
+    name: str
+    input_type: dict = Field(default_factory=dict)
+    output_type: dict = Field(default_factory=dict)
+
+
+class AIBuilderCallSite(BaseModel):
+    """An `InvokeAIBuilderModelAction` reference inside a topic dialog tree,
+    pointing at an `AIBuilderPromptModel` via `aIModelId`."""
+
+    model_id: str
+    host_topic_schema: str
+    host_topic_display: str
+    action_id: str | None = None
+    input_bindings: dict[str, str] = Field(default_factory=dict)
+    output_bindings: dict[str, str] = Field(default_factory=dict)
+
+
 class TopicConnection(BaseModel):
     source_schema: str
     source_display: str
@@ -103,6 +145,10 @@ class BotProfile(BaseModel):
     # Connection infrastructure (Phase 3)
     connection_references: list[dict] = Field(default_factory=list)
     connector_definitions: list[dict] = Field(default_factory=list)
+    # Static prompt assets harvested from botContent.yml
+    inline_prompts: list[InlinePrompt] = Field(default_factory=list)
+    ai_builder_models: list[AIBuilderPromptModel] = Field(default_factory=list)
+    ai_builder_call_sites: list[AIBuilderCallSite] = Field(default_factory=list)
 
 
 # --- Timeline models (from dialog.json) ---

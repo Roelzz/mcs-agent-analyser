@@ -101,6 +101,11 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_profile_conn_defs: list[dict] = []
     mcs_profile_quick_wins: list[dict] = []
     mcs_profile_trigger_overlaps: list[dict] = []
+    # Static prompt assets harvested from botContent.yml. Inline prompts are
+    # full-text (`SearchAndSummarizeContent.additionalInstructions`). AI Builder
+    # entries are stubs — the prompt template body lives in Dataverse.
+    mcs_profile_inline_prompts: list[dict] = []
+    mcs_profile_ai_builder_models: list[dict] = []
 
     # ── Tools tab (consolidated — absorbs former Topics tab) ───────────────
     mcs_tools_kpis: list[dict] = []

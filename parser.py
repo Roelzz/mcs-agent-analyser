@@ -3,7 +3,17 @@ from pathlib import Path
 
 import yaml
 
-from models import AISettings, AppInsightsConfig, BotProfile, ComponentSummary, GptInfo, TopicConnection
+from models import (
+    AIBuilderCallSite,
+    AIBuilderPromptModel,
+    AISettings,
+    AppInsightsConfig,
+    BotProfile,
+    ComponentSummary,
+    GptInfo,
+    InlinePrompt,
+    TopicConnection,
+)
 from utils import sanitize_yaml
 
 
@@ -84,6 +94,127 @@ def _extract_action_details(actions: list) -> list[dict]:
                     if isinstance(nested, list):
                         details.extend(_extract_action_details(nested))
     return details
+
+
+def _walk_prompt_artifacts(
+    actions: list,
+    host_topic_schema: str,
+    host_topic_display: str,
+) -> tuple[list[InlinePrompt], list[AIBuilderCallSite]]:
+    """Recursively walk a topic's action tree and collect inline prompts
+    (`SearchAndSummarizeContent.additionalInstructions`) and AI Builder
+    call-sites (`InvokeAIBuilderModelAction`). Nests into actions/elseActions
+    and conditions, mirroring the traversal already used by `_count_action_kinds`."""
+    inline_prompts: list[InlinePrompt] = []
+    call_sites: list[AIBuilderCallSite] = []
+    if not actions:
+        return inline_prompts, call_sites
+
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        kind = action.get("kind", "")
+
+        if kind == "SearchAndSummarizeContent":
+            text = action.get("additionalInstructions")
+            if isinstance(text, str) and text.strip():
+                ks = action.get("knowledgeSources", {}) or {}
+                inline_prompts.append(
+                    InlinePrompt(
+                        kind=kind,
+                        host_topic_schema=host_topic_schema,
+                        host_topic_display=host_topic_display,
+                        action_id=action.get("id"),
+                        text=text,
+                        user_input=action.get("userInput"),
+                        output_variable=action.get("variable"),
+                        response_capture_type=action.get("responseCaptureType"),
+                        knowledge_sources_mode=ks.get("kind") if isinstance(ks, dict) else None,
+                        auto_send=action.get("autoSend"),
+                    )
+                )
+
+        if kind == "InvokeAIBuilderModelAction":
+            model_id = action.get("aIModelId", "")
+            input_bindings: dict[str, str] = {}
+            output_bindings: dict[str, str] = {}
+            input_block = action.get("input") or {}
+            if isinstance(input_block, dict):
+                for k, v in (input_block.get("binding") or {}).items():
+                    input_bindings[str(k)] = str(v)
+            output_block = action.get("output") or {}
+            if isinstance(output_block, dict):
+                for k, v in (output_block.get("binding") or {}).items():
+                    output_bindings[str(k)] = str(v)
+            call_sites.append(
+                AIBuilderCallSite(
+                    model_id=model_id,
+                    host_topic_schema=host_topic_schema,
+                    host_topic_display=host_topic_display,
+                    action_id=action.get("id"),
+                    input_bindings=input_bindings,
+                    output_bindings=output_bindings,
+                )
+            )
+
+        for key in ("actions", "elseActions"):
+            nested = action.get(key)
+            if isinstance(nested, list):
+                nested_ip, nested_cs = _walk_prompt_artifacts(nested, host_topic_schema, host_topic_display)
+                inline_prompts.extend(nested_ip)
+                call_sites.extend(nested_cs)
+
+        for cond in action.get("conditions", []) or []:
+            if isinstance(cond, dict):
+                for key in ("actions", "elseActions"):
+                    nested = cond.get(key)
+                    if isinstance(nested, list):
+                        nested_ip, nested_cs = _walk_prompt_artifacts(nested, host_topic_schema, host_topic_display)
+                        inline_prompts.extend(nested_ip)
+                        call_sites.extend(nested_cs)
+
+    return inline_prompts, call_sites
+
+
+def _extract_ai_builder_models(data: dict) -> list[AIBuilderPromptModel]:
+    """Parse the top-level `aIModelDefinitions` block. The YAML carries only
+    stubs (id, name, inputType, outputType) — the prompt template body lives
+    in Dataverse, not in the export."""
+    models: list[AIBuilderPromptModel] = []
+    for entry in data.get("aIModelDefinitions") or []:
+        if not isinstance(entry, dict):
+            continue
+        models.append(
+            AIBuilderPromptModel(
+                id=str(entry.get("id", "")),
+                name=str(entry.get("displayName") or entry.get("name") or ""),
+                input_type=entry.get("inputType") if isinstance(entry.get("inputType"), dict) else {},
+                output_type=entry.get("outputType") if isinstance(entry.get("outputType"), dict) else {},
+            )
+        )
+    return models
+
+
+def _extract_prompt_artifacts(
+    data: dict,
+    schema_to_display: dict[str, str],
+) -> tuple[list[InlinePrompt], list[AIBuilderCallSite]]:
+    """Second-pass walk over every DialogComponent to harvest inline prompts
+    and AI Builder call-sites with their host topic resolved."""
+    all_inline: list[InlinePrompt] = []
+    all_calls: list[AIBuilderCallSite] = []
+    for comp in data.get("components", []) or []:
+        if comp.get("kind") != "DialogComponent":
+            continue
+        schema = comp.get("schemaName", "")
+        display = schema_to_display.get(schema) or comp.get("displayName") or schema
+        dialog = comp.get("dialog") or {}
+        begin_dialog = dialog.get("beginDialog") or {}
+        actions = begin_dialog.get("actions") or []
+        inline, calls = _walk_prompt_artifacts(actions, schema, display)
+        all_inline.extend(inline)
+        all_calls.extend(calls)
+    return all_inline, all_calls
 
 
 def _extract_gpt_info(comp: dict) -> GptInfo:
@@ -464,6 +595,9 @@ def _build_profile(
     topic_connections: list[TopicConnection],
     connection_references: list[dict],
     connector_definitions: list[dict],
+    inline_prompts: list[InlinePrompt],
+    ai_builder_models: list[AIBuilderPromptModel],
+    ai_builder_call_sites: list[AIBuilderCallSite],
 ) -> BotProfile:
     """Construct the final BotProfile from all parsed data."""
     env_vars = config.get("environmentVariables", []) or []
@@ -508,6 +642,9 @@ def _build_profile(
         app_insights=app_insights,
         connection_references=connection_references,
         connector_definitions=connector_definitions,
+        inline_prompts=inline_prompts,
+        ai_builder_models=ai_builder_models,
+        ai_builder_call_sites=ai_builder_call_sites,
     )
 
 
@@ -562,6 +699,10 @@ def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
     # Connection infrastructure
     connection_references, connector_definitions = _parse_connection_infrastructure(data, components)
 
+    # Static prompt artefacts (inline S&S blocks, AI Builder model stubs, call-sites)
+    ai_builder_models = _extract_ai_builder_models(data)
+    inline_prompts, ai_builder_call_sites = _extract_prompt_artifacts(data, schema_to_display)
+
     profile = _build_profile(
         entity=entity,
         config=config,
@@ -575,6 +716,9 @@ def _parse_bot_dict(data: dict) -> tuple[BotProfile, dict[str, str]]:
         topic_connections=topic_connections,
         connection_references=connection_references,
         connector_definitions=connector_definitions,
+        inline_prompts=inline_prompts,
+        ai_builder_models=ai_builder_models,
+        ai_builder_call_sites=ai_builder_call_sites,
     )
 
     return profile, schema_to_display

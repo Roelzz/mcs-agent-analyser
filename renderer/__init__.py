@@ -34,6 +34,7 @@ from .profile import (
     render_topic_settings_explained,
     render_trigger_overlaps,
 )
+from .prompts import render_prompts_section
 from .report import (
     render_credit_estimate,
     render_instruction_drift,
@@ -90,6 +91,7 @@ __all__ = [
     "render_mermaid_sequence",
     "render_orchestrator_reasoning",
     "render_phase_breakdown",
+    "render_prompts_section",
     "render_quick_wins",
     "render_report",
     "render_security_summary",
