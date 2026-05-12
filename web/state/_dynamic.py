@@ -134,6 +134,12 @@ class DynamicMixin(rx.State, mixin=True):
     # `list[dict]` so the dashboard's `rx.foreach` can render it without
     # nested-typed-var dances (see PR #28 lessons).
     mcs_knowledge_citations: list[dict] = []
+    # Phase 2c — horizontal turn-status strip (one chip per turn).
+    mcs_knowledge_turn_strip: list[dict] = []
+    # Phase 3a — clusters of turns with the same normalized user message.
+    mcs_knowledge_clusters: list[dict] = []
+    # Phase 3b — source × turn coverage heatmap (one row per knowledge source).
+    mcs_knowledge_heatmap: list[dict] = []
     mcs_knowledge_custom_steps: list[dict] = []
     mcs_knowledge_general_enabled: bool = False
     # Citation Verification panel — flat list of every (trace, citation)

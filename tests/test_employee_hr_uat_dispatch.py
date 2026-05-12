@@ -199,6 +199,58 @@ def test_bot_reply_links_extracted(timeline) -> None:
     )
 
 
+def test_dashboard_knowledge_ux_overhaul_fields(timeline) -> None:
+    """Lock the new state-row fields powering the Knowledge tab redesign:
+    outcome border, bot-reply inline, metrics strip, anchor href, turn
+    strip, clusters, and heatmap rows."""
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _StateStub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _StateStub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)
+
+    # Phase 1d — every search row has a tone + pre-rendered border CSS.
+    searches = [r for r in stub.mcs_knowledge_searches if r.get("kind") == "search"]
+    assert all(r.get("outcome_tone") in {"good", "info", "warn", "bad", "neutral"} for r in searches)
+    assert all("solid" in r.get("border_left_css", "") for r in searches)
+    # Phase 1c — bot reply text is attached when a bot reply exists for the turn.
+    parking_rows = [r for r in searches if "parking" in r["query"].lower()]
+    assert any(r.get("bot_reply_text") for r in parking_rows), (
+        "At least one parking turn should carry inline bot-reply text"
+    )
+
+    # Phase 1e — citation dedup collapses 6 raw → 4 unique entries; FAQ row
+    # records that it was cited in at least 1 turn.
+    assert len(stub.mcs_knowledge_citations) == 4
+    faq = next(r for r in stub.mcs_knowledge_citations if r["name"] == "FAQ-Parking-EN.pdf")
+    assert int(faq["cited_turn_count"]) >= 1
+
+    # Phase 1f — attribution rows carry anchor hrefs so click-through works.
+    attr_rows = stub.mcs_knowledge_attributions
+    assert any(r.get("anchor_href", "").startswith("#search-") for r in attr_rows)
+
+    # Phase 2a — metrics strip is non-empty on at least one search/turn.
+    assert any(r.get("metrics_strip") for r in attr_rows)
+
+    # Phase 2c — turn strip has one chip per unique answered turn (≤ 13).
+    assert 1 <= len(stub.mcs_knowledge_turn_strip) <= 13
+    assert all("tone" in c and "anchor_href" in c for c in stub.mcs_knowledge_turn_strip)
+
+    # Phase 3a — clusters: at least the parking question (asked 7 times in the
+    # fixture) collapses to one cluster row.
+    cluster_repr = " ".join(c["representative_turn"].lower() for c in stub.mcs_knowledge_clusters)
+    assert "parking" in cluster_repr or "parental" in cluster_repr or "internal" in cluster_repr
+
+    # Phase 3b — heatmap row per knowledge source, with a pre-rendered emoji
+    # string for the cells (no nested foreach).
+    assert len(stub.mcs_knowledge_heatmap) == 11  # 11 KnowledgeSourceComponents
+    assert all("cells_str" in r and "summary" in r for r in stub.mcs_knowledge_heatmap)
+
+
 def test_tier_badges_in_dashboard_rows(timeline) -> None:
     """Dashboard `results_text` strings carry tier prefixes (📎/📚/🔗) so
     users can distinguish snippet-backed citations from inferred ones."""
@@ -244,12 +296,17 @@ def test_dashboard_state_exposes_citations(timeline) -> None:
     stub = _StateStub()
     UploadMixin._populate_knowledge_data(stub, profile, tl)  # type: ignore[arg-type]
 
-    assert len(stub.mcs_knowledge_citations) == len(tl.citation_sources)
-    first = stub.mcs_knowledge_citations[0]
-    assert first["url"].startswith("https://")
-    assert int(first["char_count"]) > 1000
-    # Preview is truncated for snippets >400 chars.
-    assert first["snippet_preview"].endswith(" …") or len(first["snippet_full"]) <= 400
+    # Phase 1e: citation rows are deduped by (name, url) — the 6 raw
+    # CitationSources collapse to 4 unique cards (FAQ-Parking-EN.pdf and
+    # ING-employee-parking.aspx each appear in 2 turns).
+    assert len(stub.mcs_knowledge_citations) <= len(tl.citation_sources)
+    assert len(stub.mcs_knowledge_citations) == 4
+    # Find the FAQ-Parking-EN.pdf entry — it appears in turns 15 + 18 in the
+    # fixture; the deduped row should record both.
+    faq_row = next(r for r in stub.mcs_knowledge_citations if r["name"] == "FAQ-Parking-EN.pdf")
+    assert int(faq_row["cited_turn_count"]) >= 1
+    assert faq_row["url"].startswith("https://")
+    assert int(faq_row["char_count"]) > 1000
     # Citation count surfaces in the attribution summary suffix.
     assert "citation" in stub.mcs_knowledge_attribution_summary
 
