@@ -815,14 +815,14 @@ class UploadMixin(rx.State, mixin=True):
         for m in profile.ai_builder_models:
             input_fields = ", ".join(_describe_ai_model_fields(m.input_type)) or "—"
             output_fields = ", ".join(_describe_ai_model_fields(m.output_type)) or "—"
-            site_rows = [
-                {
-                    "host": cs.host_topic_display,
-                    "input_summary": ", ".join(f"{k}={v}" for k, v in cs.input_bindings.items()) or "—",
-                    "output_summary": ", ".join(f"{k}→{v}" for k, v in cs.output_bindings.items()) or "—",
-                }
-                for cs in sites_by_model.get(m.id, [])
-            ]
+            # Pre-format call-sites as a single newline-joined string so the UI
+            # can render with a flat `rx.text` instead of nested `rx.foreach`,
+            # which Reflex can't typecheck through `list[dict]` state vars.
+            site_lines: list[str] = []
+            for cs in sites_by_model.get(m.id, []):
+                in_summary = ", ".join(f"{k}={v}" for k, v in cs.input_bindings.items()) or "—"
+                out_summary = ", ".join(f"{k}→{v}" for k, v in cs.output_bindings.items()) or "—"
+                site_lines.append(f"  • {cs.host_topic_display}   in: {in_summary}   out: {out_summary}")
             model_rows.append(
                 {
                     "name": m.name,
@@ -830,7 +830,7 @@ class UploadMixin(rx.State, mixin=True):
                     "input_fields": input_fields,
                     "output_fields": output_fields,
                     "call_count": str(call_counts.get(m.id, 0)),
-                    "call_sites": site_rows,
+                    "call_sites_text": "\n".join(site_lines) if site_lines else "No call-sites detected.",
                 }
             )
         self.mcs_profile_ai_builder_models = model_rows  # type: ignore[attr-defined]

@@ -1662,7 +1662,9 @@ def _mcs_profile_inline_prompt_item(item: dict) -> rx.Component:
     return rx.accordion.item(
         header=rx.hstack(
             rx.text(item["host"], font_size="13px", font_weight="600", color="var(--gray-12)"),
-            rx.text("→ " + item["kind"], font_size="12px", color="var(--gray-a9)"),
+            # rx.foreach passes `item` as a Reflex Var; `str + Var` raises at
+            # compile time. Multi-arg rx.text() concatenates children safely.
+            rx.text("→ ", item["kind"], font_size="12px", color="var(--gray-a9)"),
             rx.text(item["len_label"], font_size="12px", color="var(--gray-a9)"),
             spacing="2",
             align="center",
@@ -1693,49 +1695,41 @@ def _mcs_profile_inline_prompt_item(item: dict) -> rx.Component:
     )
 
 
-def _mcs_profile_ai_builder_call_site_row(site: dict) -> rx.Component:
-    return _grid_row(
-        [
-            rx.text(site["host"], font_size="13px", color="var(--gray-12)"),
-            rx.text(site["input_summary"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
-            rx.text(site["output_summary"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
-        ],
-        template="1fr 2fr 2fr",
-    )
-
-
 def _mcs_profile_ai_builder_model_item(item: dict) -> rx.Component:
     """Accordion row for one `aIModelDefinitions` stub. Surfaces name + IDs +
     field-level contract; the prompt body itself lives in Dataverse."""
     return rx.accordion.item(
         header=rx.hstack(
             rx.text(item["name"], font_size="13px", font_weight="600", color="var(--gray-12)"),
-            rx.badge(item["call_count"] + " call-sites", variant="soft", color_scheme="blue", size="1"),
+            rx.badge(item["call_count"], " call-sites", variant="soft", color_scheme="blue", size="1"),
             rx.text(item["id"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
             spacing="2",
             align="center",
         ),
         content=rx.vstack(
             rx.text(
-                "Input fields: " + item["input_fields"] + " · Output fields: " + item["output_fields"],
+                "Input fields: ",
+                item["input_fields"],
+                " · Output fields: ",
+                item["output_fields"],
                 font_size="12px",
                 color="var(--gray-a9)",
                 font_family=_MONO,
             ),
-            rx.cond(
-                item["call_sites"].length() > 0,  # type: ignore[union-attr]
-                _data_table(
-                    ["Topic", "Input bindings", "Output bindings"],
-                    "1fr 2fr 2fr",
-                    item["call_sites"],
-                    _mcs_profile_ai_builder_call_site_row,
-                ),
-                rx.text(
-                    "No call-sites detected in this bot's topic dialogs.",
-                    font_size="12px",
-                    color="var(--gray-a8)",
-                    font_style="italic",
-                ),
+            # Flat pre-formatted text — Reflex can't typecheck a nested
+            # foreach through a `list[dict]` state var, so the populator
+            # joins all call-sites into a single newline-separated string.
+            rx.el.pre(
+                item["call_sites_text"],
+                font_size="12px",
+                color="var(--gray-11)",
+                white_space="pre-wrap",
+                font_family=_MONO,
+                background="var(--gray-a2)",
+                border="1px solid var(--gray-a4)",
+                border_radius="6px",
+                padding="10px",
+                width="100%",
             ),
             spacing="2",
             width="100%",
