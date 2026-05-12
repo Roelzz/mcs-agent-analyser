@@ -209,6 +209,12 @@ class DynamicMixin(rx.State, mixin=True):
     # Alignment
     mcs_ins_align_kpis: list[dict] = []
     mcs_ins_align_rows: list[dict] = []
+    # Failure Diagnosis (AgentRx-style)
+    mcs_ins_failure_kpis: list[dict] = []
+    mcs_ins_failure_summary: str = ""
+    mcs_ins_failure_fix: str = ""
+    mcs_ins_failure_rows: list[dict] = []
+    mcs_ins_failure_status: str = ""  # "succeeded" | "failed" | ""
 
     @rx.var
     def has_dynamic_sections(self) -> bool:
@@ -257,6 +263,7 @@ class DynamicMixin(rx.State, mixin=True):
             or self.mcs_ins_dead_rows
             or self.mcs_ins_dead_summary
             or self.mcs_ins_align_kpis
+            or self.mcs_ins_failure_kpis
             or self.mcs_profile_quick_wins
         )
 

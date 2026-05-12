@@ -108,6 +108,20 @@ class BotProfile(BaseModel):
 # --- Timeline models (from dialog.json) ---
 
 
+class FailureCategory(str, Enum):
+    """AgentRx-style failure taxonomy. Stable order matches the paper."""
+
+    PLAN_ADHERENCE = "PlanAdherence"
+    INVENTED_INFO = "InventedInfo"
+    INVALID_INVOCATION = "InvalidInvocation"
+    MISINTERPRETED_TOOL_OUTPUT = "MisinterpretedToolOutput"
+    INTENT_PLAN_MISALIGNMENT = "IntentPlanMisalignment"
+    UNDERSPECIFIED_INTENT = "UnderspecifiedIntent"
+    INTENT_NOT_SUPPORTED = "IntentNotSupported"
+    GUARDRAILS_TRIGGERED = "GuardrailsTriggered"
+    SYSTEM_FAILURE = "SystemFailure"
+
+
 class EventType(str, Enum):
     USER_MESSAGE = "UserMessage"
     BOT_MESSAGE = "BotMessage"

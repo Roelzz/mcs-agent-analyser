@@ -2107,6 +2107,70 @@ class UploadMixin(rx.State, mixin=True):
             else:
                 self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
                 self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
+
+            # Failure Diagnosis (AgentRx) — heuristic pass only; LLM judge is
+            # opt-in via the Audit Modes popover.
+            from failure_diagnosis import diagnose_failure
+
+            fd = diagnose_failure(profile, timeline, llm_enabled=False)
+            if fd.succeeded and not fd.violations:
+                self.mcs_ins_failure_kpis = []  # type: ignore[attr-defined]
+                self.mcs_ins_failure_status = ""  # type: ignore[attr-defined]
+                self.mcs_ins_failure_summary = ""  # type: ignore[attr-defined]
+                self.mcs_ins_failure_fix = ""  # type: ignore[attr-defined]
+                self.mcs_ins_failure_rows = []  # type: ignore[attr-defined]
+            elif fd.succeeded:
+                self.mcs_ins_failure_status = "succeeded"  # type: ignore[attr-defined]
+                self.mcs_ins_failure_kpis = [  # type: ignore[attr-defined]
+                    {"label": "Status", "value": "Succeeded", "tone": "good"},
+                    {"label": "Violations", "value": str(len(fd.violations))},
+                    {"label": "Recovered", "value": "Yes", "tone": "good"},
+                ]
+                self.mcs_ins_failure_summary = (  # type: ignore[attr-defined]
+                    f"Conversation succeeded after {len(fd.violations)} non-critical "
+                    f"violation(s) — all recovered before reaching the user."
+                )
+                self.mcs_ins_failure_fix = ""  # type: ignore[attr-defined]
+                self.mcs_ins_failure_rows = [  # type: ignore[attr-defined]
+                    {
+                        "position": str(v.position),
+                        "constraint": v.constraint_id,
+                        "severity": v.severity,
+                        "category": v.suggested_category.value if v.suggested_category else "—",
+                        "evidence": (v.evidence or "")[:120],
+                    }
+                    for v in fd.violations
+                ]
+            else:
+                d = fd.diagnosis
+                assert d is not None
+                cat = d.category.value if d.category else "Unclassified"
+                self.mcs_ins_failure_status = "failed"  # type: ignore[attr-defined]
+                self.mcs_ins_failure_kpis = [  # type: ignore[attr-defined]
+                    {"label": "Status", "value": "Failed", "tone": "danger"},
+                    {"label": "Category", "value": cat, "tone": "danger"},
+                    {
+                        "label": "Critical step",
+                        "value": str(d.critical_step_position) if d.critical_step_position is not None else "—",
+                    },
+                    {"label": "Confidence", "value": f"{d.confidence:.0%}"},
+                    {
+                        "label": "Source",
+                        "value": "LLM judge" if d.judge_used else "Heuristic",
+                    },
+                ]
+                self.mcs_ins_failure_summary = d.summary  # type: ignore[attr-defined]
+                self.mcs_ins_failure_fix = d.fix_suggestion  # type: ignore[attr-defined]
+                self.mcs_ins_failure_rows = [  # type: ignore[attr-defined]
+                    {
+                        "position": str(v.position),
+                        "constraint": v.constraint_id,
+                        "severity": v.severity,
+                        "category": v.suggested_category.value if v.suggested_category else "—",
+                        "evidence": (v.evidence or "")[:120],
+                    }
+                    for v in fd.violations
+                ]
         else:
             self.mcs_ins_dead_summary = ""  # type: ignore[attr-defined]
             self.mcs_ins_dead_rows = []  # type: ignore[attr-defined]
@@ -2115,6 +2179,11 @@ class UploadMixin(rx.State, mixin=True):
             self.mcs_ins_deleg_warnings = []  # type: ignore[attr-defined]
             self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
             self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
+            self.mcs_ins_failure_kpis = []  # type: ignore[attr-defined]
+            self.mcs_ins_failure_status = ""  # type: ignore[attr-defined]
+            self.mcs_ins_failure_summary = ""  # type: ignore[attr-defined]
+            self.mcs_ins_failure_fix = ""  # type: ignore[attr-defined]
+            self.mcs_ins_failure_rows = []  # type: ignore[attr-defined]
 
     def _clear_panel_data(self) -> None:
         """Reset all structured panel state vars."""
@@ -2202,6 +2271,11 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_ins_latency_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
         self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_failure_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_failure_status = ""  # type: ignore[attr-defined]
+        self.mcs_ins_failure_summary = ""  # type: ignore[attr-defined]
+        self.mcs_ins_failure_fix = ""  # type: ignore[attr-defined]
+        self.mcs_ins_failure_rows = []  # type: ignore[attr-defined]
 
     def new_upload(self):
         self.report_markdown = ""  # type: ignore[attr-defined]
@@ -2266,5 +2340,10 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_ins_latency_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
         self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
+        self.mcs_ins_failure_kpis = []  # type: ignore[attr-defined]
+        self.mcs_ins_failure_status = ""  # type: ignore[attr-defined]
+        self.mcs_ins_failure_summary = ""  # type: ignore[attr-defined]
+        self.mcs_ins_failure_fix = ""  # type: ignore[attr-defined]
+        self.mcs_ins_failure_rows = []  # type: ignore[attr-defined]
         self._clear_panel_data()
         return rx.redirect("/dashboard")

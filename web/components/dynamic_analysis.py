@@ -5395,6 +5395,33 @@ def _ins_align_row(item: dict) -> rx.Component:
     )
 
 
+def _ins_failure_row(item: dict) -> rx.Component:
+    return rx.grid(
+        rx.text(item["position"], font_size="12px", color="var(--gray-a9)", text_align="right"),
+        rx.text(item["constraint"], font_size="12px", color="var(--gray-12)", font_family=_MONO),
+        rx.badge(
+            item["severity"],
+            color_scheme=rx.match(
+                item["severity"],
+                ("fail", "red"),
+                ("warning", "amber"),
+                ("info", "blue"),
+                "gray",
+            ),
+            variant="soft",
+            size="1",
+        ),
+        rx.text(item["category"], font_size="12px", color="var(--gray-a10)"),
+        rx.text(item["evidence"], font_size="12px", color="var(--gray-a9)"),
+        columns="0.6fr 2fr 1fr 1.4fr 3fr",
+        gap="8px",
+        align="center",
+        padding_y="6px",
+        border_bottom=_INS_ROW_BORDER,
+        width="100%",
+    )
+
+
 def _ins_grid_header(*cols: tuple[str, str]) -> rx.Component:
     """Create a grid header row. cols = list of (label, alignment)."""
     children = [rx.text(lbl, **_INS_HEADER_CELL, text_align=align) for lbl, align in cols]
@@ -5621,6 +5648,80 @@ def _mcs_quality_panel() -> rx.Component:
                             width="100%",
                         ),
                         rx.foreach(State.mcs_ins_dead_rows, _ins_dead_row),
+                        width="100%",
+                    ),
+                ),
+                width="100%",
+            ),
+        ),
+        # ── Failure Diagnosis (AgentRx-style) ──────────────────────────────
+        rx.cond(
+            State.mcs_ins_failure_kpis.length() > 0,  # type: ignore[union-attr]
+            card(
+                _ins_card_header(
+                    "siren",
+                    "var(--red-9)",
+                    "Failure Diagnosis",
+                    "AgentRx-style critical-step localization with a 9-category root-cause taxonomy.",
+                ),
+                rx.hstack(
+                    rx.foreach(State.mcs_ins_failure_kpis, _ins_kpi),
+                    spacing="3",
+                    width="100%",
+                    overflow_x="auto",
+                    padding_y="12px",
+                ),
+                rx.cond(
+                    State.mcs_ins_failure_summary != "",
+                    rx.box(
+                        rx.text(
+                            State.mcs_ins_failure_summary,
+                            font_size="13px",
+                            color="var(--gray-12)",
+                            line_height="1.55",
+                        ),
+                        padding="10px 12px",
+                        background="var(--gray-a2)",
+                        border_radius="8px",
+                        border=f"1px solid {SURFACE_BORDER}",
+                        width="100%",
+                    ),
+                ),
+                rx.cond(
+                    State.mcs_ins_failure_fix != "",
+                    rx.box(
+                        rx.text("Suggested fix", font_size="11px", color="var(--green-11)", font_weight="700"),
+                        rx.text(
+                            State.mcs_ins_failure_fix,
+                            font_size="13px",
+                            color="var(--gray-12)",
+                            line_height="1.55",
+                        ),
+                        padding="10px 12px",
+                        background="var(--green-a2)",
+                        border_radius="8px",
+                        border="1px solid var(--green-a5)",
+                        margin_top="8px",
+                        width="100%",
+                    ),
+                ),
+                rx.cond(
+                    State.mcs_ins_failure_rows.length() > 0,  # type: ignore[union-attr]
+                    rx.box(
+                        rx.grid(
+                            rx.text("Pos", **_INS_HEADER_CELL),
+                            rx.text("Constraint", **_INS_HEADER_CELL),
+                            rx.text("Severity", **_INS_HEADER_CELL),
+                            rx.text("Category", **_INS_HEADER_CELL),
+                            rx.text("Evidence", **_INS_HEADER_CELL),
+                            columns="0.6fr 2fr 1fr 1.4fr 3fr",
+                            gap="8px",
+                            padding_y="8px",
+                            border_bottom=f"2px solid {SURFACE_BORDER}",
+                            width="100%",
+                        ),
+                        rx.foreach(State.mcs_ins_failure_rows, _ins_failure_row),
+                        margin_top="12px",
                         width="100%",
                     ),
                 ),

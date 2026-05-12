@@ -12,6 +12,7 @@ from conversation_analysis import (
     ResponseQualityReport,
     TurnEfficiencyReport,
 )
+from failure_diagnosis import FailureDiagnosisReport
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +370,75 @@ def render_instruction_alignment(report: AlignmentReport) -> str:
         lines.append("")
     else:
         lines.append("No violations detected in the analyzed conversation.")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Feature 9: Failure Diagnosis (AgentRx-style)
+# ---------------------------------------------------------------------------
+
+
+_CATEGORY_ICONS = {
+    "PlanAdherence": "🧭",
+    "InventedInfo": "🌫️",
+    "InvalidInvocation": "🛠️",
+    "MisinterpretedToolOutput": "👀",
+    "IntentPlanMisalignment": "🎯",
+    "UnderspecifiedIntent": "❓",
+    "IntentNotSupported": "🚫",
+    "GuardrailsTriggered": "🛡️",
+    "SystemFailure": "💥",
+}
+
+
+def render_failure_diagnosis(report: FailureDiagnosisReport) -> str:
+    """Render the AgentRx-style failure diagnosis as markdown."""
+    if report.succeeded and not report.violations:
+        return ""
+
+    lines: list[str] = []
+    lines.append("### Failure Diagnosis")
+    lines.append("")
+
+    if report.succeeded:
+        lines.append(
+            f"✅ **Conversation succeeded** — {len(report.violations)} non-critical "
+            f"violation(s) recorded for audit trail (all recovered)."
+        )
+        lines.append("")
+    else:
+        d = report.diagnosis
+        assert d is not None  # invariant when succeeded is False
+        cat = d.category.value if d.category else "Unclassified"
+        icon = _CATEGORY_ICONS.get(cat, "❌")
+        lines.append(f"❌ **Critical failure detected — {icon} {cat}**")
+        lines.append("")
+        lines.append("| Field | Value |")
+        lines.append("| :-- | :-- |")
+        lines.append(f"| Critical step | position {d.critical_step_position} |")
+        if d.root_cause_position is not None and d.root_cause_position != d.critical_step_position:
+            lines.append(f"| Root-cause step | position {d.root_cause_position} |")
+        lines.append(f"| Confidence | {d.confidence:.0%} |")
+        lines.append(f"| Source | {'LLM judge' if d.judge_used else 'Heuristic engine'} |")
+        lines.append("")
+        if d.summary:
+            lines.append(f"**Summary.** {d.summary}")
+            lines.append("")
+        if d.fix_suggestion:
+            lines.append(f"**Suggested fix.** {d.fix_suggestion}")
+            lines.append("")
+
+    if report.violations:
+        lines.append("#### Violation log")
+        lines.append("")
+        lines.append("| Position | Constraint | Severity | Suggested category | Evidence |")
+        lines.append("| --: | :-- | :-- | :-- | :-- |")
+        for v in report.violations:
+            cat = v.suggested_category.value if v.suggested_category else "—"
+            evidence = (v.evidence or "").replace("|", "\\|")[:120]
+            lines.append(f"| {v.position} | `{v.constraint_id}` | {v.severity} | {cat} | {evidence} |")
         lines.append("")
 
     return "\n".join(lines)

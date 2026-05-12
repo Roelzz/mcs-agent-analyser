@@ -221,14 +221,22 @@ def build_audit_payload(
 
 async def _audit_openai(api_key: str, model_id: str, system_prompt: str, user_content: str) -> str:
     client = AsyncOpenAI(api_key=api_key)
-    response = await client.chat.completions.create(
-        model=model_id,
-        temperature=0.3,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+    try:
+        response = await client.chat.completions.create(
+            model=model_id, temperature=0.3, messages=messages
+        )
+    except Exception as exc:  # noqa: BLE001 — narrow check on exception text
+        # Reasoning / GPT-5-class models reject custom temperature with
+        # `unsupported_value` and only accept the default. Retry without it.
+        msg = str(exc).lower()
+        if "temperature" not in msg or "unsupported" not in msg:
+            raise
+        logger.info(f"Model '{model_id}' rejected custom temperature; retrying with default")
+        response = await client.chat.completions.create(model=model_id, messages=messages)
     return response.choices[0].message.content or ""
 
 

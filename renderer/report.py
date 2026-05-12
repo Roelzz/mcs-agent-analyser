@@ -12,6 +12,7 @@ from ._helpers import (
     _sanitize_table_cell,
 )
 from model_comparison import build_comparison_markdown
+from .conversation_analysis import render_failure_diagnosis
 from .knowledge import render_knowledge_search_section
 from .tools import render_tool_analysis
 from .profile import (
@@ -202,6 +203,16 @@ def render_report(
     topic_lc = render_topic_lifecycles_md(timeline)
     if topic_lc:
         sections.append(topic_lc)
+
+    # 8.4 Failure Diagnosis (AgentRx-style heuristic pass — LLM judge is
+    # opt-in via the Audit Modes popover and runs from the web layer).
+    if timeline.events:
+        from failure_diagnosis import diagnose_failure
+
+        diagnosis_report = diagnose_failure(profile, timeline, llm_enabled=False)
+        diagnosis_md = render_failure_diagnosis(diagnosis_report)
+        if diagnosis_md:
+            sections.append(diagnosis_md)
 
     # --- Inventories (static capabilities) ---
 
