@@ -1656,6 +1656,93 @@ def _mcs_profile_overlap_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_profile_inline_prompt_item(item: dict) -> rx.Component:
+    """Accordion row for one `SearchAndSummarizeContent.additionalInstructions`
+    prompt body."""
+    return rx.accordion.item(
+        header=rx.hstack(
+            rx.text(item["host"], font_size="13px", font_weight="600", color="var(--gray-12)"),
+            rx.text("→ " + item["kind"], font_size="12px", color="var(--gray-a9)"),
+            rx.text(item["len_label"], font_size="12px", color="var(--gray-a9)"),
+            spacing="2",
+            align="center",
+        ),
+        content=rx.vstack(
+            rx.cond(
+                item["meta_summary"] != "",
+                rx.text(item["meta_summary"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+            ),
+            rx.el.pre(
+                item["text"],
+                font_size="12px",
+                color="var(--gray-11)",
+                white_space="pre-wrap",
+                word_break="break-word",
+                font_family=_MONO,
+                background="var(--gray-a2)",
+                border="1px solid var(--gray-a4)",
+                border_radius="6px",
+                padding="12px",
+                max_height="400px",
+                overflow_y="auto",
+                width="100%",
+            ),
+            spacing="2",
+            width="100%",
+        ),
+    )
+
+
+def _mcs_profile_ai_builder_call_site_row(site: dict) -> rx.Component:
+    return _grid_row(
+        [
+            rx.text(site["host"], font_size="13px", color="var(--gray-12)"),
+            rx.text(site["input_summary"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(site["output_summary"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+        ],
+        template="1fr 2fr 2fr",
+    )
+
+
+def _mcs_profile_ai_builder_model_item(item: dict) -> rx.Component:
+    """Accordion row for one `aIModelDefinitions` stub. Surfaces name + IDs +
+    field-level contract; the prompt body itself lives in Dataverse."""
+    return rx.accordion.item(
+        header=rx.hstack(
+            rx.text(item["name"], font_size="13px", font_weight="600", color="var(--gray-12)"),
+            rx.badge(item["call_count"] + " call-sites", variant="soft", color_scheme="blue", size="1"),
+            rx.text(item["id"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            spacing="2",
+            align="center",
+        ),
+        content=rx.vstack(
+            rx.text(
+                "Input fields: " + item["input_fields"] + " · Output fields: " + item["output_fields"],
+                font_size="12px",
+                color="var(--gray-a9)",
+                font_family=_MONO,
+            ),
+            rx.cond(
+                item["call_sites"].length() > 0,  # type: ignore[union-attr]
+                _data_table(
+                    ["Topic", "Input bindings", "Output bindings"],
+                    "1fr 2fr 2fr",
+                    item["call_sites"],
+                    _mcs_profile_ai_builder_call_site_row,
+                ),
+                rx.text(
+                    "No call-sites detected in this bot's topic dialogs.",
+                    font_size="12px",
+                    color="var(--gray-a8)",
+                    font_style="italic",
+                ),
+            ),
+            spacing="2",
+            width="100%",
+        ),
+    )
+
+
 def _mcs_profile_panel() -> rx.Component:
     return rx.vstack(
         # Instruction drift warning
@@ -1751,6 +1838,61 @@ def _mcs_profile_panel() -> rx.Component:
                     collapsible=True,
                     variant="ghost",
                     width="100%",
+                ),
+                width="100%",
+            ),
+        ),
+        # Static prompts harvested from botContent.yml
+        rx.cond(
+            (State.mcs_profile_inline_prompts.length() > 0)  # type: ignore[union-attr]
+            | (State.mcs_profile_ai_builder_models.length() > 0),  # type: ignore[union-attr]
+            card(
+                section_heading("Static Prompts"),
+                rx.text(
+                    "Prompt assets the bot author authored inside `botContent.yml`. "
+                    "Distinct from the agent system prompt above.",
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="8px",
+                ),
+                rx.cond(
+                    State.mcs_profile_inline_prompts.length() > 0,  # type: ignore[union-attr]
+                    rx.vstack(
+                        sub_heading("Inline prompts (SearchAndSummarizeContent)"),
+                        rx.accordion.root(
+                            rx.foreach(State.mcs_profile_inline_prompts, _mcs_profile_inline_prompt_item),
+                            type="multiple",
+                            collapsible=True,
+                            variant="ghost",
+                            width="100%",
+                        ),
+                        spacing="2",
+                        width="100%",
+                        padding_bottom="12px",
+                    ),
+                ),
+                rx.cond(
+                    State.mcs_profile_ai_builder_models.length() > 0,  # type: ignore[union-attr]
+                    rx.vstack(
+                        sub_heading("AI Builder prompt models"),
+                        rx.accordion.root(
+                            rx.foreach(State.mcs_profile_ai_builder_models, _mcs_profile_ai_builder_model_item),
+                            type="multiple",
+                            collapsible=True,
+                            variant="ghost",
+                            width="100%",
+                        ),
+                        rx.text(
+                            "Prompt bodies are stored in Dataverse, not in this YAML export. "
+                            "Open Copilot Studio → AI Builder → Prompts and look up by ID.",
+                            font_size="12px",
+                            color="var(--gray-a9)",
+                            font_style="italic",
+                            padding_top="6px",
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
                 ),
                 width="100%",
             ),

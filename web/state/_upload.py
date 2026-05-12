@@ -43,6 +43,24 @@ from web.state._base import _clear_bot_profile, _save_bot_profile
 from renderer.dynamic_data import build_citation_panel_rows, build_variable_tracker_rows  # noqa: E402,F401 — re-exported
 
 
+def _describe_ai_model_fields(schema: dict) -> list[str]:
+    """Flatten an `aIModelDefinitions.inputType`/`outputType` JSON-schema-ish
+    dict into a list of field names for display. Mirrors the helper in
+    `renderer/prompts.py` so the dashboard and the markdown report show the
+    same labels."""
+    if not isinstance(schema, dict):
+        return []
+    props = schema.get("properties")
+    if isinstance(props, dict) and props:
+        return list(props.keys())
+    inner = schema.get("schema")
+    if isinstance(inner, dict):
+        inner_props = inner.get("properties")
+        if isinstance(inner_props, dict) and inner_props:
+            return list(inner_props.keys())
+    return [k for k in schema.keys() if k not in {"type", "kind"}]
+
+
 class UploadMixin(rx.State, mixin=True):
     """Upload vars and handlers."""
 
@@ -761,6 +779,61 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_profile_ai_config = ai_config  # type: ignore[attr-defined]
         self.mcs_profile_instructions_len = instructions_len  # type: ignore[attr-defined]
         self.mcs_profile_starters = starters  # type: ignore[attr-defined]
+
+        # Static prompt assets (SearchAndSummarizeContent.additionalInstructions
+        # + AI Builder model stubs from `aIModelDefinitions`).
+        inline_rows: list[dict] = []
+        for ip in profile.inline_prompts:
+            meta_chips: list[str] = []
+            if ip.user_input:
+                meta_chips.append(f"userInput={ip.user_input}")
+            if ip.output_variable:
+                meta_chips.append(f"output={ip.output_variable}")
+            if ip.response_capture_type:
+                meta_chips.append(f"capture={ip.response_capture_type}")
+            if ip.knowledge_sources_mode:
+                meta_chips.append(f"ks={ip.knowledge_sources_mode}")
+            if ip.auto_send is not None:
+                meta_chips.append(f"autoSend={ip.auto_send}")
+            inline_rows.append(
+                {
+                    "host": ip.host_topic_display,
+                    "kind": ip.kind,
+                    "text": ip.text,
+                    "len_label": f"{len(ip.text):,} chars",
+                    "meta_summary": " · ".join(meta_chips),
+                }
+            )
+        self.mcs_profile_inline_prompts = inline_rows  # type: ignore[attr-defined]
+
+        from collections import Counter
+        call_counts = Counter(cs.model_id for cs in profile.ai_builder_call_sites)
+        sites_by_model: dict[str, list] = {}
+        for cs in profile.ai_builder_call_sites:
+            sites_by_model.setdefault(cs.model_id, []).append(cs)
+        model_rows: list[dict] = []
+        for m in profile.ai_builder_models:
+            input_fields = ", ".join(_describe_ai_model_fields(m.input_type)) or "—"
+            output_fields = ", ".join(_describe_ai_model_fields(m.output_type)) or "—"
+            site_rows = [
+                {
+                    "host": cs.host_topic_display,
+                    "input_summary": ", ".join(f"{k}={v}" for k, v in cs.input_bindings.items()) or "—",
+                    "output_summary": ", ".join(f"{k}→{v}" for k, v in cs.output_bindings.items()) or "—",
+                }
+                for cs in sites_by_model.get(m.id, [])
+            ]
+            model_rows.append(
+                {
+                    "name": m.name,
+                    "id": m.id,
+                    "input_fields": input_fields,
+                    "output_fields": output_fields,
+                    "call_count": str(call_counts.get(m.id, 0)),
+                    "call_sites": site_rows,
+                }
+            )
+        self.mcs_profile_ai_builder_models = model_rows  # type: ignore[attr-defined]
 
         # Security chips
         auth_display = profile.authentication_mode
@@ -2220,6 +2293,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_profile_conn_defs = []  # type: ignore[attr-defined]
         self.mcs_profile_quick_wins = []  # type: ignore[attr-defined]
         self.mcs_profile_trigger_overlaps = []  # type: ignore[attr-defined]
+        self.mcs_profile_inline_prompts = []  # type: ignore[attr-defined]
+        self.mcs_profile_ai_builder_models = []  # type: ignore[attr-defined]
         self.mcs_tools_kpis = []  # type: ignore[attr-defined]
         self.mcs_tools_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_tools_external_calls = []  # type: ignore[attr-defined]

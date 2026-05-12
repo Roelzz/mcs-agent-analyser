@@ -14,6 +14,7 @@ from ._helpers import (
 )
 from model_comparison import build_comparison_markdown
 from .knowledge import render_knowledge_search_section
+from .prompts import render_prompts_section
 from .tools import render_tool_analysis
 from .profile import (
     render_ai_config,
@@ -160,6 +161,11 @@ def render_report(
     ai_config = render_ai_config(profile)
     if ai_config:
         sections.append(ai_config)
+
+    # 3.5 Static prompts (inline SearchAndSummarize + AI Builder model stubs)
+    prompts_section = render_prompts_section(profile)
+    if prompts_section:
+        sections.append(prompts_section)
 
     # 4. Security Inventory
     security = render_security_summary(profile)
