@@ -133,6 +133,29 @@ def test_citation_sources_bound_to_user_turn(timeline) -> None:
     assert all(c.triggering_user_message for c in tl.citation_sources)
 
 
+def test_citations_attached_to_matching_searches(timeline) -> None:
+    """Cross-link: a knowledge search whose triggering turn also produced
+    CBResponse citations should carry those citations as `search_results`,
+    so the dashboard's search cards render snippet bodies instead of an
+    empty 'No Grounding' badge."""
+    _, tl = timeline
+    enriched = [ks for ks in tl.knowledge_searches if ks.search_results]
+    # 3 of 13 search turns have CBResponse data; the other 10 had bot
+    # answers without going through the citation pipeline (genuinely empty
+    # in the source data).
+    assert len(enriched) == 3, f"Expected 3 enriched searches, got {len(enriched)}"
+
+    parking_searches = [ks for ks in enriched if "parking" in (ks.triggering_user_message or "").lower()]
+    assert len(parking_searches) >= 1
+    parking_result = next(
+        (r for r in parking_searches[0].search_results if r.name == "FAQ-Parking-EN.pdf"),
+        None,
+    )
+    assert parking_result is not None
+    assert parking_result.text is not None and len(parking_result.text) > 1000
+    assert parking_result.result_type == "citation"
+
+
 def test_full_report_renders_citation_snippets(timeline) -> None:
     profile, tl = timeline
     report = render_report(profile, tl)

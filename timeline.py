@@ -305,6 +305,48 @@ def _finalize_knowledge_search(state: _TimelineState) -> None:
         state.pending_ks_errors = []
 
 
+def _attach_citations_to_searches(state: _TimelineState) -> None:
+    """Cross-link citations to orchestrator searches by triggering user turn.
+
+    Modern Copilot Studio exports ship empty `fullResults` in every
+    `UniversalSearchToolTraceData` event, so each `KnowledgeSearchInfo`
+    arrives with `search_results=[]`. The grounded snippet content for the
+    same turn lives in `CBResponse.Text.CitationSources[]` (harvested into
+    `state.citation_sources`).
+
+    This pass walks each search and attaches every citation from the same
+    turn as a synthetic `SearchResult`. Result: each search card on the
+    dashboard now renders the actual snippet text the bot received,
+    instead of "No Grounding".
+    """
+    if not state.citation_sources:
+        return
+
+    # Index citations by triggering user message — same key both streams
+    # already use, so a direct lookup matches without normalisation.
+    citations_by_turn: dict[str | None, list[CitationSource]] = {}
+    for c in state.citation_sources:
+        citations_by_turn.setdefault(c.triggering_user_message, []).append(c)
+
+    for ks in state.knowledge_searches:
+        if ks.search_results:
+            # An export that actually shipped result rows wins — don't
+            # overwrite real data with our backfill.
+            continue
+        bucket = citations_by_turn.get(ks.triggering_user_message) or []
+        if not bucket:
+            continue
+        ks.search_results = [
+            SearchResult(
+                name=c.name,
+                url=c.url,
+                text=c.text,
+                result_type="citation",
+            )
+            for c in bucket
+        ]
+
+
 def _build_phase(
     topic: str,
     value: dict,
@@ -1306,6 +1348,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
             _process_trace_event(activity, state, schema_lookup, timestamp, position)
 
     _finalize_knowledge_search(state)
+    _attach_citations_to_searches(state)
     _synthesize_orchestrator_phases(state)
 
     total_elapsed = _ms_between(state.first_timestamp, state.last_timestamp)
