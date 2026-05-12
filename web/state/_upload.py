@@ -1290,13 +1290,50 @@ class UploadMixin(rx.State, mixin=True):
             #   🔗  Tier 3 — markdown link extracted from the bot's reply
             #              text (no snippet body, inferred citation)
             # plus the existing quality icon (🟢/🟡/🔴) for snippet length.
+            #
+            # Each row is built as an HTML string with `title=` attributes
+            # on the tier + quality icons so the browser shows a native
+            # tooltip when the user hovers over them. This works around
+            # Reflex's nested-foreach typing trap — we can't put a list of
+            # per-result dicts inside the search-row dict, but we can
+            # pre-render the section as raw HTML and render with rx.html.
+            import html as _html
             result_count = len(ks.search_results)
             result_lines: list[str] = []
             url_parts: list[str] = []
+            html_rows: list[str] = []
             tier_prefix_for = {
-                "citation": "📎 ",
-                "kt_attribution": "📚 ",
-                "bot_reply_link": "🔗 ",
+                "citation": "📎",
+                "kt_attribution": "📚",
+                "bot_reply_link": "🔗",
+            }
+            tier_tooltip_for = {
+                "citation": (
+                    "Tier 1 — full snippet body from CBResponse.CitationSources. "
+                    "Gold-standard grounded evidence; you're seeing the actual "
+                    "source text the bot consumed."
+                ),
+                "kt_attribution": (
+                    "Tier 2 — source name from KnowledgeTraceData. The URL is "
+                    "the SharePoint root from botContent.yml, not the specific "
+                    "document. No snippet body — AI Builder consumed it internally "
+                    "and didn't write it back to the trace."
+                ),
+                "bot_reply_link": (
+                    "Tier 3 — URL extracted from the bot's reply text via a "
+                    "markdown-link regex. Inferred citation; treat with caution. "
+                    "Bot hallucinations (e.g. home.htmld vs home.html) appear here "
+                    "verbatim."
+                ),
+            }
+            quality_tooltip_for = {
+                "🟢": "Snippet ≥200 chars — substantial grounded passage.",
+                "🟡": "Snippet 50–199 chars — fragmentary, treat with caution.",
+                "🔴": "Snippet <50 chars — near-empty result.",
+                "⚫": (
+                    "No snippet body. Common for Tier 2/3 rows where only "
+                    "the source URL was recoverable from the export."
+                ),
             }
             for j, r in enumerate(ks.search_results[:5], 1):
                 title = r.name or r.url or f"Result {j}"
@@ -1310,13 +1347,45 @@ class UploadMixin(rx.State, mixin=True):
                 else:
                     quality_icon = "⚫"
                 tier_badge = tier_prefix_for.get(r.result_type or "", "")
+                tier_tt = tier_tooltip_for.get(r.result_type or "", "")
+                quality_tt = quality_tooltip_for.get(quality_icon, "")
                 snippet = (r.text or "").replace("\n", " ")
+                # Plain-text version kept for legacy callers / exports that
+                # don't render HTML.
                 result_lines.append(
-                    f"{tier_badge}{quality_icon} {j}. {title}" + (f" — {snippet}" if snippet else "")
+                    f"{tier_badge} {quality_icon} {j}. {title}"
+                    + (f" — {snippet}" if snippet else "")
+                )
+                # HTML version: tier + quality icons wrapped in <span title="…">
+                # for native browser tooltips. Title attributes appear on any
+                # element so they're robust to Reflex's component constraints.
+                title_html = _html.escape(title)
+                if r.url:
+                    title_html = (
+                        f'<a href="{_html.escape(r.url)}" target="_blank" '
+                        f'style="color:inherit;text-decoration:underline">'
+                        f"{title_html}</a>"
+                    )
+                snippet_html = ""
+                if snippet:
+                    snippet_html = " — " + _html.escape(
+                        snippet[:200] + ("…" if len(snippet) > 200 else "")
+                    )
+                html_rows.append(
+                    f'<div style="font-family:monospace;font-size:11px;'
+                    f"color:var(--gray-11);line-height:1.6;margin:2px 0;"
+                    f'word-break:break-word">'
+                    f'<span title="{_html.escape(tier_tt)}" '
+                    f'style="cursor:help">{tier_badge}</span>'
+                    f' <span title="{_html.escape(quality_tt)}" '
+                    f'style="cursor:help">{quality_icon}</span>'
+                    f" {j}. {title_html}{snippet_html}"
+                    f"</div>"
                 )
                 if r.url:
                     url_parts.append(r.url)
             results_text = "\n".join(result_lines) if result_lines else ""
+            results_html = "".join(html_rows) if html_rows else ""
             # Clean up efficiency string (strip markdown)
             eff_clean = ""
             if eff:
@@ -1349,6 +1418,7 @@ class UploadMixin(rx.State, mixin=True):
                     "errors": "; ".join(ks.search_errors) if ks.search_errors else "",
                     "result_count": str(result_count),
                     "results_text": results_text,
+                    "results_html": results_html,
                     "has_urls": ", ".join(url_parts) if url_parts else "",
                     # Phase 1c: inline the matching bot-reply text so the
                     # user sees what the bot actually said next to the

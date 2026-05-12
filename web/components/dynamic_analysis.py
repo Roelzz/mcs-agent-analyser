@@ -2899,9 +2899,14 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                     padding="4px 8px",
                 ),
             ),
-            # Results
+            # Results — rendered as raw HTML so each tier and quality
+            # icon can carry a native `title=` tooltip explaining the
+            # provenance and quality grade. Reflex's nested-foreach
+            # typing constraints rule out a per-result component tree, so
+            # the populator pre-renders the section as a string of div
+            # rows.
             rx.cond(
-                item["results_text"] != "",
+                item["results_html"] != "",
                 rx.box(
                     rx.hstack(
                         rx.text(item["result_count"], font_size="11px", color="var(--gray-a9)", font_weight="600"),
@@ -2910,17 +2915,7 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                         align="center",
                         margin_bottom="4px",
                     ),
-                    rx.el.pre(
-                        item["results_text"],
-                        font_size="11px",
-                        color="var(--gray-11)",
-                        white_space="pre-wrap",
-                        word_break="break-all",
-                        overflow_wrap="anywhere",
-                        font_family=_MONO,
-                        line_height="1.6",
-                        margin="0",
-                    ),
+                    rx.html(item["results_html"]),
                     background="var(--gray-a2)",
                     border=f"1px solid {SURFACE_BORDER}",
                     border_radius="6px",
