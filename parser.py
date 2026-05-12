@@ -902,8 +902,11 @@ RECOGNISED_VALUE_TYPES: dict[str, str] = {
     "DynamicPlanStepBindUpdate": "Tool-argument bindings",
     "DialogTracingInfo": "Topic-action trace",
     "UniversalSearchToolTraceData": "Knowledge-search trace",
+    "KnowledgeTraceData": "Per-turn knowledge attribution",
     "IntentRecognition": "Intent recognition",
     "ErrorCode": "Runtime error",
+    "ErrorTraceData": "Runtime error trace",
+    "GPTAnswer": "GPT answer state",
     "VariableAssignment": "Variable assignment (transcript format)",
     "DialogRedirect": "Dialog redirect (transcript format)",
     "SessionInfo": "Session metadata (transcript format)",
@@ -911,6 +914,7 @@ RECOGNISED_VALUE_TYPES: dict[str, str] = {
     "UnknownIntent": "Unknown intent (transcript format)",
     "SkillInfo": "Skill metadata (transcript format)",
     "DialogTracing": "Topic-action trace",  # alias used as `name`
+    "signin/tokenExchange": "OAuth token exchange",
 }
 
 # actionType strings inside `DialogTracingInfo.actions[]` that the parser

@@ -315,6 +315,23 @@ class CustomSearchStep(BaseModel):
     execution_time: str | None = None
 
 
+class KnowledgeAttribution(BaseModel):
+    """Per-turn knowledge attribution emitted as `KnowledgeTraceData`. Carries
+    which knowledge sources the runtime ultimately cited for a turn, plus the
+    overall completion state. Distinct from a `KnowledgeSearchInfo`: that one
+    records an orchestrator-level search; this one records the per-turn outcome
+    (one event per answered turn that touched knowledge)."""
+
+    position: int = 0
+    timestamp: str | None = None
+    triggering_user_message: str | None = None
+    completion_state: str | None = None
+    is_searched: bool = False
+    cited_source_ids: list[str] = Field(default_factory=list)
+    cited_source_names: list[str] = Field(default_factory=list)
+    failed_source_types: list[str] = Field(default_factory=list)
+
+
 # --- Tool call analysis models ---
 
 
@@ -391,6 +408,7 @@ class ConversationTimeline(BaseModel):
     total_elapsed_ms: float = 0.0
     knowledge_searches: list[KnowledgeSearchInfo] = Field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)
+    knowledge_attributions: list[KnowledgeAttribution] = Field(default_factory=list)
     tool_calls: list[ToolCall] = Field(default_factory=list)
     generative_answer_traces: list[GenerativeAnswerTrace] = Field(default_factory=list)
     # Per-activity audit table — what valueTypes / actionTypes / attachment

@@ -1073,9 +1073,10 @@ class UploadMixin(rx.State, mixin=True):
         ks_comps = [c for c in profile.components if c.kind == "KnowledgeSourceComponent"]
         file_comps = [c for c in profile.components if c.kind == "FileAttachmentComponent"]
         searches = timeline.knowledge_searches if timeline is not None else []
+        attributions = getattr(timeline, "knowledge_attributions", []) if timeline is not None else []
         custom_steps = getattr(timeline, "custom_search_steps", []) if timeline is not None else []
+        answered_turns = sum(1 for a in attributions if (a.completion_state or "").lower() == "answered")
 
-        active_count = sum(1 for c in ks_comps + file_comps if c.state == "Active")
         self.mcs_knowledge_kpis = [  # type: ignore[attr-defined]
             {
                 "label": "Knowledge Sources",
@@ -1084,8 +1085,18 @@ class UploadMixin(rx.State, mixin=True):
                 "tone": "neutral",
             },
             {"label": "File Attachments", "value": str(len(file_comps)), "hint": "Uploaded files", "tone": "neutral"},
-            {"label": "Active", "value": str(active_count), "hint": "Currently enabled", "tone": "neutral"},
-            {"label": "Searches", "value": str(len(searches)), "hint": "In this session", "tone": "neutral"},
+            {
+                "label": "Turns w/ Knowledge",
+                "value": str(len(attributions)),
+                "hint": f"{answered_turns} answered" if attributions else "in this session",
+                "tone": "good" if attributions and answered_turns == len(attributions) else "neutral",
+            },
+            {
+                "label": "Orchestrator Searches",
+                "value": str(len(searches)),
+                "hint": "In this session",
+                "tone": "neutral",
+            },
         ]
 
         # Knowledge sources table
@@ -1225,6 +1236,32 @@ class UploadMixin(rx.State, mixin=True):
                 }
             )
         self.mcs_knowledge_searches = search_rows  # type: ignore[attr-defined]
+
+        # Per-turn knowledge attribution rows. One row per answered turn that
+        # touched knowledge — distinct from orchestrator search traces above.
+        attribution_rows: list[dict] = []
+        for a in attributions:
+            state_lower = (a.completion_state or "").lower()
+            cited_str = ", ".join(a.cited_source_names) if a.cited_source_names else "—"
+            attribution_rows.append(
+                {
+                    "turn_message": a.triggering_user_message or "(system-initiated)",
+                    "completion_state": a.completion_state or "Unknown",
+                    "completion_tone": "good" if state_lower == "answered" else "bad",
+                    "is_searched": "Yes" if a.is_searched else "No",
+                    "cited_count": str(len(a.cited_source_names)),
+                    "cited_sources_str": cited_str,
+                    "failed_types_str": ", ".join(a.failed_source_types) if a.failed_source_types else "",
+                }
+            )
+        self.mcs_knowledge_attributions = attribution_rows  # type: ignore[attr-defined]
+        if attributions:
+            self.mcs_knowledge_attribution_summary = (  # type: ignore[attr-defined]
+                f"{len(attributions)} turns used knowledge · {answered_turns} answered · "
+                f"{len(searches)} orchestrator search{'es' if len(searches) != 1 else ''}"
+            )
+        else:
+            self.mcs_knowledge_attribution_summary = ""  # type: ignore[attr-defined]
 
         # Custom search steps
         self.mcs_knowledge_custom_steps = [  # type: ignore[attr-defined]
@@ -2307,6 +2344,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_knowledge_coverage = []  # type: ignore[attr-defined]
         self.mcs_knowledge_source_details = []  # type: ignore[attr-defined]
         self.mcs_knowledge_searches = []  # type: ignore[attr-defined]
+        self.mcs_knowledge_attributions = []  # type: ignore[attr-defined]
+        self.mcs_knowledge_attribution_summary = ""  # type: ignore[attr-defined]
         self.mcs_knowledge_custom_steps = []  # type: ignore[attr-defined]
         self.mcs_knowledge_general_enabled = False  # type: ignore[attr-defined]
         self.mcs_knowledge_citation_panel = []  # type: ignore[attr-defined]
