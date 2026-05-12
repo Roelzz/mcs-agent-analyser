@@ -2410,6 +2410,22 @@ def _mcs_ks_coverage_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_knowledge_attribution_row(item: dict) -> rx.Component:
+    """Per-turn knowledge attribution row. Mirrors the orchestrator-search
+    card shape but reflects the higher-level `KnowledgeTraceData` view: one
+    row per answered turn with cited sources + completion state."""
+    return _grid_row(
+        [
+            rx.text(item["turn_message"], font_size="13px", color="var(--gray-12)"),
+            _status_badge(item["completion_state"], item["completion_tone"]),
+            rx.text(item["is_searched"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["cited_count"], font_size="12px", color="var(--gray-11)", text_align="right"),
+            rx.text(item["cited_sources_str"], font_size="12px", color="var(--gray-a9)", font_family=_MONO),
+        ],
+        template="3fr 1fr 0.5fr 0.5fr 3fr",
+    )
+
+
 def _mcs_ks_item(item: dict) -> rx.Component:
     """Dispatch between group header and search card."""
     return rx.cond(
@@ -3449,6 +3465,41 @@ def _mcs_knowledge_panel() -> rx.Component:
                         ),
                         width="100%",
                     ),
+                ),
+                width="100%",
+            ),
+        ),
+        # Knowledge Usage by Turn — per-turn `KnowledgeTraceData` attribution.
+        # Sits above orchestrator searches because it's the higher-level "what
+        # did each turn end up citing?" view, while Search Results below is the
+        # "how did we get there?" detail.
+        rx.cond(
+            State.mcs_knowledge_attributions.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("list-checks", size=16, color=PRIMARY),
+                    section_heading("Knowledge Usage by Turn"),
+                    rx.spacer(),
+                    rx.badge(
+                        State.mcs_knowledge_attributions.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="blue",
+                        variant="soft",
+                        size="1",
+                    ),
+                    align="center",
+                    width="100%",
+                ),
+                rx.text(
+                    State.mcs_knowledge_attribution_summary,
+                    font_size="12px",
+                    color="var(--gray-a9)",
+                    padding_bottom="8px",
+                ),
+                _data_table(
+                    ["Turn", "State", "Searched", "# cited", "Cited sources"],
+                    "3fr 1fr 0.5fr 0.5fr 3fr",
+                    State.mcs_knowledge_attributions,
+                    _mcs_knowledge_attribution_row,
                 ),
                 width="100%",
             ),

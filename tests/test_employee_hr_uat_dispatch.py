@@ -104,3 +104,32 @@ def test_full_report_includes_recovered_signals(timeline) -> None:
     assert "20 turns used knowledge" in report
     # The error code from ErrorTraceData (was dropped).
     assert "OpenAIModelTokenLimit" in report
+
+
+def test_dashboard_state_exposes_knowledge_attributions(timeline) -> None:
+    """The dashboard Knowledge tab pulls from `mcs_knowledge_attributions`.
+    If the timeline has the data but the state copy is empty, the tab
+    silently undercounts — exactly the bug we just hit. Lock the bridge.
+
+    Calls `_populate_knowledge_data` directly so we don't have to stub
+    every sibling helper the parent dispatcher invokes."""
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _StateStub:
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+
+    stub = _StateStub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)  # type: ignore[arg-type]
+
+    assert len(stub.mcs_knowledge_attributions) == 20
+    first = stub.mcs_knowledge_attributions[0]
+    assert "HRDocumentNL" in first["cited_sources_str"]
+    assert first["completion_state"] == "Answered"
+    assert first["is_searched"] == "Yes"
+    # KPI rework: previous "Searches" tile is now split into two.
+    kpi_labels = {kpi["label"]: kpi["value"] for kpi in stub.mcs_knowledge_kpis}
+    assert kpi_labels["Turns w/ Knowledge"] == "20"
+    assert kpi_labels["Orchestrator Searches"] == "13"
+    assert "20 turns used knowledge" in stub.mcs_knowledge_attribution_summary

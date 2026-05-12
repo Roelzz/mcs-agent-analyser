@@ -123,6 +123,12 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_knowledge_coverage: list[dict] = []
     mcs_knowledge_source_details: list[dict] = []
     mcs_knowledge_searches: list[dict] = []
+    # Per-turn knowledge attribution harvested from `KnowledgeTraceData`.
+    # Distinct from `mcs_knowledge_searches`: that one is orchestrator-level
+    # search traces; this is the per-turn "did this turn use knowledge and
+    # what did it cite?" view.
+    mcs_knowledge_attributions: list[dict] = []
+    mcs_knowledge_attribution_summary: str = ""
     mcs_knowledge_custom_steps: list[dict] = []
     mcs_knowledge_general_enabled: bool = False
     # Citation Verification panel — flat list of every (trace, citation)
