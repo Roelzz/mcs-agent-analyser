@@ -199,6 +199,61 @@ def test_bot_reply_links_extracted(timeline) -> None:
     )
 
 
+def test_tools_tab_ai_builder_summary(timeline) -> None:
+    """Tools tab gains an AI Builder Calls section: one row per
+    aIModelDefinitions entry, plus runtime totals harvested from
+    TurnPromptMetrics."""
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _Stub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _Stub()
+    UploadMixin._populate_topics_data(stub, profile, tl)
+
+    # Four aIModelDefinitions in the fixture; every one gets a row.
+    assert len(stub.mcs_tools_ai_builder_summary) == 4
+    names = {r["name"] for r in stub.mcs_tools_ai_builder_summary}
+    assert "Ticket Eligibility Checker" in names
+    assert "Response Structure" in names
+
+    # The Ticket Eligibility Checker fires once per Path A turn (10 such
+    # turns) + Path B (3 turns × CB variant) ≈ 13–16 runtime calls.
+    tec = next(r for r in stub.mcs_tools_ai_builder_summary if r["name"] == "Ticket Eligibility Checker")
+    assert int(tec["runtime_call_count"]) >= 13
+    assert int(tec["call_site_count"]) == 3
+    assert "Topic.TicketEligiblePromptKN" not in tec["topics_text"]  # topics_text uses host display names, not vars
+
+
+def test_tools_tab_ai_builder_per_call(timeline) -> None:
+    """Per-call detail surfaces each runtime invocation that maps to an
+    AI Builder model via the variable_name → call-site mapping."""
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _Stub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _Stub()
+    UploadMixin._populate_topics_data(stub, profile, tl)
+
+    # At least 26 runtime calls (matches what we observed earlier).
+    assert len(stub.mcs_tools_ai_builder_calls) >= 26
+    # Spot-check one TicketEligibility row.
+    tec_row = next(
+        r
+        for r in stub.mcs_tools_ai_builder_calls
+        if r["variable_name"] == "Topic.TicketEligiblePromptKN"
+    )
+    assert tec_row["model_display"] == "Ticket Eligibility Checker"
+    assert tec_row["model_id"].startswith("b030db4e")
+    # The TicketEligibility classifier's output is always "Eligible" or "Not Eligible".
+    assert tec_row["output_preview"].strip() in {"Eligible", "Not Eligible"}
+
+
 def test_path_label_per_card(timeline) -> None:
     """Each search card carries a path classifier: B = CBResponse-driven,
     A = orchestrator + AI Builder (no snippets in export), C = inferred

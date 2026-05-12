@@ -2149,6 +2149,51 @@ def _mcs_tools_ext_detail_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_tools_ai_builder_summary_row(item: dict) -> rx.Component:
+    """One row of the AI Builder Calls summary table — per
+    aIModelDefinitions entry, with static call-site count + runtime
+    invocation totals (calls / tokens / credits)."""
+    return _grid_row(
+        [
+            rx.vstack(
+                rx.text(item["name"], font_size="13px", font_weight="600", color="var(--gray-12)"),
+                rx.text(item["id"], font_size="10px", color="var(--gray-a8)", font_family=_MONO),
+                spacing="0",
+                align="start",
+            ),
+            rx.text(item["call_site_count"], font_size="13px", color="var(--gray-11)", text_align="right"),
+            rx.text(item["runtime_call_count"], font_size="13px", color="var(--gray-12)", font_weight="600", text_align="right"),
+            rx.text(item["prompt_tokens"], font_size="12px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(item["completion_tokens"], font_size="12px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(item["credits"], font_size="13px", color=PRIMARY, font_weight="600", text_align="right"),
+            rx.text(item["topics_text"], font_size="11px", color="var(--gray-a8)"),
+        ],
+        template="3fr 0.8fr 0.8fr 1fr 1fr 1fr 3fr",
+    )
+
+
+def _mcs_tools_ai_builder_call_row(item: dict) -> rx.Component:
+    """One row per runtime AI Builder invocation. Shows turn · host
+    topic · model · token counts · output preview."""
+    return _grid_row(
+        [
+            rx.vstack(
+                rx.text(item["model_display"], font_size="12px", font_weight="600", color="var(--gray-12)"),
+                rx.text(item["host_topic"], font_size="10px", color="var(--gray-a8)"),
+                spacing="0",
+                align="start",
+            ),
+            rx.text(item["variable_name"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
+            rx.text(item["turn_message"], font_size="12px", color="var(--gray-12)"),
+            rx.text(item["prompt_tokens"], font_size="11px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(item["completion_tokens"], font_size="11px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(item["credits"], font_size="11px", color="var(--gray-11)", font_family=_MONO, text_align="right"),
+            rx.text(item["output_preview"], font_size="11px", color="var(--gray-a9)", font_style="italic"),
+        ],
+        template="2fr 2fr 2fr 0.7fr 0.7fr 0.7fr 4fr",
+    )
+
+
 def _mcs_tools_stats_row(item: dict) -> rx.Component:
     """Statistics table row for tool call analysis."""
     return _grid_row(
@@ -2237,6 +2282,103 @@ def _mcs_tools_panel() -> rx.Component:
                     "2fr 1fr 2fr 2fr",
                     State.mcs_tools_external_calls,
                     _mcs_tools_ext_detail_row,
+                ),
+                width="100%",
+            ),
+        ),
+        # AI Builder Calls — summary table (per `aIModelDefinitions` entry)
+        # + per-call detail (every runtime invocation harvested from
+        # `TurnPromptMetrics`). AI Builder calls aren't on the
+        # orchestrator-level tool surface (they fire from inside
+        # DialogComponent action trees) so they get their own card.
+        rx.cond(
+            State.mcs_tools_ai_builder_summary.length() > 0,  # type: ignore[union-attr]
+            card(
+                rx.hstack(
+                    rx.icon("brain-circuit", size=16, color=PRIMARY),
+                    section_heading("AI Builder Calls"),
+                    rx.spacer(),
+                    rx.badge(
+                        State.mcs_tools_ai_builder_summary.length().to(str),  # type: ignore[union-attr]
+                        " models",
+                        color_scheme="purple",
+                        variant="soft",
+                        size="1",
+                    ),
+                    rx.badge(
+                        State.mcs_tools_ai_builder_calls.length().to(str),  # type: ignore[union-attr]
+                        " runtime calls",
+                        color_scheme="blue",
+                        variant="soft",
+                        size="1",
+                    ),
+                    align="center",
+                    width="100%",
+                ),
+                rx.text(
+                    "Every aIModelDefinitions entry in your bot, paired with "
+                    "the runtime invocations the analyser captured from "
+                    "VariableAssignment events. Static call-sites = where the "
+                    "model is wired in the YAML; runtime calls = how many "
+                    "times it actually fired in this session.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                    padding_bottom="8px",
+                ),
+                _data_table(
+                    [
+                        "Model",
+                        "Call-sites",
+                        "Runtime calls",
+                        "Prompt tok",
+                        "Completion tok",
+                        "Credits",
+                        "Topics that fired it",
+                    ],
+                    "3fr 0.8fr 0.8fr 1fr 1fr 1fr 3fr",
+                    State.mcs_tools_ai_builder_summary,
+                    _mcs_tools_ai_builder_summary_row,
+                ),
+                rx.cond(
+                    State.mcs_tools_ai_builder_calls.length() > 0,  # type: ignore[union-attr]
+                    rx.accordion.root(
+                        rx.accordion.item(
+                            header=rx.hstack(
+                                rx.icon("list", size=12, color="var(--gray-a9)"),
+                                rx.text(
+                                    "Per-call detail (",
+                                    State.mcs_tools_ai_builder_calls.length().to(str),  # type: ignore[union-attr]
+                                    " runtime invocations)",
+                                    font_size="11px",
+                                    color="var(--gray-a9)",
+                                ),
+                                spacing="1",
+                                align="center",
+                            ),
+                            content=rx.box(
+                                _data_table(
+                                    [
+                                        "Model · host topic",
+                                        "Output variable",
+                                        "Turn",
+                                        "In tok",
+                                        "Out tok",
+                                        "Credits",
+                                        "Output preview",
+                                    ],
+                                    "2fr 2fr 2fr 0.7fr 0.7fr 0.7fr 4fr",
+                                    State.mcs_tools_ai_builder_calls,
+                                    _mcs_tools_ai_builder_call_row,
+                                ),
+                                width="100%",
+                            ),
+                        ),
+                        collapsible=True,
+                        variant="ghost",
+                        width="100%",
+                        padding_top="8px",
+                    ),
                 ),
                 width="100%",
             ),

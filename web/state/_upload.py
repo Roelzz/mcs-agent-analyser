@@ -2569,6 +2569,125 @@ class UploadMixin(rx.State, mixin=True):
         else:
             self.mcs_topics_mermaid = ""  # type: ignore[attr-defined]
 
+        # ── AI Builder Calls aggregation (Tools tab) ──────────────────
+        # Static side: profile.ai_builder_models (the 4 aIModelDefinitions
+        # from YAML) + profile.ai_builder_call_sites (8 entries showing
+        # where each model is invoked).
+        # Runtime side: timeline.turn_prompt_metrics — every LLM call the
+        # runtime executed, keyed by the output variable_name.
+        #
+        # Mapping: each call-site has output_bindings.predictionOutput
+        # = "<variable name>". Each metric has variable_name. Match the
+        # two so we can show "this runtime call invoked Model X via topic Y".
+        ai_models = list(getattr(profile, "ai_builder_models", []) or [])
+        ai_call_sites = list(getattr(profile, "ai_builder_call_sites", []) or [])
+        metrics_list = list(getattr(timeline, "turn_prompt_metrics", []) or []) if timeline else []
+
+        # var_name -> (model_id, host_topic_display). When the same
+        # variable is bound from multiple call-sites (rare), last write
+        # wins — acceptable for surface labels.
+        var_to_site: dict[str, tuple[str, str]] = {}
+        for cs in ai_call_sites:
+            for bind_value in (cs.output_bindings or {}).values():
+                if bind_value:
+                    var_to_site[bind_value] = (cs.model_id, cs.host_topic_display)
+
+        # model_id -> aggregator
+        from collections import Counter as _Counter
+        runtime_by_model: dict[str, dict] = {}
+        for m in metrics_list:
+            site = var_to_site.get(m.variable_name)
+            if not site:
+                continue
+            model_id, host = site
+            slot = runtime_by_model.setdefault(
+                model_id,
+                {
+                    "calls": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "credits": 0.0,
+                    "ai_builder_credits": 0.0,
+                    "models_used": set(),
+                    "topics": _Counter(),
+                },
+            )
+            slot["calls"] += 1
+            slot["prompt_tokens"] += m.prompt_tokens or 0
+            slot["completion_tokens"] += m.completion_tokens or 0
+            slot["total_tokens"] += (
+                m.total_tokens or ((m.prompt_tokens or 0) + (m.completion_tokens or 0))
+            )
+            slot["credits"] += m.copilot_credits or 0.0
+            slot["ai_builder_credits"] += m.ai_builder_credits or 0.0
+            if m.model_name:
+                slot["models_used"].add(m.model_name)
+            if host:
+                slot["topics"][host] += 1
+
+        static_call_count_by_model: _Counter = _Counter(cs.model_id for cs in ai_call_sites)
+
+        # Summary rows — one per defined AI Builder model. We render even
+        # models with zero runtime invocations so the user can see the
+        # full static inventory.
+        summary_rows: list[dict] = []
+        for m in ai_models:
+            slot = runtime_by_model.get(m.id) or {}
+            calls = int(slot.get("calls", 0))
+            prompt_t = int(slot.get("prompt_tokens", 0))
+            comp_t = int(slot.get("completion_tokens", 0))
+            credits = float(slot.get("credits", 0.0))
+            ai_credits = float(slot.get("ai_builder_credits", 0.0))
+            models_used = sorted(slot.get("models_used") or set())
+            topic_counter: _Counter = slot.get("topics") or _Counter()
+            topics_str = ", ".join(
+                f"{topic} ×{count}" for topic, count in topic_counter.most_common()
+            )
+            summary_rows.append(
+                {
+                    "name": m.name or "(unnamed)",
+                    "id": m.id,
+                    "call_site_count": str(static_call_count_by_model.get(m.id, 0)),
+                    "runtime_call_count": str(calls),
+                    "prompt_tokens": f"{prompt_t:,}",
+                    "completion_tokens": f"{comp_t:,}",
+                    "credits": f"{credits:.1f}",
+                    "ai_builder_credits": f"{ai_credits:.1f}",
+                    "models_used": ", ".join(models_used) if models_used else "—",
+                    "topics_text": topics_str or "—",
+                }
+            )
+        self.mcs_tools_ai_builder_summary = summary_rows  # type: ignore[attr-defined]
+
+        # Per-call detail rows — flat list, one row per runtime
+        # invocation that maps to an AI Builder model. Sorted by turn so
+        # the user can see classifier + composer firing in order.
+        model_name_by_id = {m.id: m.name for m in ai_models}
+        call_rows: list[dict] = []
+        for m in metrics_list:
+            site = var_to_site.get(m.variable_name)
+            if not site:
+                continue
+            model_id, host = site
+            output_text = (m.text or "").strip().replace("\n", " ")
+            call_rows.append(
+                {
+                    "model_display": model_name_by_id.get(model_id) or model_id,
+                    "model_id": model_id,
+                    "variable_name": m.variable_name or "—",
+                    "host_topic": host or "—",
+                    "turn_message": m.triggering_user_message or "(system-initiated)",
+                    "model_name_runtime": m.model_name or "—",
+                    "prompt_tokens": f"{m.prompt_tokens or 0:,}",
+                    "completion_tokens": f"{m.completion_tokens or 0:,}",
+                    "credits": f"{m.copilot_credits or 0.0:.2f}",
+                    "finish_reason": m.finish_reason or "—",
+                    "output_preview": output_text,
+                }
+            )
+        self.mcs_tools_ai_builder_calls = call_rows  # type: ignore[attr-defined]
+
     # ── Model tab data extraction ────────────────────────────────────────────
 
     def _populate_model_data(self, profile) -> None:
@@ -3091,6 +3210,8 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_tools_kpis = []  # type: ignore[attr-defined]
         self.mcs_tools_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_tools_external_calls = []  # type: ignore[attr-defined]
+        self.mcs_tools_ai_builder_summary = []  # type: ignore[attr-defined]
+        self.mcs_tools_ai_builder_calls = []  # type: ignore[attr-defined]
         self.mcs_tools_call_count = 0  # type: ignore[attr-defined]
         self.mcs_tools_stats_rows = []  # type: ignore[attr-defined]
         self.mcs_tools_flow_mermaid = ""  # type: ignore[attr-defined]

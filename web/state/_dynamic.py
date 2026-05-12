@@ -115,6 +115,12 @@ class DynamicMixin(rx.State, mixin=True):
     mcs_tools_call_count: int = 0
     mcs_tools_stats_rows: list[dict] = []
     mcs_tools_flow_mermaid: str = ""
+    # AI Builder Calls section — aggregates the YAML aIModelDefinitions
+    # plus their runtime invocations from TurnPromptMetrics. Sibling to
+    # External Calls; distinct because AI Builder calls fire from inside
+    # DialogComponent action trees (not orchestrator-level tool calls).
+    mcs_tools_ai_builder_summary: list[dict] = []
+    mcs_tools_ai_builder_calls: list[dict] = []
 
     # ── Knowledge tab ────────────────────────────────────────────────────────
     mcs_knowledge_kpis: list[dict] = []
