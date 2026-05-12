@@ -129,6 +129,11 @@ class DynamicMixin(rx.State, mixin=True):
     # what did it cite?" view.
     mcs_knowledge_attributions: list[dict] = []
     mcs_knowledge_attribution_summary: str = ""
+    # Citation snippets harvested from runtime variables carrying a
+    # `Text.CitationSources[]` blob (typically `Global.CBResponse`). Flat
+    # `list[dict]` so the dashboard's `rx.foreach` can render it without
+    # nested-typed-var dances (see PR #28 lessons).
+    mcs_knowledge_citations: list[dict] = []
     mcs_knowledge_custom_steps: list[dict] = []
     mcs_knowledge_general_enabled: bool = False
     # Citation Verification panel — flat list of every (trace, citation)

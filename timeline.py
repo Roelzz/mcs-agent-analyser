@@ -1,9 +1,11 @@
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from models import (
     BotProfile,
+    CitationSource,
     ConversationTimeline,
     CreditEstimate,
     CreditLineItem,
@@ -51,6 +53,7 @@ class _TimelineState:
     errors: list[str] = field(default_factory=list)
     knowledge_searches: list[KnowledgeSearchInfo] = field(default_factory=list)
     knowledge_attributions: list[KnowledgeAttribution] = field(default_factory=list)
+    citation_sources: list[CitationSource] = field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = field(default_factory=list)
     pending_ks_query: dict | None = None
     pending_ks_info: KnowledgeSearchInfo | None = None
@@ -931,6 +934,38 @@ def _process_trace_event(
                 )
             )
 
+            # Citation harvest: many custom-RAG bots (e.g. the user's
+            # Conversational boosting topic) write a JSON blob with a
+            # `Text.CitationSources[]` array into a runtime variable. The
+            # orchestrator-search trace ships empty `fullResults` in modern
+            # exports, so this is the only place the grounded snippet text
+            # survives. Detection is shape-based, not name-based, so it
+            # survives variable renames.
+            raw_value = value.get("newValue")
+            if isinstance(raw_value, str) and "CitationSources" in raw_value:
+                try:
+                    parsed = json.loads(raw_value)
+                except (json.JSONDecodeError, TypeError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    text_block = parsed.get("Text") if isinstance(parsed.get("Text"), dict) else {}
+                    sources = text_block.get("CitationSources") or []
+                    for s in sources:
+                        if not isinstance(s, dict):
+                            continue
+                        state.citation_sources.append(
+                            CitationSource(
+                                position=position,
+                                timestamp=timestamp,
+                                triggering_user_message=state.latest_user_text,
+                                citation_id=str(s.get("Id") or ""),
+                                name=s.get("Name"),
+                                url=s.get("Url"),
+                                text=s.get("Text"),
+                                source_variable=var_id or "Global.CBResponse",
+                            )
+                        )
+
         elif value_type == "DialogRedirect":
             target_id = value.get("targetDialogId", "")
             state.events.append(
@@ -1287,6 +1322,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         total_elapsed_ms=total_elapsed,
         knowledge_searches=state.knowledge_searches,
         knowledge_attributions=state.knowledge_attributions,
+        citation_sources=state.citation_sources,
         custom_search_steps=state.custom_search_steps,
         tool_calls=state.tool_calls,
         generative_answer_traces=state.generative_answer_traces,

@@ -332,6 +332,28 @@ class KnowledgeAttribution(BaseModel):
     failed_source_types: list[str] = Field(default_factory=list)
 
 
+class CitationSource(BaseModel):
+    """A single citation entry harvested from a runtime variable carrying a
+    `Text.CitationSources[]` blob — typically the bot's custom-RAG output
+    variable (e.g. `Global.CBResponse`). Each entry pairs a source name +
+    URL with the actual grounded snippet text (often several KB).
+
+    Carries the full snippet body because the orchestrator-search trace
+    (`UniversalSearchToolTraceData`) ships empty `fullResults` in many
+    modern Copilot Studio exports — citations are the only place the
+    grounded content actually survives.
+    """
+
+    position: int = 0
+    timestamp: str | None = None
+    triggering_user_message: str | None = None
+    citation_id: str | None = None
+    name: str | None = None
+    url: str | None = None
+    text: str | None = None
+    source_variable: str = "Global.CBResponse"
+
+
 # --- Tool call analysis models ---
 
 
@@ -409,6 +431,7 @@ class ConversationTimeline(BaseModel):
     knowledge_searches: list[KnowledgeSearchInfo] = Field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = Field(default_factory=list)
     knowledge_attributions: list[KnowledgeAttribution] = Field(default_factory=list)
+    citation_sources: list[CitationSource] = Field(default_factory=list)
     tool_calls: list[ToolCall] = Field(default_factory=list)
     generative_answer_traces: list[GenerativeAnswerTrace] = Field(default_factory=list)
     # Per-activity audit table — what valueTypes / actionTypes / attachment

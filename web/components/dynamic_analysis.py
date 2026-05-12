@@ -2420,6 +2420,62 @@ def _mcs_knowledge_attribution_row(item: dict) -> rx.Component:
     )
 
 
+def _mcs_knowledge_citation_card(item: dict) -> rx.Component:
+    """One citation snippet card — turn header · linked source · char-count
+    badge · 400-char preview · expandable full body. Flat layout so Reflex
+    can typecheck cleanly without nested `rx.foreach`."""
+    return card(
+        rx.vstack(
+            rx.hstack(
+                rx.icon("paperclip", size=14, color=PRIMARY),
+                rx.text(item["turn_message"], font_size="12px", font_weight="600", color="var(--gray-12)", flex="1"),
+                rx.badge(item["char_count"], " chars", color_scheme="blue", variant="soft", size="1"),
+                align="center",
+                spacing="2",
+                width="100%",
+            ),
+            rx.cond(
+                item["url"] != "",
+                rx.link(
+                    item["name"],
+                    href=item["url"],
+                    is_external=True,
+                    font_size="13px",
+                    font_weight="600",
+                    color=PRIMARY,
+                ),
+                rx.text(item["name"], font_size="13px", font_weight="600", color="var(--gray-12)"),
+            ),
+            rx.text(item["snippet_preview"], font_size="12px", color="var(--gray-a9)", font_style="italic"),
+            rx.accordion.root(
+                rx.accordion.item(
+                    header=rx.text("Full snippet", font_size="11px", color="var(--gray-a9)"),
+                    content=rx.el.pre(
+                        item["snippet_full"],
+                        font_size="11px",
+                        color="var(--gray-11)",
+                        white_space="pre-wrap",
+                        word_break="break-word",
+                        font_family=_MONO,
+                        background="var(--gray-a2)",
+                        border="1px solid var(--gray-a4)",
+                        border_radius="6px",
+                        padding="10px",
+                        max_height="320px",
+                        overflow_y="auto",
+                    ),
+                ),
+                collapsible=True,
+                variant="ghost",
+                width="100%",
+            ),
+            spacing="2",
+            width="100%",
+        ),
+        width="100%",
+    )
+
+
 def _mcs_ks_item(item: dict) -> rx.Component:
     """Dispatch between group header and search card."""
     return rx.cond(
@@ -3495,6 +3551,38 @@ def _mcs_knowledge_panel() -> rx.Component:
                     State.mcs_knowledge_attributions,
                     _mcs_knowledge_attribution_row,
                 ),
+                width="100%",
+            ),
+        ),
+        # Citation snippets — the grounded source text the bot actually
+        # received (from `Global.CBResponse.Text.CitationSources[]` or
+        # similar). Distinct from orchestrator-search rows below: many
+        # modern Copilot Studio exports ship empty `fullResults` in the
+        # search trace, so this is the only place snippets survive.
+        rx.cond(
+            State.mcs_knowledge_citations.length() > 0,  # type: ignore[union-attr]
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("paperclip", size=16, color=PRIMARY),
+                    section_heading("Citations"),
+                    rx.badge(
+                        State.mcs_knowledge_citations.length().to(str),  # type: ignore[union-attr]
+                        color_scheme="blue",
+                        variant="soft",
+                        size="1",
+                    ),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "Grounded source snippets the bot received this conversation. "
+                    "Each card links to the source URL; expand to see the full snippet body.",
+                    font_size="11px",
+                    color="var(--gray-a9)",
+                    font_style="italic",
+                ),
+                rx.foreach(State.mcs_knowledge_citations, _mcs_knowledge_citation_card),
+                spacing="3",
                 width="100%",
             ),
         ),
