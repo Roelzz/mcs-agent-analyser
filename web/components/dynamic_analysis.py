@@ -2426,30 +2426,110 @@ _TONE_CHIP_BG: dict[str, str] = {
 
 
 def _mcs_knowledge_tier_legend() -> rx.Component:
-    """Persistent legend strip that explains the tier badges + quality
-    icons appearing on every search-result row. Without it users have to
-    guess what 📎 / 📚 / 🔗 / 🟢 / 🟡 / 🔴 / ⚫ mean."""
-    bits = [
-        ("📎", "grounded snippet (CBResponse)"),
-        ("📚", "cited source (KTD attribution)"),
-        ("🔗", "URL referenced in reply"),
-        ("🟢", "snippet ≥200 chars"),
-        ("🟡", "50–199 chars"),
-        ("🔴", "<50 chars"),
-        ("⚫", "no snippet body"),
+    """Persistent legend strip explaining the tier + quality icons on
+    every search-result row. Each chip is hover-wrapped with a Reflex
+    tooltip that surfaces a paragraph-length explanation of where the
+    evidence comes from and how to interpret it."""
+    # (icon, short_label, long_tooltip) tuples. Long form is shown on
+    # hover so the legend strip stays compact for scanners.
+    bits: list[tuple[str, str, str]] = [
+        (
+            "📎",
+            "grounded snippet",
+            "Tier 1 — the bot's runtime captured the full source document "
+            "text for this result via Global.CBResponse.Text.CitationSources[].Text. "
+            "Typically 2,000–5,000 characters per citation. This is the gold-"
+            "standard evidence: you're seeing the actual snippet the bot used "
+            "to compose its answer. Appears for turns that went through the "
+            "Conversational boosting topic's SearchAndSummarizeContent node — "
+            "the only Copilot Studio path in this export that preserves snippet "
+            "bodies in the trace.",
+        ),
+        (
+            "📚",
+            "cited source (KTD)",
+            "Tier 2 — the runtime recorded that this knowledge source was "
+            "cited via KnowledgeTraceData.citedKnowledgeSources, but did NOT "
+            "trace the snippet text. The URL on this row is the SharePoint "
+            "root from your bot's botContent.yml (KnowledgeSourceComponent."
+            "source.site), not the specific document the AI Builder model "
+            "consumed. Common for turns that took the orchestrator + AI "
+            "Builder code path — the snippets flowed into the model's prompt "
+            "internally but were dropped from the export.",
+        ),
+        (
+            "🔗",
+            "reply-extracted URL",
+            "Tier 3 — this URL was found inside the bot's final reply text "
+            "by a markdown-link regex matching [label](url). It's an "
+            "INFERRED citation: the bot decided to surface this URL in its "
+            "answer, but the original source content isn't in the export. "
+            "Useful fallback when neither CBResponse nor KTD attribution "
+            "captured the source. Treat with caution: bot hallucinations "
+            "(e.g. home.htmld instead of home.html) surface here verbatim, "
+            "which is exactly the case the original 'incorrect URL' report "
+            "was about.",
+        ),
+        (
+            "🟢",
+            "snippet ≥200 chars",
+            "Snippet-length quality indicator. Green = substantial passage "
+            "(≥200 chars). High-confidence grounded evidence — you can audit "
+            "the source content directly. Driven by len(SearchResult.text).",
+        ),
+        (
+            "🟡",
+            "50–199 chars",
+            "Snippet-length quality indicator. Yellow = fragmentary (50–199 "
+            "chars). Source was cited but the captured text is too short to "
+            "fully audit the bot's claim. Treat with caution.",
+        ),
+        (
+            "🔴",
+            "<50 chars",
+            "Snippet-length quality indicator. Red = near-miss (<50 chars). "
+            "Likely a header, label, or near-empty result — the bot probably "
+            "didn't use this passage to ground its answer.",
+        ),
+        (
+            "⚫",
+            "no snippet body",
+            "No snippet body at all. Common for Tier 2 (KTD attribution) "
+            "and Tier 3 (reply-extracted URL) rows where only the source "
+            "URL was recoverable. Not a failure — just an honest 'we know "
+            "which source was queried but Microsoft didn't trace what came "
+            "back'. To see actual snippets, look at the Citations card "
+            "above (📎 rows).",
+        ),
     ]
     children = []
-    for icon, label in bits:
+    for icon, short_label, long_tooltip in bits:
+        chip = rx.hstack(
+            rx.text(icon, font_size="13px"),
+            rx.text(short_label, font_size="11px", color="var(--gray-a9)"),
+            spacing="1",
+            align="center",
+            cursor="help",
+            border_bottom="1px dotted var(--gray-a5)",
+            padding_bottom="1px",
+        )
         children.append(
-            rx.hstack(
-                rx.text(icon, font_size="13px"),
-                rx.text(label, font_size="11px", color="var(--gray-a9)"),
-                spacing="1",
-                align="center",
+            rx.tooltip(
+                chip,
+                content=long_tooltip,
+                side="bottom",
+                align="start",
+                delay_duration=200,
             )
         )
     return rx.box(
-        rx.hstack(*children, spacing="3", flex_wrap="wrap", align="center"),
+        rx.hstack(
+            rx.text("Legend", font_size="11px", color="var(--gray-a9)", font_weight="700"),
+            *children,
+            spacing="3",
+            flex_wrap="wrap",
+            align="center",
+        ),
         padding="8px 12px",
         background="var(--gray-a2)",
         border="1px solid var(--gray-a4)",
