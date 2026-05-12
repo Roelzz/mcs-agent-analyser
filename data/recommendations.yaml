@@ -1,0 +1,126 @@
+# Canned recommendations for AgentRx-style failure diagnosis.
+#
+# Loaded by diagnosis/recommendations.py. Keyed by FailureCategory.value.
+# Each entry produces a `Recommendation` with source="canned".
+#
+# Edit freely — entries here are intentionally generic but MCS-flavoured.
+# Surgical, transcript-specific suggestions come from the AI-generated
+# layer (Phase 2), not this file.
+
+recommendations:
+
+  plan_adherence_failure:
+    - title: "Tighten orchestrator instructions"
+      body: |
+        The agent skipped or added steps. Review the orchestrator's system
+        instructions for the missing step's pre-condition. If a topic is being
+        bypassed, check its trigger phrases and description for ambiguity.
+    - title: "Inspect topic redirects"
+      body: |
+        Walk the `DialogRedirect` events around the critical step. A common
+        cause is a redirect firing before the original topic completed its
+        slot-filling — the orchestrator perceives that as plan abandonment.
+
+  invention_of_new_information:
+    - title: "Enforce grounded-only responses"
+      body: |
+        Add explicit instructions like "answer only from provided knowledge"
+        and configure the generative answer node with citation requirements.
+        Without these, the model will fall back to parametric knowledge.
+    - title: "Audit knowledge source coverage"
+      body: |
+        The knowledge sources didn't return supporting facts but the bot
+        produced an answer anyway. Review the source's index freshness, the
+        confidence threshold, and whether the user's question is in scope.
+
+  invalid_invocation:
+    - title: "Validate tool argument bindings"
+      body: |
+        Inspect the tool's input slots and the auto-fill / manual binding
+        configuration in the topic. Wrong types or missing required args
+        usually trace back to a topic question that didn't capture the slot.
+    - title: "Tighten the connector schema"
+      body: |
+        If the connector schema allows nullable / loose-typed inputs, the
+        orchestrator may pass garbage. Mark required arguments as such, add
+        enum constraints where applicable.
+
+  misinterpretation_of_tool_output:
+    - title: "Add explicit empty-result handling"
+      body: |
+        The topic that consumed the tool output likely lacks an `IsBlank()`
+        or error-envelope check. Add a condition node before the success
+        branch that handles the no-result case explicitly.
+    - title: "Verify confidence + citation requirements"
+      body: |
+        Knowledge / generative-answer nodes can succeed structurally even
+        when the model misread the snippet. Bump the confidence threshold
+        and require citations to force grounded interpretation.
+
+  intent_plan_misalignment:
+    - title: "Clarify the bot's primary goal"
+      body: |
+        Re-read the orchestrator instruction: does it state the user's likely
+        intent in priority order? When two interpretations are plausible
+        (e.g. cheapest vs fastest), make the default explicit.
+    - title: "Inspect plan thrashing"
+      body: |
+        If the orchestrator re-planned with the same step set, that's the
+        signature of intent confusion. Add example "good" plans for the
+        common intent classes to the system prompt.
+
+  underspecified_user_intent:
+    - title: "Force a clarification turn"
+      body: |
+        The user's request was ambiguous and the bot guessed. Add a
+        clarification topic that triggers when key entities are missing —
+        better to ask "Paris, France or Paris, Texas?" than to pick wrong.
+    - title: "Use entity recognisers as gates"
+      body: |
+        Wire entity recognisers to topic conditions: if the required entity
+        wasn't captured, route to the slot-fill topic instead of proceeding.
+
+  intent_not_supported:
+    - title: "Add an explicit out-of-scope topic"
+      body: |
+        The user asked for a capability the bot doesn't have. Create a
+        catch-all topic that politely declines and offers an alternative
+        (search, human handoff, related capability).
+    - title: "Update conversation starters"
+      body: |
+        Make the bot's actual scope obvious from the first interaction.
+        Conversation starters double as a capability advertisement.
+
+  guardrails_triggered:
+    - title: "Review content moderation level"
+      body: |
+        A safety filter blocked a legitimate response. Check the moderation
+        configuration; if the user query is benign, lower the threshold or
+        scope it to specific input fields only.
+    - title: "Audit access-control policies"
+      body: |
+        Confirm the bot's access-control policy and connection authorisation
+        match what the user is allowed to do. Mis-scoped Dataverse roles
+        are the usual culprit.
+
+  system_failure:
+    - title: "Add retry + circuit-breaker on the failing endpoint"
+      body: |
+        Infrastructure failed (timeout, 5xx, network). Wrap the connector
+        call in a Power Automate flow with explicit retry and a fallback
+        message so the orchestrator doesn't see the raw failure.
+    - title: "Check Application Insights for upstream errors"
+      body: |
+        Cross-reference the timestamp of the critical step with Application
+        Insights traces. Often the bot is downstream of a real outage.
+
+  inconclusive:
+    - title: "Add more transcript context"
+      body: |
+        The judge couldn't decide. Re-run with the full bot export attached
+        (some categories require the orchestrator instruction to disambiguate).
+    - title: "Try the heuristic-only path"
+      body: |
+        If the LLM is genuinely undecided, the deterministic constraint
+        violations may still suggest a direction. Read them as ranked hints
+        rather than a single verdict.
