@@ -486,10 +486,9 @@ def _attach_bot_reply_links(state: _TimelineState) -> None:
         if not replies:
             continue
         existing_urls = {r.url for r in ks.search_results if r.url}
-        added = 0
         for reply in replies:
             for label, url in _extract_bot_reply_links(reply):
-                if url in existing_urls or added >= 20:
+                if url in existing_urls:
                     continue
                 existing_urls.add(url)
                 ks.search_results.append(
@@ -500,7 +499,6 @@ def _attach_bot_reply_links(state: _TimelineState) -> None:
                         result_type="bot_reply_link",
                     )
                 )
-                added += 1
 
 
 def _build_phase(
@@ -1264,7 +1262,7 @@ def _process_trace_event(
                     # most recent. Skip empty/falsy values.
                     incoming = value.get("newValue")
                     if isinstance(incoming, str) and incoming:
-                        slot[slot_key] = incoming[:200]
+                        slot[slot_key] = incoming
                     break
 
         elif value_type == "DialogRedirect":

@@ -1101,7 +1101,7 @@ class UploadMixin(rx.State, mixin=True):
                 if text:
                     existing = bot_reply_by_turn.get(current_turn, "")
                     combined = (existing + "\n\n" + text) if existing else text
-                    bot_reply_by_turn[current_turn] = combined[:1500]
+                    bot_reply_by_turn[current_turn] = combined
 
         # --- Build per-turn aggregated prompt metrics (Phase 2a) ---
         # Group `TurnPromptMetrics` by triggering_user_message and pre-format
@@ -1348,7 +1348,7 @@ class UploadMixin(rx.State, mixin=True):
                     "the source URL was recoverable from the export."
                 ),
             }
-            for j, r in enumerate(ks.search_results[:5], 1):
+            for j, r in enumerate(ks.search_results, 1):
                 title = r.name or r.url or f"Result {j}"
                 snippet_len = len(r.text or "")
                 if snippet_len >= 200:
@@ -1363,15 +1363,13 @@ class UploadMixin(rx.State, mixin=True):
                 tier_tt = tier_tooltip_for.get(r.result_type or "", "")
                 quality_tt = quality_tooltip_for.get(quality_icon, "")
                 snippet = (r.text or "").replace("\n", " ")
-                # Plain-text version kept for legacy callers / exports that
-                # don't render HTML.
                 result_lines.append(
                     f"{tier_badge} {quality_icon} {j}. {title}"
                     + (f" — {snippet}" if snippet else "")
                 )
                 # HTML version: tier + quality icons wrapped in <span title="…">
-                # for native browser tooltips. Title attributes appear on any
-                # element so they're robust to Reflex's component constraints.
+                # for native browser tooltips. Snippet body is rendered in
+                # full — no preview cap — per user requirement.
                 title_html = _html.escape(title)
                 if r.url:
                     title_html = (
@@ -1381,9 +1379,7 @@ class UploadMixin(rx.State, mixin=True):
                     )
                 snippet_html = ""
                 if snippet:
-                    snippet_html = " — " + _html.escape(
-                        snippet[:200] + ("…" if len(snippet) > 200 else "")
-                    )
+                    snippet_html = " — " + _html.escape(snippet)
                 html_rows.append(
                     f'<div style="font-family:monospace;font-size:11px;'
                     f"color:var(--gray-11);line-height:1.6;margin:2px 0;"
@@ -1507,9 +1503,8 @@ class UploadMixin(rx.State, mixin=True):
         for c in citations:
             key = (c.name or "", c.url or "")
             snippet = (c.text or "").strip()
-            preview = snippet[:400].replace("\n", " ")
-            if len(snippet) > 400:
-                preview += " …"
+            # Preview = full snippet (user explicitly disallowed truncation).
+            preview = snippet.replace("\n", " ")
             turn = c.triggering_user_message or "(system-initiated)"
             existing = seen_key_to_row.get(key)
             if existing is not None:
@@ -1553,9 +1548,8 @@ class UploadMixin(rx.State, mixin=True):
         composed_answer_rows: list[dict] = []
         for ca in getattr(timeline, "composed_answers", []) or []:
             md = (ca.markdown_content or "").strip()
-            preview = md[:600].replace("\n", " ")
-            if len(md) > 600:
-                preview += " …"
+            # Preview = full markdown body (no truncation).
+            preview = md.replace("\n", " ")
             composed_answer_rows.append(
                 {
                     "turn_message": ca.triggering_user_message or "(system-initiated)",
@@ -1619,7 +1613,8 @@ class UploadMixin(rx.State, mixin=True):
                 seen_turns.append(t)
                 tone = _outcome_tone(ks)
                 # Short label: index + first 24 chars of the turn text.
-                short = (t[:24] + "…") if len(t) > 24 else t
+                # Full label — no chip truncation; chips wrap to multi-line.
+                short = t
                 turn_strip.append(
                     {
                         "index": str(len(turn_strip) + 1),
@@ -1662,8 +1657,7 @@ class UploadMixin(rx.State, mixin=True):
                 "representative_turn": slot["representative_turn"],
                 "occurrences": str(slot["search_count"]),
                 "with_citation": str(slot["with_citation_count"]),
-                "turn_list_text": "; ".join(slot["turn_messages"][:5])
-                                  + ("…" if len(slot["turn_messages"]) > 5 else ""),
+                "turn_list_text": "; ".join(slot["turn_messages"]),
             })
         # Sort by frequency descending so the most-repeated question is first.
         cluster_rows.sort(key=lambda r: int(r["occurrences"]), reverse=True)

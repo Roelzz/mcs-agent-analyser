@@ -209,9 +209,12 @@ def render_knowledge_search_section(
                 f" · searched: {'Yes' if attribution.is_searched else 'No'}\n"
             )
             if attribution.cited_source_names:
-                shown = attribution.cited_source_names[:10]
-                tail = f" *(+{len(attribution.cited_source_names) - 10} more)*" if len(attribution.cited_source_names) > 10 else ""
-                lines.append("**Cited sources:** " + ", ".join(f"`{n}`" for n in shown) + tail + "\n")
+                # Render every cited source — no per-row truncation.
+                lines.append(
+                    "**Cited sources:** "
+                    + ", ".join(f"`{n}`" for n in attribution.cited_source_names)
+                    + "\n"
+                )
             else:
                 lines.append("**Cited sources:** _none — answer was not grounded._\n")
             if attribution.failed_source_types:

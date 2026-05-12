@@ -2613,10 +2613,7 @@ def _mcs_knowledge_heatmap_row(item: dict) -> rx.Component:
             color="var(--gray-12)",
             font_weight="600",
             min_width="180px",
-            max_width="180px",
-            overflow="hidden",
-            text_overflow="ellipsis",
-            white_space="nowrap",
+            word_break="break-word",
         ),
         rx.text(
             item["cells_str"],
