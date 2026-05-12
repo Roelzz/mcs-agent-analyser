@@ -6,8 +6,10 @@ from pathlib import Path
 import reflex as rx
 from loguru import logger
 
+from exports.citations_csv import render_citations_csv  # noqa: E402
 from instruction_store import save_snapshot  # noqa: E402
 from model_comparison import _MODEL_CATALOGUE, _resolve_catalogue_key  # noqa: E402
+from models import ConversationTimeline  # noqa: E402
 from parser import detect_trigger_overlaps, parse_dialog_json, parse_yaml, validate_connections  # noqa: E402
 from renderer import render_instruction_drift, render_report, render_transcript_report  # noqa: E402
 from renderer._helpers import _format_duration, _parse_execution_time_ms, _pct  # noqa: E402
@@ -2456,6 +2458,30 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_ins_latency_mermaid = ""  # type: ignore[attr-defined]
         self.mcs_ins_align_kpis = []  # type: ignore[attr-defined]
         self.mcs_ins_align_rows = []  # type: ignore[attr-defined]
+
+    @rx.event
+    def download_citations_csv(self):
+        timeline_json: str = self.timeline_json  # type: ignore[attr-defined]
+        if not timeline_json:
+            self.upload_error = "No analysis loaded — upload a bot export first."
+            return
+
+        try:
+            timeline = ConversationTimeline.model_validate_json(timeline_json)
+        except Exception as e:
+            logger.warning("Citations CSV: failed to rehydrate timeline: {}", e)
+            self.upload_error = "Could not load citations from the current analysis."
+            return
+
+        csv_str = render_citations_csv(timeline)
+
+        # Slug the visible bot/report title for the filename so the download
+        # is recognisable when the user analyses several bots in one session.
+        title = (self.report_title or "report").strip()  # type: ignore[attr-defined]
+        slug = "".join(c if (c.isalnum() or c in ("-", "_")) else "-" for c in title) or "report"
+        filename = f"citations-{slug}.csv"
+
+        yield rx.download(data=csv_str, filename=filename)
 
     def new_upload(self):
         self.report_markdown = ""  # type: ignore[attr-defined]
