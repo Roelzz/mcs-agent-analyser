@@ -178,20 +178,26 @@ def render_knowledge_search_section(
     # any orchestrator searches that ran during it below.
     if attributions:
         answered = sum(1 for a in attributions if (a.completion_state or "").lower() == "answered")
+        citations = getattr(timeline, "citation_sources", []) or []
+        citation_count_suffix = f" · {len(citations)} citation{'s' if len(citations) != 1 else ''}" if citations else ""
         lines.append(
             f"**{len(attributions)} turn{'s' if len(attributions) != 1 else ''} used knowledge"
             f" · {answered} answered"
-            f" · {total} orchestrator search{'es' if total != 1 else ''}**"
+            f" · {total} orchestrator search{'es' if total != 1 else ''}"
+            f"{citation_count_suffix}**"
             f" | General Knowledge: {gk}\n"
         )
 
         from collections import OrderedDict
 
-        # Index orchestrator searches by triggering user message so they can be
-        # nested under the matching attribution turn.
+        # Index orchestrator searches and citations by triggering user message
+        # so they can be nested under the matching attribution turn.
         searches_by_turn: OrderedDict[str | None, list[tuple[int, KnowledgeSearchInfo]]] = OrderedDict()
         for i, ks in enumerate(searches, 1):
             searches_by_turn.setdefault(ks.triggering_user_message, []).append((i, ks))
+        citations_by_turn: OrderedDict[str | None, list] = OrderedDict()
+        for c in citations:
+            citations_by_turn.setdefault(c.triggering_user_message, []).append(c)
 
         for attribution in attributions:
             lines.append("---\n")
@@ -210,6 +216,32 @@ def render_knowledge_search_section(
                 lines.append("**Cited sources:** _none — answer was not grounded._\n")
             if attribution.failed_source_types:
                 lines.append(f"⚠ Failed source types: {', '.join(attribution.failed_source_types)}\n")
+
+            # Citations sub-section — only the rows whose triggering turn
+            # matches this attribution. Each row shows source name + URL +
+            # first ~400 chars of snippet, with the full body in a fenced
+            # block for the source-level audit.
+            turn_citations = citations_by_turn.get(attribution.triggering_user_message, [])
+            if turn_citations:
+                lines.append(f"\n#### 📎 Citations ({len(turn_citations)})\n")
+                for j, c in enumerate(turn_citations, 1):
+                    label = c.name or c.url or f"Citation {j}"
+                    if c.url:
+                        lines.append(f"{j}. **[{label}]({c.url})**")
+                    else:
+                        lines.append(f"{j}. **{label}**")
+                    snippet = (c.text or "").strip()
+                    if snippet:
+                        preview = snippet[:400].replace("\n", " ")
+                        truncated = " …" if len(snippet) > 400 else ""
+                        lines.append(f"   > {preview}{truncated}\n")
+                        lines.append("   <details><summary>Full snippet</summary>\n")
+                        lines.append("   ```")
+                        lines.append("   " + snippet.replace("\n", "\n   "))
+                        lines.append("   ```")
+                        lines.append("   </details>\n")
+                    else:
+                        lines.append("   _No snippet text._\n")
             turn_searches = searches_by_turn.get(attribution.triggering_user_message, [])
             if turn_searches:
                 lines.append(f"\n_Orchestrator searches this turn ({len(turn_searches)}):_\n")

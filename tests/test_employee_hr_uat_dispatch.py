@@ -106,6 +106,63 @@ def test_full_report_includes_recovered_signals(timeline) -> None:
     assert "OpenAIModelTokenLimit" in report
 
 
+def test_citation_sources_extracted_from_cbresponse(timeline) -> None:
+    """`Global.CBResponse.Text.CitationSources[]` carries the actual grounded
+    snippet text — the orchestrator-search trace ships empty `fullResults` in
+    this export, so this is the only path snippets survive."""
+    _, tl = timeline
+    citations = tl.citation_sources
+    assert len(citations) >= 3, f"Expected ≥3 citations from CBResponse, got {len(citations)}"
+    first = next((c for c in citations if c.name == "FAQ-Parking-EN.pdf"), None)
+    assert first is not None, "FAQ-Parking-EN.pdf citation must be present"
+    assert first.url.startswith("https://ing.sharepoint.com/")
+    assert first.text is not None and len(first.text) > 1000, (
+        f"Snippet must be >1000 chars; got {len(first.text or '')}"
+    )
+
+
+def test_citation_sources_bound_to_user_turn(timeline) -> None:
+    _, tl = timeline
+    turns = {c.triggering_user_message for c in tl.citation_sources}
+    assert any(t and "parking" in t.lower() for t in turns), (
+        "At least one citation must be tied to a parking-related turn"
+    )
+    assert any(t and "parental" in t.lower() for t in turns), (
+        "At least one citation must be tied to a parental-leave turn"
+    )
+    assert all(c.triggering_user_message for c in tl.citation_sources)
+
+
+def test_full_report_renders_citation_snippets(timeline) -> None:
+    profile, tl = timeline
+    report = render_report(profile, tl)
+    # Citations header + a distinctive snippet fragment must both appear.
+    assert "📎 Citations" in report
+    assert "FAQ-Parking-EN.pdf" in report
+    assert "parental-leave.aspx" in report
+
+
+def test_dashboard_state_exposes_citations(timeline) -> None:
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _StateStub:
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+
+    stub = _StateStub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)  # type: ignore[arg-type]
+
+    assert len(stub.mcs_knowledge_citations) == len(tl.citation_sources)
+    first = stub.mcs_knowledge_citations[0]
+    assert first["url"].startswith("https://")
+    assert int(first["char_count"]) > 1000
+    # Preview is truncated for snippets >400 chars.
+    assert first["snippet_preview"].endswith(" …") or len(first["snippet_full"]) <= 400
+    # Citation count surfaces in the attribution summary suffix.
+    assert "citation" in stub.mcs_knowledge_attribution_summary
+
+
 def test_dashboard_state_exposes_knowledge_attributions(timeline) -> None:
     """The dashboard Knowledge tab pulls from `mcs_knowledge_attributions`.
     If the timeline has the data but the state copy is empty, the tab

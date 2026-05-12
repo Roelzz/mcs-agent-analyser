@@ -1255,10 +1255,38 @@ class UploadMixin(rx.State, mixin=True):
                 }
             )
         self.mcs_knowledge_attributions = attribution_rows  # type: ignore[attr-defined]
+
+        # Citation rows — one dict per harvested `Text.CitationSources[]`
+        # entry, flat shape so the dashboard `rx.foreach` doesn't have to
+        # walk a nested list. Snippet body is preserved verbatim; the UI
+        # decides truncation at render time.
+        citations = getattr(timeline, "citation_sources", []) if timeline is not None else []
+        citation_rows: list[dict] = []
+        for c in citations:
+            snippet = (c.text or "").strip()
+            preview = snippet[:400].replace("\n", " ")
+            if len(snippet) > 400:
+                preview += " …"
+            citation_rows.append(
+                {
+                    "turn_message": c.triggering_user_message or "(system-initiated)",
+                    "name": c.name or c.url or "Citation",
+                    "url": c.url or "",
+                    "snippet_preview": preview,
+                    "snippet_full": snippet,
+                    "char_count": str(len(snippet)),
+                }
+            )
+        self.mcs_knowledge_citations = citation_rows  # type: ignore[attr-defined]
+
         if attributions:
+            citation_suffix = (
+                f" · {len(citations)} citation{'s' if len(citations) != 1 else ''}" if citations else ""
+            )
             self.mcs_knowledge_attribution_summary = (  # type: ignore[attr-defined]
                 f"{len(attributions)} turns used knowledge · {answered_turns} answered · "
                 f"{len(searches)} orchestrator search{'es' if len(searches) != 1 else ''}"
+                f"{citation_suffix}"
             )
         else:
             self.mcs_knowledge_attribution_summary = ""  # type: ignore[attr-defined]
@@ -2346,6 +2374,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_knowledge_searches = []  # type: ignore[attr-defined]
         self.mcs_knowledge_attributions = []  # type: ignore[attr-defined]
         self.mcs_knowledge_attribution_summary = ""  # type: ignore[attr-defined]
+        self.mcs_knowledge_citations = []  # type: ignore[attr-defined]
         self.mcs_knowledge_custom_steps = []  # type: ignore[attr-defined]
         self.mcs_knowledge_general_enabled = False  # type: ignore[attr-defined]
         self.mcs_knowledge_citation_panel = []  # type: ignore[attr-defined]
