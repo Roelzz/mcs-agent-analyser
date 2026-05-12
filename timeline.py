@@ -12,12 +12,27 @@ from models import (
     ExecutionPhase,
     GenerativeAnswerCitation,
     GenerativeAnswerTrace,
+    KnowledgeAttribution,
     KnowledgeSearchInfo,
     SearchResult,
     TimelineEvent,
     ToolCall,
     ToolCallObservation,
 )
+
+
+def _clean_source(s: str) -> str:
+    """Clean a raw knowledge source identifier into its display name.
+
+    Reused by both `UniversalSearchToolTraceData` (orchestrator-level search)
+    and `KnowledgeTraceData` (per-turn attribution) handlers so the two streams
+    render identical labels.
+    """
+    if ".file." in s:
+        filename_with_id = s.split(".file.", 1)[1]
+        return re.sub(r"_[A-Za-z0-9]{3,}$", "", filename_with_id)
+    base = re.sub(r"_[A-Za-z0-9]{3,}$", "", s)
+    return base.split(".")[-1]
 
 
 # Standard UUID v4 pattern — used as a last-resort fallback to pull the
@@ -35,6 +50,7 @@ class _TimelineState:
     phases: list[ExecutionPhase] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     knowledge_searches: list[KnowledgeSearchInfo] = field(default_factory=list)
+    knowledge_attributions: list[KnowledgeAttribution] = field(default_factory=list)
     custom_search_steps: list[CustomSearchStep] = field(default_factory=list)
     pending_ks_query: dict | None = None
     pending_ks_info: KnowledgeSearchInfo | None = None
@@ -819,6 +835,15 @@ def _process_trace_event(
                 }
 
         elif value_type == "UniversalSearchToolTraceData":
+            # If a previous USTD arrived without a paired
+            # `DynamicPlanStepFinished[P:UniversalSearchTool]` to flush it,
+            # commit the pending row now so we don't silently overwrite it.
+            # Some Copilot Studio exports omit step-finished events, so the
+            # original "wait for step-finished to commit" path leaked every
+            # search except the last one.
+            if state.pending_ks_info is not None:
+                state.knowledge_searches.append(state.pending_ks_info)
+                state.pending_ks_info = None
             sources = value.get("knowledgeSources", [])
             source_names = [s.split(".")[-1] if "." in s else s for s in sources]
             state.events.append(
@@ -830,14 +855,6 @@ def _process_trace_event(
                     + (f" (+{len(source_names) - 3})" if len(source_names) > 3 else ""),
                 )
             )
-
-            def _clean_source(s: str) -> str:
-                """Clean a raw knowledge source identifier to a display name."""
-                if ".file." in s:
-                    filename_with_id = s.split(".file.", 1)[1]
-                    return re.sub(r"_[A-Za-z0-9]{3,}$", "", filename_with_id)
-                base = re.sub(r"_[A-Za-z0-9]{3,}$", "", s)
-                return base.split(".")[-1]
 
             cleaned = [_clean_source(s) for s in sources]
             deduped = list(dict.fromkeys(cleaned))
@@ -925,6 +942,104 @@ def _process_trace_event(
                 )
             )
 
+        # Trace-type IntentRecognition events also exist (the handler at line
+        # ~886 lives under `act_type == "event"` and is unreachable for these).
+        # Real exports ship the bulk of IR events under `trace`, so route them
+        # here too.
+        elif value_type == "IntentRecognition":
+            matched_intent = value.get("matchedIntent") or value.get("intent", "")
+            confidence = value.get("confidence") or value.get("score")
+            intent_score = None
+            if confidence is not None:
+                try:
+                    intent_score = float(confidence)
+                except (ValueError, TypeError):
+                    intent_score = None
+            topic = matched_intent or "Unknown"
+            state.events.append(
+                TimelineEvent(
+                    timestamp=timestamp,
+                    position=position,
+                    event_type=EventType.INTENT_RECOGNITION,
+                    topic_name=topic,
+                    summary=f"Intent: {topic} ({intent_score:.0%})"
+                    if intent_score is not None
+                    else f"Intent: {topic}",
+                    intent_score=intent_score,
+                )
+            )
+
+        elif value_type == "UnknownIntent":
+            state.events.append(
+                TimelineEvent(
+                    timestamp=timestamp,
+                    position=position,
+                    event_type=EventType.INTENT_RECOGNITION,
+                    topic_name="UnknownIntent",
+                    summary="Intent: UnknownIntent",
+                )
+            )
+
+        elif value_type == "GPTAnswer":
+            answer_state = value.get("gptAnswerState") or "unknown"
+            state.events.append(
+                TimelineEvent(
+                    timestamp=timestamp,
+                    position=position,
+                    event_type=EventType.GENERATIVE_ANSWER,
+                    summary=f"GPT answer: {answer_state}",
+                    state=answer_state,
+                )
+            )
+
+        # Per-turn knowledge attribution. Distinct from `KnowledgeSearchInfo`
+        # (the orchestrator-level search trace). Each answered turn that
+        # touched knowledge emits exactly one of these with the source IDs
+        # the runtime ultimately cited and the overall completion state.
+        elif value_type == "KnowledgeTraceData":
+            raw_sources = list(value.get("citedKnowledgeSources") or [])
+            cited_names = list(dict.fromkeys(_clean_source(s) for s in raw_sources))
+            state.knowledge_attributions.append(
+                KnowledgeAttribution(
+                    position=position,
+                    timestamp=timestamp,
+                    triggering_user_message=state.latest_user_text,
+                    completion_state=value.get("completionState"),
+                    is_searched=bool(value.get("isKnowledgeSearched")),
+                    cited_source_ids=raw_sources,
+                    cited_source_names=cited_names,
+                    failed_source_types=list(value.get("failedKnowledgeSourcesTypes") or []),
+                )
+            )
+            head = ", ".join(cited_names[:3])
+            tail = f" (+{len(cited_names) - 3})" if len(cited_names) > 3 else ""
+            state.events.append(
+                TimelineEvent(
+                    timestamp=timestamp,
+                    position=position,
+                    event_type=EventType.KNOWLEDGE_SEARCH,
+                    summary=f"Cited: {head}{tail}" if cited_names else "Knowledge attribution (no sources cited)",
+                )
+            )
+
+        # Modern Copilot Studio runtimes emit `ErrorTraceData` (camelCase
+        # `errorCode`/`errorMessage`) instead of the legacy `ErrorCode`
+        # value shape below.
+        elif value_type == "ErrorTraceData":
+            code = value.get("errorCode") or "Unknown"
+            msg = value.get("errorMessage") or ""
+            is_user = bool(value.get("isUserError"))
+            state.errors.append(f"{code}: {msg}" if msg else code)
+            state.events.append(
+                TimelineEvent(
+                    timestamp=timestamp,
+                    position=position,
+                    event_type=EventType.ERROR,
+                    summary=f"{'User' if is_user else 'System'} error: {code}",
+                    error=code,
+                )
+            )
+
         elif value.get("ErrorCode"):
             error_code = value["ErrorCode"]
             state.errors.append(f"ErrorCode: {error_code}")
@@ -937,6 +1052,20 @@ def _process_trace_event(
                     error=error_code,
                 )
             )
+
+    # `signin/tokenExchange` arrives as `act_type == "invoke"` — not an
+    # `event` or `trace`. Surface it as a generic timeline event so the
+    # parser-audit table flips to ✅ and the Conversation tab can show
+    # the auth touchpoint.
+    elif act_type == "invoke" and value_type == "signin/tokenExchange":
+        state.events.append(
+            TimelineEvent(
+                timestamp=timestamp,
+                position=position,
+                event_type=EventType.OTHER,
+                summary="OAuth token exchange",
+            )
+        )
 
 
 _THINKING_THRESHOLD_MS = 1000  # gaps > 1s between events are orchestrator thinking
@@ -1136,8 +1265,9 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
             )
             continue
 
-        # Delegate event and trace activity types to helper
-        if act_type in ("event", "trace"):
+        # Delegate event/trace/invoke activity types to helper. `invoke`
+        # covers `signin/tokenExchange` and similar auth round-trips.
+        if act_type in ("event", "trace", "invoke"):
             _process_trace_event(activity, state, schema_lookup, timestamp, position)
 
     _finalize_knowledge_search(state)
@@ -1156,6 +1286,7 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
         errors=state.errors,
         total_elapsed_ms=total_elapsed,
         knowledge_searches=state.knowledge_searches,
+        knowledge_attributions=state.knowledge_attributions,
         custom_search_steps=state.custom_search_steps,
         tool_calls=state.tool_calls,
         generative_answer_traces=state.generative_answer_traces,

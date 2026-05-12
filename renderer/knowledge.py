@@ -139,8 +139,19 @@ def render_knowledge_search_section(
     timeline: ConversationTimeline,
     profile: BotProfile | None = None,
 ) -> str:
-    """Render Knowledge Search section as Markdown, grouped by triggering user message."""
+    """Render Knowledge Search section as Markdown.
+
+    Combines three streams the parser may have populated:
+    - `knowledge_attributions` (per-turn `KnowledgeTraceData` — citation
+      attribution for each answered turn).
+    - `knowledge_searches` (orchestrator-level `UniversalSearchToolTraceData`).
+    - `generative_answer_traces` (topic-level `SearchAndSummarizeContent`).
+
+    The header summarises all three; the body shows each turn's cited sources
+    (from attributions) alongside any orchestrator searches that ran during it.
+    """
     searches = timeline.knowledge_searches
+    attributions = getattr(timeline, "knowledge_attributions", []) or []
     custom = getattr(timeline, "custom_search_steps", [])
     gen_traces = getattr(timeline, "generative_answer_traces", []) or []
     gk = "✓ On" if (profile and profile.ai_settings and profile.ai_settings.use_model_knowledge) else "✗ Off"
@@ -148,12 +159,12 @@ def render_knowledge_search_section(
 
     lines: list[str] = ["## Knowledge Search\n"]
 
-    if not searches and not custom and not gen_traces:
+    if not searches and not custom and not gen_traces and not attributions:
         lines.append(f"**0 searches** | General Knowledge: {gk}\n")
         lines.append("No knowledge searches recorded.\n")
         return "\n".join(lines)
 
-    if not searches and not custom and gen_traces:
+    if not searches and not custom and gen_traces and not attributions:
         # Topic-level S&S only — skip orchestrator-search rendering and jump straight to traces.
         lines.append(
             f"**0 orchestrator searches · {len(gen_traces)} topic-level Search & Summarize call"
@@ -162,35 +173,87 @@ def render_knowledge_search_section(
         lines.append(render_generative_answer_traces(gen_traces, profile))
         return "\n".join(lines)
 
-    # Group searches by triggering_user_message (preserve order)
-    from collections import OrderedDict
-
-    groups: OrderedDict[str | None, list[tuple[int, KnowledgeSearchInfo]]] = OrderedDict()
-    for i, ks in enumerate(searches, 1):
-        key = ks.triggering_user_message
-        groups.setdefault(key, []).append((i, ks))
-
-    total_turns = len(groups)
-
-    if total_turns <= 1:
-        lines.append(f"**{total} search{'es' if total != 1 else ''}** | General Knowledge: {gk}\n")
-    else:
+    # Attribution-driven per-turn view: every turn the runtime tagged as
+    # knowledge-touching gets its own block, with cited sources up front and
+    # any orchestrator searches that ran during it below.
+    if attributions:
+        answered = sum(1 for a in attributions if (a.completion_state or "").lower() == "answered")
         lines.append(
-            f"**{total} search{'es' if total != 1 else ''} across {total_turns} user turn{'s' if total_turns != 1 else ''}** | General Knowledge: {gk}\n"
+            f"**{len(attributions)} turn{'s' if len(attributions) != 1 else ''} used knowledge"
+            f" · {answered} answered"
+            f" · {total} orchestrator search{'es' if total != 1 else ''}**"
+            f" | General Knowledge: {gk}\n"
         )
 
-    # Render each group
-    for msg_key, group_searches in groups.items():
-        if total_turns > 1:
-            lines.append("---\n")
-        if msg_key is not None:
-            header = _clean_user_message(msg_key)
-            lines.append(f'### 💬 "{header}"\n')
-        elif total_turns > 1:
-            lines.append("### 🔧 System-initiated\n")
+        from collections import OrderedDict
 
-        lines.extend(_render_ks_table(group_searches))
-        lines.extend(_render_ks_details(group_searches))
+        # Index orchestrator searches by triggering user message so they can be
+        # nested under the matching attribution turn.
+        searches_by_turn: OrderedDict[str | None, list[tuple[int, KnowledgeSearchInfo]]] = OrderedDict()
+        for i, ks in enumerate(searches, 1):
+            searches_by_turn.setdefault(ks.triggering_user_message, []).append((i, ks))
+
+        for attribution in attributions:
+            lines.append("---\n")
+            turn_text = _clean_user_message(attribution.triggering_user_message or "(system-initiated)")
+            lines.append(f'### 💬 "{turn_text}"\n')
+            badge = "✅" if (attribution.completion_state or "").lower() == "answered" else "⚠"
+            lines.append(
+                f"{badge} **{attribution.completion_state or 'Unknown'}**"
+                f" · searched: {'Yes' if attribution.is_searched else 'No'}\n"
+            )
+            if attribution.cited_source_names:
+                shown = attribution.cited_source_names[:10]
+                tail = f" *(+{len(attribution.cited_source_names) - 10} more)*" if len(attribution.cited_source_names) > 10 else ""
+                lines.append("**Cited sources:** " + ", ".join(f"`{n}`" for n in shown) + tail + "\n")
+            else:
+                lines.append("**Cited sources:** _none — answer was not grounded._\n")
+            if attribution.failed_source_types:
+                lines.append(f"⚠ Failed source types: {', '.join(attribution.failed_source_types)}\n")
+            turn_searches = searches_by_turn.get(attribution.triggering_user_message, [])
+            if turn_searches:
+                lines.append(f"\n_Orchestrator searches this turn ({len(turn_searches)}):_\n")
+                lines.extend(_render_ks_table(turn_searches))
+                lines.extend(_render_ks_details(turn_searches))
+
+        # System-initiated searches not tied to any turn: render after the attributions list.
+        unattached = searches_by_turn.get(None, [])
+        if unattached:
+            lines.append("---\n")
+            lines.append("### 🔧 System-initiated\n")
+            lines.extend(_render_ks_table(unattached))
+            lines.extend(_render_ks_details(unattached))
+    else:
+        # Legacy path — no per-turn attribution available, fall back to the
+        # previous orchestrator-search-grouped view.
+        from collections import OrderedDict
+
+        groups: OrderedDict[str | None, list[tuple[int, KnowledgeSearchInfo]]] = OrderedDict()
+        for i, ks in enumerate(searches, 1):
+            key = ks.triggering_user_message
+            groups.setdefault(key, []).append((i, ks))
+
+        total_turns = len(groups)
+
+        if total_turns <= 1:
+            lines.append(f"**{total} search{'es' if total != 1 else ''}** | General Knowledge: {gk}\n")
+        else:
+            lines.append(
+                f"**{total} search{'es' if total != 1 else ''} across {total_turns} user turn{'s' if total_turns != 1 else ''}**"
+                f" | General Knowledge: {gk}\n"
+            )
+
+        for msg_key, group_searches in groups.items():
+            if total_turns > 1:
+                lines.append("---\n")
+            if msg_key is not None:
+                header = _clean_user_message(msg_key)
+                lines.append(f'### 💬 "{header}"\n')
+            elif total_turns > 1:
+                lines.append("### 🔧 System-initiated\n")
+
+            lines.extend(_render_ks_table(group_searches))
+            lines.extend(_render_ks_details(group_searches))
 
     if custom:
         lines.append("\n### Custom Search Topics\n")
