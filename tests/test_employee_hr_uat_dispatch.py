@@ -24,7 +24,7 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "employee_hr_uat"
 def timeline():
     profile, lookup = parse_yaml(FIXTURE_DIR / "botContent.yml")
     activities = parse_dialog_json(FIXTURE_DIR / "dialog.json")
-    return profile, build_timeline(activities, lookup)
+    return profile, build_timeline(activities, lookup, profile=profile)
 
 
 def test_knowledge_attribution_recovers_per_turn_events(timeline) -> None:
@@ -134,18 +134,20 @@ def test_citation_sources_bound_to_user_turn(timeline) -> None:
 
 
 def test_citations_attached_to_matching_searches(timeline) -> None:
-    """Cross-link: a knowledge search whose triggering turn also produced
-    CBResponse citations should carry those citations as `search_results`,
-    so the dashboard's search cards render snippet bodies instead of an
-    empty 'No Grounding' badge."""
+    """Tier 1: a knowledge search whose triggering turn also produced
+    CBResponse citations should carry those citations (with full snippet
+    body) as `search_results`, tagged `result_type='citation'`."""
     _, tl = timeline
-    enriched = [ks for ks in tl.knowledge_searches if ks.search_results]
-    # 3 of 13 search turns have CBResponse data; the other 10 had bot
-    # answers without going through the citation pipeline (genuinely empty
-    # in the source data).
-    assert len(enriched) == 3, f"Expected 3 enriched searches, got {len(enriched)}"
+    with_citations = [
+        ks
+        for ks in tl.knowledge_searches
+        if any(r.result_type == "citation" for r in ks.search_results)
+    ]
+    # 3 of 13 search turns have CBResponse data; the other 10 took the
+    # AI-Builder-only code path and have no snippet body to recover.
+    assert len(with_citations) == 3, f"Expected 3 searches with citation rows, got {len(with_citations)}"
 
-    parking_searches = [ks for ks in enriched if "parking" in (ks.triggering_user_message or "").lower()]
+    parking_searches = [ks for ks in with_citations if "parking" in (ks.triggering_user_message or "").lower()]
     assert len(parking_searches) >= 1
     parking_result = next(
         (r for r in parking_searches[0].search_results if r.name == "FAQ-Parking-EN.pdf"),
@@ -154,6 +156,72 @@ def test_citations_attached_to_matching_searches(timeline) -> None:
     assert parking_result is not None
     assert parking_result.text is not None and len(parking_result.text) > 1000
     assert parking_result.result_type == "citation"
+
+
+def test_kt_attribution_resolves_to_urls(timeline) -> None:
+    """Tier 2: every cited source name from KTD gets a clickable SharePoint
+    root URL via lookup against profile.components. Turn 1 (parental leave)
+    has no CBResponse but does have KTD attribution for HR Document NL +
+    NewHRKnowledge_Ap."""
+    _, tl = timeline
+    # Find turn 1's search.
+    turn1 = next(
+        ks
+        for ks in tl.knowledge_searches
+        if "How does the parental leave" in (ks.triggering_user_message or "")
+    )
+    kt_rows = [r for r in turn1.search_results if r.result_type == "kt_attribution"]
+    assert len(kt_rows) >= 2, f"Turn 1 should have ≥2 KT-attribution rows, got {len(kt_rows)}"
+    urls = {r.url for r in kt_rows}
+    assert any(u and "intranet-001-hr/INGDocuments" in u for u in urls), (
+        f"HR Document NL root URL missing; got {urls}"
+    )
+    # Tier 2 rows carry no snippet body.
+    assert all(not r.text for r in kt_rows)
+
+
+def test_bot_reply_links_extracted(timeline) -> None:
+    """Tier 3: markdown links inside the bot's reply text are extracted
+    as `result_type='bot_reply_link'` rows. Turn 1's bot reply contains
+    `[Parental Leave Policy – ING](https://www.rijksoverheid.nl/...)` —
+    that URL must surface."""
+    _, tl = timeline
+    turn1 = next(
+        ks
+        for ks in tl.knowledge_searches
+        if "How does the parental leave" in (ks.triggering_user_message or "")
+    )
+    link_rows = [r for r in turn1.search_results if r.result_type == "bot_reply_link"]
+    assert len(link_rows) >= 1, f"Turn 1 should have ≥1 bot-reply-link row, got {len(link_rows)}"
+    urls = {r.url for r in link_rows}
+    assert any("rijksoverheid.nl" in (u or "") for u in urls), (
+        f"rijksoverheid.nl URL missing from bot-reply extraction; got {urls}"
+    )
+
+
+def test_tier_badges_in_dashboard_rows(timeline) -> None:
+    """Dashboard `results_text` strings carry tier prefixes (📎/📚/🔗) so
+    users can distinguish snippet-backed citations from inferred ones."""
+    profile, tl = timeline
+    from web.state._upload import UploadMixin
+
+    class _StateStub:
+        def __setattr__(self, n, v):
+            object.__setattr__(self, n, v)
+
+    stub = _StateStub()
+    UploadMixin._populate_knowledge_data(stub, profile, tl)
+    search_rows = [r for r in stub.mcs_knowledge_searches if r.get("kind") == "search"]
+    # Find a parking-turn row (Tier-1 citation territory).
+    parking_row = next(r for r in search_rows if "parking" in r["query"].lower())
+    assert "📎" in parking_row["results_text"], (
+        f"Tier-1 badge missing from parking row: {parking_row['results_text'][:200]!r}"
+    )
+    # Turn 1: parental-leave Path A — Tier 2 + Tier 3 only.
+    parental_row = next(r for r in search_rows if "parental leave" in r["query"].lower())
+    assert "📚" in parental_row["results_text"] or "🔗" in parental_row["results_text"], (
+        f"Tier-2/3 badges missing from parental-leave row: {parental_row['results_text'][:200]!r}"
+    )
 
 
 def test_full_report_renders_citation_snippets(timeline) -> None:

@@ -315,9 +315,9 @@ def _attach_citations_to_searches(state: _TimelineState) -> None:
     `state.citation_sources`).
 
     This pass walks each search and attaches every citation from the same
-    turn as a synthetic `SearchResult`. Result: each search card on the
-    dashboard now renders the actual snippet text the bot received,
-    instead of "No Grounding".
+    turn as a synthetic `SearchResult` tagged `result_type="citation"`.
+    Result: each search card on the dashboard now renders the actual
+    snippet text the bot received, instead of "No Grounding".
     """
     if not state.citation_sources:
         return
@@ -345,6 +345,131 @@ def _attach_citations_to_searches(state: _TimelineState) -> None:
             )
             for c in bucket
         ]
+
+
+def _attach_kt_attribution_urls(state: _TimelineState, profile: "BotProfile") -> None:
+    """Tier-2 enrichment: turn each `KnowledgeTraceData.citedKnowledgeSources`
+    name into a clickable row by looking up its source root URL on the
+    matching `KnowledgeSourceComponent` from the YAML.
+
+    Most Path A turns (orchestrator + AI Builder, no CBResponse) have KTD
+    attribution but no snippet body. This gives those turns *something*
+    clickable — the SharePoint root where the cited source lives — so the
+    user can audit the actual document themselves.
+    """
+    if not state.knowledge_attributions or not state.knowledge_searches:
+        return
+
+    # name → source_site lookup from profile.components.
+    name_to_url: dict[str, str] = {}
+    for comp in profile.components:
+        if comp.kind != "KnowledgeSourceComponent" or not comp.source_site:
+            continue
+        # Same cleaning the KTD handler applies, so the keys match.
+        name_to_url[_clean_source(comp.schema_name)] = comp.source_site
+
+    # Aggregate cited names per triggering user turn.
+    names_by_turn: dict[str | None, list[str]] = {}
+    for attr in state.knowledge_attributions:
+        bucket = names_by_turn.setdefault(attr.triggering_user_message, [])
+        for name in attr.cited_source_names:
+            if name not in bucket:
+                bucket.append(name)
+
+    for ks in state.knowledge_searches:
+        names = names_by_turn.get(ks.triggering_user_message) or []
+        if not names:
+            continue
+        existing_urls = {r.url for r in ks.search_results if r.url}
+        existing_names = {r.name for r in ks.search_results if r.name}
+        for name in names:
+            if name in existing_names:
+                continue
+            url = name_to_url.get(name)
+            if not url or url in existing_urls:
+                continue
+            existing_urls.add(url)
+            ks.search_results.append(
+                SearchResult(
+                    name=name,
+                    url=url,
+                    text=None,
+                    result_type="kt_attribution",
+                )
+            )
+
+
+_BOT_REPLY_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)]+)\)")
+
+
+def _extract_bot_reply_links(text: str) -> list[tuple[str, str]]:
+    """Extract `(label, url)` pairs from markdown links inside a bot reply.
+
+    Deduplicates by URL — the same source often appears multiple times in
+    the bot's composed answer. Returns the labels as the bot wrote them
+    (preserving "Parental Leave Policy", "Workday", etc.) so the audit
+    panel mirrors what the user saw.
+    """
+    if not text:
+        return []
+    seen: dict[str, str] = {}
+    for match in _BOT_REPLY_MD_LINK_RE.finditer(text):
+        label = (match.group(1) or "").strip()
+        url = (match.group(2) or "").strip()
+        if not url or url in seen:
+            continue
+        seen[url] = label or url
+    return [(label, url) for url, label in seen.items()]
+
+
+def _attach_bot_reply_links(state: _TimelineState) -> None:
+    """Tier-3 enrichment: extract markdown links from the bot's composed
+    reply text and attach them as `SearchResult(result_type="bot_reply_link")`
+    on the matching turn's knowledge search.
+
+    These are *inferred* citations — the AI Builder model received snippet
+    content internally and decided which URLs to surface in its final
+    answer. The snippet body itself isn't in the export, but the URLs are.
+    Caps at 20 per turn so a verbose answer can't drown the panel.
+    """
+    if not state.knowledge_searches:
+        return
+
+    # Walk events in order, attributing each BOT_MESSAGE to the most
+    # recent USER_MESSAGE turn.
+    current_turn: str | None = None
+    bot_text_by_turn: dict[str | None, list[str]] = {}
+    user_prefix_re = re.compile(r'^User: "(.*)"$')
+    for ev in state.events:
+        if ev.event_type == EventType.USER_MESSAGE:
+            m = user_prefix_re.match(ev.summary or "")
+            current_turn = m.group(1) if m else (ev.summary or "").removeprefix("User: ").strip().strip('"')
+        elif ev.event_type == EventType.BOT_MESSAGE and current_turn is not None:
+            text = (ev.summary or "").removeprefix("Bot: ").strip()
+            if text:
+                bot_text_by_turn.setdefault(current_turn, []).append(text)
+
+    for ks in state.knowledge_searches:
+        turn_text = ks.triggering_user_message
+        replies = bot_text_by_turn.get(turn_text) or []
+        if not replies:
+            continue
+        existing_urls = {r.url for r in ks.search_results if r.url}
+        added = 0
+        for reply in replies:
+            for label, url in _extract_bot_reply_links(reply):
+                if url in existing_urls or added >= 20:
+                    continue
+                existing_urls.add(url)
+                ks.search_results.append(
+                    SearchResult(
+                        name=label,
+                        url=url,
+                        text=None,
+                        result_type="bot_reply_link",
+                    )
+                )
+                added += 1
 
 
 def _build_phase(
@@ -1228,8 +1353,20 @@ def _synthesize_orchestrator_phases(state: _TimelineState) -> None:
         state.phases.append(phase)
 
 
-def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> ConversationTimeline:
-    """Build a ConversationTimeline from sorted activities and schema name lookup."""
+def build_timeline(
+    activities: list[dict],
+    schema_lookup: dict[str, str],
+    profile: "BotProfile | None" = None,
+) -> ConversationTimeline:
+    """Build a ConversationTimeline from sorted activities and schema name lookup.
+
+    `profile` is optional; when provided, the Tier-2 enrichment pass uses
+    `profile.components` to resolve `KnowledgeTraceData.citedKnowledgeSources`
+    names into clickable source-root URLs on each turn's search results.
+    Callers that don't have profile context (CLI transcript-only mode)
+    simply get the existing Tier-1 (citation) + Tier-3 (bot-reply link)
+    enrichments.
+    """
     state = _TimelineState()
 
     for activity in activities:
@@ -1349,6 +1486,9 @@ def build_timeline(activities: list[dict], schema_lookup: dict[str, str]) -> Con
 
     _finalize_knowledge_search(state)
     _attach_citations_to_searches(state)
+    if profile is not None:
+        _attach_kt_attribution_urls(state, profile)
+    _attach_bot_reply_links(state)
     _synthesize_orchestrator_phases(state)
 
     total_elapsed = _ms_between(state.first_timestamp, state.last_timestamp)

@@ -287,7 +287,7 @@ class UploadMixin(rx.State, mixin=True):
 
             profile, schema_lookup = parse_yaml(yaml_files[0])
             activities = parse_dialog_json(json_files[0])
-            timeline = build_timeline(activities, schema_lookup)
+            timeline = build_timeline(activities, schema_lookup, profile=profile)
             self._finalize_full_analysis(profile, timeline)
 
     async def _process_bot_files(self, files: list[rx.UploadFile]):
@@ -317,7 +317,7 @@ class UploadMixin(rx.State, mixin=True):
 
             profile, schema_lookup = parse_yaml(yml_path)
             activities = parse_dialog_json(json_path)
-            timeline = build_timeline(activities, schema_lookup)
+            timeline = build_timeline(activities, schema_lookup, profile=profile)
             self._finalize_full_analysis(profile, timeline)
 
     async def _process_yml_plus_paste(self, yml_file: rx.UploadFile, paste_text: str):
@@ -333,7 +333,7 @@ class UploadMixin(rx.State, mixin=True):
 
             profile, schema_lookup = parse_yaml(yml_path)
             activities = parse_dialog_json(json_path)
-            timeline = build_timeline(activities, schema_lookup)
+            timeline = build_timeline(activities, schema_lookup, profile=profile)
             self._finalize_full_analysis(profile, timeline)
 
     async def _process_transcript(self, files: list[rx.UploadFile]):
@@ -1191,16 +1191,39 @@ class UploadMixin(rx.State, mixin=True):
             dur_ms = _parse_execution_time_ms(ks.execution_time)
             dur = _format_duration(dur_ms) if dur_ms is not None else (ks.execution_time or "—")
             eff = _source_efficiency(ks)
-            # Flatten results into a displayable summary string
+            # Flatten results into a displayable summary string. Each row
+            # gets a *tier* prefix indicating the provenance of the
+            # evidence:
+            #   📎  Tier 1 — full snippet body from CBResponse.CitationSources
+            #   📚  Tier 2 — source-name attribution from KTD, URL resolved
+            #              against profile.components (no snippet body)
+            #   🔗  Tier 3 — markdown link extracted from the bot's reply
+            #              text (no snippet body, inferred citation)
+            # plus the existing quality icon (🟢/🟡/🔴) for snippet length.
             result_count = len(ks.search_results)
             result_lines: list[str] = []
             url_parts: list[str] = []
+            tier_prefix_for = {
+                "citation": "📎 ",
+                "kt_attribution": "📚 ",
+                "bot_reply_link": "🔗 ",
+            }
             for j, r in enumerate(ks.search_results[:5], 1):
                 title = r.name or r.url or f"Result {j}"
                 snippet_len = len(r.text or "")
-                quality_icon = "🟢" if snippet_len >= 200 else ("🟡" if snippet_len >= 50 else "🔴")
+                if snippet_len >= 200:
+                    quality_icon = "🟢"
+                elif snippet_len >= 50:
+                    quality_icon = "🟡"
+                elif snippet_len > 0:
+                    quality_icon = "🔴"
+                else:
+                    quality_icon = "⚫"
+                tier_badge = tier_prefix_for.get(r.result_type or "", "")
                 snippet = (r.text or "").replace("\n", " ")
-                result_lines.append(f"{quality_icon} {j}. {title}" + (f" — {snippet}" if snippet else ""))
+                result_lines.append(
+                    f"{tier_badge}{quality_icon} {j}. {title}" + (f" — {snippet}" if snippet else "")
+                )
                 if r.url:
                     url_parts.append(r.url)
             results_text = "\n".join(result_lines) if result_lines else ""
