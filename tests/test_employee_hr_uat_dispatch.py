@@ -138,11 +138,7 @@ def test_citations_attached_to_matching_searches(timeline) -> None:
     CBResponse citations should carry those citations (with full snippet
     body) as `search_results`, tagged `result_type='citation'`."""
     _, tl = timeline
-    with_citations = [
-        ks
-        for ks in tl.knowledge_searches
-        if any(r.result_type == "citation" for r in ks.search_results)
-    ]
+    with_citations = [ks for ks in tl.knowledge_searches if any(r.result_type == "citation" for r in ks.search_results)]
     # 3 of 13 search turns have CBResponse data; the other 10 took the
     # AI-Builder-only code path and have no snippet body to recover.
     assert len(with_citations) == 3, f"Expected 3 searches with citation rows, got {len(with_citations)}"
@@ -166,16 +162,12 @@ def test_kt_attribution_resolves_to_urls(timeline) -> None:
     _, tl = timeline
     # Find turn 1's search.
     turn1 = next(
-        ks
-        for ks in tl.knowledge_searches
-        if "How does the parental leave" in (ks.triggering_user_message or "")
+        ks for ks in tl.knowledge_searches if "How does the parental leave" in (ks.triggering_user_message or "")
     )
     kt_rows = [r for r in turn1.search_results if r.result_type == "kt_attribution"]
     assert len(kt_rows) >= 2, f"Turn 1 should have ≥2 KT-attribution rows, got {len(kt_rows)}"
     urls = {r.url for r in kt_rows}
-    assert any(u and "intranet-001-hr/INGDocuments" in u for u in urls), (
-        f"HR Document NL root URL missing; got {urls}"
-    )
+    assert any(u and "intranet-001-hr/INGDocuments" in u for u in urls), f"HR Document NL root URL missing; got {urls}"
     # Tier 2 rows carry no snippet body.
     assert all(not r.text for r in kt_rows)
 
@@ -187,9 +179,7 @@ def test_bot_reply_links_extracted(timeline) -> None:
     that URL must surface."""
     _, tl = timeline
     turn1 = next(
-        ks
-        for ks in tl.knowledge_searches
-        if "How does the parental leave" in (ks.triggering_user_message or "")
+        ks for ks in tl.knowledge_searches if "How does the parental leave" in (ks.triggering_user_message or "")
     )
     link_rows = [r for r in turn1.search_results if r.result_type == "bot_reply_link"]
     assert len(link_rows) >= 1, f"Turn 1 should have ≥1 bot-reply-link row, got {len(link_rows)}"
@@ -243,11 +233,7 @@ def test_tools_tab_ai_builder_per_call(timeline) -> None:
     # At least 26 runtime calls (matches what we observed earlier).
     assert len(stub.mcs_tools_ai_builder_calls) >= 26
     # Spot-check one TicketEligibility row.
-    tec_row = next(
-        r
-        for r in stub.mcs_tools_ai_builder_calls
-        if r["variable_name"] == "Topic.TicketEligiblePromptKN"
-    )
+    tec_row = next(r for r in stub.mcs_tools_ai_builder_calls if r["variable_name"] == "Topic.TicketEligiblePromptKN")
     assert tec_row["model_display"] == "Ticket Eligibility Checker"
     assert tec_row["model_id"].startswith("b030db4e")
     # The TicketEligibility classifier's output is always "Eligible" or "Not Eligible".
@@ -429,11 +415,7 @@ def test_inline_prompt_extra_fields(timeline) -> None:
     """The Conversational boosting InlinePrompt now carries moderation,
     latency, and file-search-mode configuration from the SAS node."""
     profile, _ = timeline
-    cb = next(
-        ip
-        for ip in profile.inline_prompts
-        if ip.host_topic_display == "Conversational boosting"
-    )
+    cb = next(ip for ip in profile.inline_prompts if ip.host_topic_display == "Conversational boosting")
     assert cb.moderation_level == "Medium"
     assert cb.latency_message is not None and "moment" in cb.latency_message.lower()
     assert cb.file_search_mode == "DoNotSearchFiles"
@@ -583,9 +565,7 @@ def test_dashboard_state_exposes_citations(timeline) -> None:
 
 def test_turn_prompt_metrics_extracted(timeline) -> None:
     _, tl = timeline
-    assert len(tl.turn_prompt_metrics) >= 7, (
-        f"Expected ≥7 turn-prompt-metrics rows, got {len(tl.turn_prompt_metrics)}"
-    )
+    assert len(tl.turn_prompt_metrics) >= 7, f"Expected ≥7 turn-prompt-metrics rows, got {len(tl.turn_prompt_metrics)}"
     first = tl.turn_prompt_metrics[0]
     assert first.model_name == "gpt-5-chat-2025-07-14"
     assert first.prompt_tokens is not None and first.prompt_tokens > 1000
@@ -595,10 +575,7 @@ def test_turn_prompt_metrics_extracted(timeline) -> None:
 
 def test_turn_prompt_metrics_bound_to_turn(timeline) -> None:
     _, tl = timeline
-    assert all(
-        m.triggering_user_message is None or m.triggering_user_message
-        for m in tl.turn_prompt_metrics
-    )
+    assert all(m.triggering_user_message is None or m.triggering_user_message for m in tl.turn_prompt_metrics)
     assert any(
         m.triggering_user_message and "parental leave" in m.triggering_user_message.lower()
         for m in tl.turn_prompt_metrics

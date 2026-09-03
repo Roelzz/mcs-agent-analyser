@@ -210,11 +210,7 @@ def render_knowledge_search_section(
             )
             if attribution.cited_source_names:
                 # Render every cited source — no per-row truncation.
-                lines.append(
-                    "**Cited sources:** "
-                    + ", ".join(f"`{n}`" for n in attribution.cited_source_names)
-                    + "\n"
-                )
+                lines.append("**Cited sources:** " + ", ".join(f"`{n}`" for n in attribution.cited_source_names) + "\n")
             else:
                 lines.append("**Cited sources:** _none — answer was not grounded._\n")
             if attribution.failed_source_types:
