@@ -1178,7 +1178,9 @@ def _mcs_conversation_flow_panel() -> rx.Component:
             rx.button(
                 rx.cond(
                     State.mcs_conv_flow_fullscreen,
-                    rx.hstack(rx.icon("minimize-2", size=12), rx.text("Exit fullscreen", font_size="11px"), spacing="1"),
+                    rx.hstack(
+                        rx.icon("minimize-2", size=12), rx.text("Exit fullscreen", font_size="11px"), spacing="1"
+                    ),
                     rx.hstack(rx.icon("maximize-2", size=12), rx.text("Fullscreen", font_size="11px"), spacing="1"),
                 ),
                 on_click=State.toggle_mcs_conv_flow_fullscreen,
@@ -2162,9 +2164,23 @@ def _mcs_tools_ai_builder_summary_row(item: dict) -> rx.Component:
                 align="start",
             ),
             rx.text(item["call_site_count"], font_size="13px", color="var(--gray-11)", text_align="right"),
-            rx.text(item["runtime_call_count"], font_size="13px", color="var(--gray-12)", font_weight="600", text_align="right"),
-            rx.text(item["prompt_tokens"], font_size="12px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
-            rx.text(item["completion_tokens"], font_size="12px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(
+                item["runtime_call_count"],
+                font_size="13px",
+                color="var(--gray-12)",
+                font_weight="600",
+                text_align="right",
+            ),
+            rx.text(
+                item["prompt_tokens"], font_size="12px", color="var(--gray-a9)", font_family=_MONO, text_align="right"
+            ),
+            rx.text(
+                item["completion_tokens"],
+                font_size="12px",
+                color="var(--gray-a9)",
+                font_family=_MONO,
+                text_align="right",
+            ),
             rx.text(item["credits"], font_size="13px", color=PRIMARY, font_weight="600", text_align="right"),
             rx.text(item["topics_text"], font_size="11px", color="var(--gray-a8)"),
         ],
@@ -2185,8 +2201,16 @@ def _mcs_tools_ai_builder_call_row(item: dict) -> rx.Component:
             ),
             rx.text(item["variable_name"], font_size="11px", color="var(--gray-a9)", font_family=_MONO),
             rx.text(item["turn_message"], font_size="12px", color="var(--gray-12)"),
-            rx.text(item["prompt_tokens"], font_size="11px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
-            rx.text(item["completion_tokens"], font_size="11px", color="var(--gray-a9)", font_family=_MONO, text_align="right"),
+            rx.text(
+                item["prompt_tokens"], font_size="11px", color="var(--gray-a9)", font_family=_MONO, text_align="right"
+            ),
+            rx.text(
+                item["completion_tokens"],
+                font_size="11px",
+                color="var(--gray-a9)",
+                font_family=_MONO,
+                text_align="right",
+            ),
             rx.text(item["credits"], font_size="11px", color="var(--gray-11)", font_family=_MONO, text_align="right"),
             rx.text(item["output_preview"], font_size="11px", color="var(--gray-a9)", font_style="italic"),
         ],
@@ -2894,7 +2918,9 @@ def _mcs_knowledge_citation_card(item: dict) -> rx.Component:
         rx.vstack(
             rx.hstack(
                 rx.icon("paperclip", size=14, color=PRIMARY),
-                rx.text(item["cited_turns_text"], font_size="12px", font_weight="600", color="var(--gray-12)", flex="1"),
+                rx.text(
+                    item["cited_turns_text"], font_size="12px", font_weight="600", color="var(--gray-12)", flex="1"
+                ),
                 rx.badge(
                     "cited in ",
                     item["cited_turn_count"],
@@ -3226,87 +3252,89 @@ def _mcs_ks_search_card(item: dict) -> rx.Component:
                         width="100%",
                     ),
                 ),
-            # Thought
-            rx.cond(
-                item["thought"] != "",
-                rx.text(
-                    item["thought"], font_size="12px", color="var(--gray-a9)", font_style="italic", padding_y="2px"
+                # Thought
+                rx.cond(
+                    item["thought"] != "",
+                    rx.text(
+                        item["thought"], font_size="12px", color="var(--gray-a9)", font_style="italic", padding_y="2px"
+                    ),
                 ),
-            ),
-            # Output sources
-            rx.cond(
-                item["output_sources"] != "",
-                rx.hstack(
-                    rx.text("Sources used:", font_size="11px", color="var(--gray-a9)", font_weight="600"),
-                    rx.text(item["output_sources"], font_size="11px", color="var(--gray-11)"),
-                    spacing="2",
-                    align="center",
-                ),
-            ),
-            # Efficiency
-            rx.cond(
-                item["efficiency"] != "",
-                rx.text(item["efficiency"], font_size="11px", color="var(--gray-a9)"),
-            ),
-            # Errors
-            rx.cond(
-                item["errors"] != "",
-                rx.box(
+                # Output sources
+                rx.cond(
+                    item["output_sources"] != "",
                     rx.hstack(
-                        rx.icon("triangle-alert", size=12, color="var(--red-9)"),
-                        rx.text(item["errors"], font_size="12px", color="var(--red-11)"),
+                        rx.text("Sources used:", font_size="11px", color="var(--gray-a9)", font_weight="600"),
+                        rx.text(item["output_sources"], font_size="11px", color="var(--gray-11)"),
                         spacing="2",
                         align="center",
                     ),
-                    background="var(--red-a2)",
-                    border="1px solid var(--red-a4)",
-                    border_radius="6px",
-                    padding="4px 8px",
                 ),
-            ),
-            # Results — rendered as raw HTML so each tier and quality
-            # icon can carry a native `title=` tooltip explaining the
-            # provenance and quality grade. Reflex's nested-foreach
-            # typing constraints rule out a per-result component tree, so
-            # the populator pre-renders the section as a string of div
-            # rows.
-            rx.cond(
-                item["results_html"] != "",
-                rx.box(
-                    rx.hstack(
-                        rx.text(item["result_count"], font_size="11px", color="var(--gray-a9)", font_weight="600"),
-                        rx.text("result(s) retrieved:", font_size="11px", color="var(--gray-a9)", font_weight="600"),
-                        spacing="1",
-                        align="center",
-                        margin_bottom="4px",
+                # Efficiency
+                rx.cond(
+                    item["efficiency"] != "",
+                    rx.text(item["efficiency"], font_size="11px", color="var(--gray-a9)"),
+                ),
+                # Errors
+                rx.cond(
+                    item["errors"] != "",
+                    rx.box(
+                        rx.hstack(
+                            rx.icon("triangle-alert", size=12, color="var(--red-9)"),
+                            rx.text(item["errors"], font_size="12px", color="var(--red-11)"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        background="var(--red-a2)",
+                        border="1px solid var(--red-a4)",
+                        border_radius="6px",
+                        padding="4px 8px",
                     ),
-                    rx.html(item["results_html"]),
-                    background="var(--gray-a2)",
-                    border=f"1px solid {SURFACE_BORDER}",
-                    border_radius="6px",
-                    padding="8px 10px",
-                    width="100%",
-                    overflow="hidden",
                 ),
-            ),
-            # Source URLs
-            rx.cond(
-                item["has_urls"] != "",
-                rx.hstack(
-                    rx.icon("external-link", size=12, color="var(--gray-a8)"),
-                    rx.text("Sources:", font_size="11px", color="var(--gray-a9)", font_weight="600"),
-                    rx.text(item["has_urls"], font_size="11px", color=PRIMARY, word_break="break-all"),
-                    spacing="2",
-                    align="start",
-                    flex_wrap="wrap",
-                    padding_top="4px",
+                # Results — rendered as raw HTML so each tier and quality
+                # icon can carry a native `title=` tooltip explaining the
+                # provenance and quality grade. Reflex's nested-foreach
+                # typing constraints rule out a per-result component tree, so
+                # the populator pre-renders the section as a string of div
+                # rows.
+                rx.cond(
+                    item["results_html"] != "",
+                    rx.box(
+                        rx.hstack(
+                            rx.text(item["result_count"], font_size="11px", color="var(--gray-a9)", font_weight="600"),
+                            rx.text(
+                                "result(s) retrieved:", font_size="11px", color="var(--gray-a9)", font_weight="600"
+                            ),
+                            spacing="1",
+                            align="center",
+                            margin_bottom="4px",
+                        ),
+                        rx.html(item["results_html"]),
+                        background="var(--gray-a2)",
+                        border=f"1px solid {SURFACE_BORDER}",
+                        border_radius="6px",
+                        padding="8px 10px",
+                        width="100%",
+                        overflow="hidden",
+                    ),
                 ),
+                # Source URLs
+                rx.cond(
+                    item["has_urls"] != "",
+                    rx.hstack(
+                        rx.icon("external-link", size=12, color="var(--gray-a8)"),
+                        rx.text("Sources:", font_size="11px", color="var(--gray-a9)", font_weight="600"),
+                        rx.text(item["has_urls"], font_size="11px", color=PRIMARY, word_break="break-all"),
+                        spacing="2",
+                        align="start",
+                        flex_wrap="wrap",
+                        padding_top="4px",
+                    ),
+                ),
+                spacing="2",
+                width="100%",
             ),
-            spacing="2",
             width="100%",
-        ),
-        width="100%",
-        padding="14px",
+            padding="14px",
         ),
         # Phase 1f anchor target + Phase 1d coloured left border. The
         # `border_left_css` string is pre-computed in the populator so the

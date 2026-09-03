@@ -1296,9 +1296,7 @@ def _process_trace_event(
                     position=position,
                     event_type=EventType.INTENT_RECOGNITION,
                     topic_name=topic,
-                    summary=f"Intent: {topic} ({intent_score:.0%})"
-                    if intent_score is not None
-                    else f"Intent: {topic}",
+                    summary=f"Intent: {topic} ({intent_score:.0%})" if intent_score is not None else f"Intent: {topic}",
                     intent_score=intent_score,
                 )
             )

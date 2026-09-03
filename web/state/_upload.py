@@ -809,6 +809,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_profile_inline_prompts = inline_rows  # type: ignore[attr-defined]
 
         from collections import Counter
+
         call_counts = Counter(cs.model_id for cs in profile.ai_builder_call_sites)
         sites_by_model: dict[str, list] = {}
         for cs in profile.ai_builder_call_sites:
@@ -1088,6 +1089,7 @@ class UploadMixin(rx.State, mixin=True):
         # most recent USER_MESSAGE turn. Same walk also builds
         # `events_by_turn` for the per-card raw-trace accordion.
         import re as _re
+
         bot_reply_by_turn: dict[str, str] = {}
         events_by_turn: dict[str, list] = {}
         current_turn: str | None = None
@@ -1130,13 +1132,9 @@ class UploadMixin(rx.State, mixin=True):
             if m_obj.model_name:
                 slot["models"].add(m_obj.model_name)
             if m_obj.text:
-                model_text_by_turn.setdefault(key, []).append(
-                    f"[{m_obj.variable_name}] {m_obj.text}"
-                )
+                model_text_by_turn.setdefault(key, []).append(f"[{m_obj.variable_name}] {m_obj.text}")
             if m_obj.thought_steps:
-                thought_steps_by_turn.setdefault(key, []).append(
-                    f"[{m_obj.variable_name}] {m_obj.thought_steps}"
-                )
+                thought_steps_by_turn.setdefault(key, []).append(f"[{m_obj.variable_name}] {m_obj.thought_steps}")
 
         def _metrics_strip_for(turn: str) -> str:
             slot = metrics_by_turn.get(turn)
@@ -1175,6 +1173,7 @@ class UploadMixin(rx.State, mixin=True):
             "bad": "var(--red-9)",
             "neutral": "var(--gray-a4)",
         }
+
         def _outcome_border_css(tone: str) -> str:
             return f"4px solid {_tone_to_color.get(tone, _tone_to_color['neutral'])}"
 
@@ -1256,21 +1255,15 @@ class UploadMixin(rx.State, mixin=True):
                 return ""
             parts = []
             if user_msg:
-                parts.append(
-                    f'<span style="color:var(--gray-a9)">💬</span> '
-                    f'<em>{_html_esc.escape(user_msg)}</em>'
-                )
+                parts.append(f'<span style="color:var(--gray-a9)">💬</span> <em>{_html_esc.escape(user_msg)}</em>')
             if q:
-                arrow = " <span style=\"color:var(--gray-a7)\">→</span> " if parts else ""
+                arrow = ' <span style="color:var(--gray-a7)">→</span> ' if parts else ""
                 parts.append(
-                    f'{arrow}<span style="color:var(--gray-a9)">🔎</span> '
-                    f'<strong>{_html_esc.escape(q)}</strong>'
+                    f'{arrow}<span style="color:var(--gray-a9)">🔎</span> <strong>{_html_esc.escape(q)}</strong>'
                 )
             html = (
                 '<div style="font-size:11px;color:var(--gray-11);'
-                'line-height:1.5;margin:4px 0;word-break:break-word">'
-                + "".join(parts)
-                + "</div>"
+                'line-height:1.5;margin:4px 0;word-break:break-word">' + "".join(parts) + "</div>"
             )
             if kw:
                 html += (
@@ -1295,17 +1288,11 @@ class UploadMixin(rx.State, mixin=True):
             kw = ks.search_keywords or ""
             ks_count = len(ks.knowledge_sources) if ks.knowledge_sources else 0
             ktds = ktd_by_turn.get(turn, [])
-            cited_names = sorted(
-                {name for a in ktds for name in (a.cited_source_names or [])}
-            )
+            cited_names = sorted({name for a in ktds for name in (a.cited_source_names or [])})
             cited_state = (ktds[0].completion_state if ktds else "") or ""
             calls = metrics_calls_by_turn.get(turn, [])
-            citations_this_turn = [
-                r for r in ks.search_results if r.result_type == "citation"
-            ]
-            reply_link_rows = [
-                r for r in ks.search_results if r.result_type == "bot_reply_link"
-            ]
+            citations_this_turn = [r for r in ks.search_results if r.result_type == "citation"]
+            reply_link_rows = [r for r in ks.search_results if r.result_type == "bot_reply_link"]
 
             def step(emoji: str, title: str, body: str) -> str:
                 return (
@@ -1325,13 +1312,9 @@ class UploadMixin(rx.State, mixin=True):
             if q or kw:
                 rewrite_body = ""
                 if q:
-                    rewrite_body += (
-                        f"<code>search_query</code>: <strong>{_html_esc.escape(q)}</strong><br/>"
-                    )
+                    rewrite_body += f"<code>search_query</code>: <strong>{_html_esc.escape(q)}</strong><br/>"
                 if kw:
-                    rewrite_body += (
-                        f"<code>keywords</code>: {_html_esc.escape(kw)}"
-                    )
+                    rewrite_body += f"<code>keywords</code>: {_html_esc.escape(kw)}"
                 blocks.append(
                     step(
                         "🔀",
@@ -1407,8 +1390,7 @@ class UploadMixin(rx.State, mixin=True):
                 blocks.append(
                     step(
                         "🔗",
-                        f"{len(reply_link_rows)} URL"
-                        f"{'s' if len(reply_link_rows) != 1 else ''} mentioned in bot reply",
+                        f"{len(reply_link_rows)} URL{'s' if len(reply_link_rows) != 1 else ''} mentioned in bot reply",
                         "Inferred citations: URLs the answer composer chose to "
                         "include in its markdown answer. Not authoritative — "
                         "treat as a fallback when CBResponse / KTD didn't fire.",
@@ -1418,8 +1400,7 @@ class UploadMixin(rx.State, mixin=True):
             missing_bits: list[str] = []
             if ks_count and not citations_this_turn:
                 missing_bits.append(
-                    "Actual SharePoint document snippets the answer composer "
-                    "read (this code path doesn't trace them)."
+                    "Actual SharePoint document snippets the answer composer read (this code path doesn't trace them)."
                 )
             if not ktds:
                 missing_bits.append("Runtime attribution (KnowledgeTraceData).")
@@ -1428,17 +1409,12 @@ class UploadMixin(rx.State, mixin=True):
                     step(
                         "❓",
                         "What's missing from the export",
-                        "<ul style=\"margin:0 0 0 16px;padding:0\">"
+                        '<ul style="margin:0 0 0 16px;padding:0">'
                         + "".join(f"<li>{m}</li>" for m in missing_bits)
                         + "</ul>",
                     )
                 )
-            return (
-                '<div style="font-family:var(--default-font-family);'
-                'font-size:12px">'
-                + "".join(blocks)
-                + "</div>"
-            )
+            return '<div style="font-family:var(--default-font-family);font-size:12px">' + "".join(blocks) + "</div>"
 
         def _raw_trace_html(ks) -> str:
             """Render the activity-by-activity event log for the bounding
@@ -1454,8 +1430,8 @@ class UploadMixin(rx.State, mixin=True):
                 summary = (ev.summary or "").replace("\n", " ")
                 rows.append(
                     f'<div style="font-family:var(--font-mono);font-size:11px;'
-                    'line-height:1.5;display:grid;grid-template-columns:1.5fr 6fr;'
-                    'gap:8px;padding:2px 0;border-bottom:1px dashed var(--gray-a3);'
+                    "line-height:1.5;display:grid;grid-template-columns:1.5fr 6fr;"
+                    "gap:8px;padding:2px 0;border-bottom:1px dashed var(--gray-a3);"
                     'word-break:break-word">'
                     f'<span style="color:var(--gray-a9)">{_html_esc.escape(t)}</span>'
                     f'<span style="color:var(--gray-11)">{_html_esc.escape(summary)}</span>'
@@ -1463,9 +1439,7 @@ class UploadMixin(rx.State, mixin=True):
                 )
             return (
                 '<div style="background:var(--gray-a2);border:1px solid var(--gray-a4);'
-                'border-radius:6px;padding:8px 10px;max-height:420px;overflow:auto">'
-                + "".join(rows)
-                + "</div>"
+                'border-radius:6px;padding:8px 10px;max-height:420px;overflow:auto">' + "".join(rows) + "</div>"
             )
 
         self.mcs_knowledge_kpis = [  # type: ignore[attr-defined]
@@ -1599,6 +1573,7 @@ class UploadMixin(rx.State, mixin=True):
             # per-result dicts inside the search-row dict, but we can
             # pre-render the section as raw HTML and render with rx.html.
             import html as _html
+
             result_count = len(ks.search_results)
             result_lines: list[str] = []
             url_parts: list[str] = []
@@ -1651,10 +1626,7 @@ class UploadMixin(rx.State, mixin=True):
                 tier_tt = tier_tooltip_for.get(r.result_type or "", "")
                 quality_tt = quality_tooltip_for.get(quality_icon, "")
                 snippet = (r.text or "").replace("\n", " ")
-                result_lines.append(
-                    f"{tier_badge} {quality_icon} {j}. {title}"
-                    + (f" — {snippet}" if snippet else "")
-                )
+                result_lines.append(f"{tier_badge} {quality_icon} {j}. {title}" + (f" — {snippet}" if snippet else ""))
                 # HTML version: tier + quality icons wrapped in <span title="…">
                 # for native browser tooltips. Snippet body is rendered in
                 # full — no preview cap — per user requirement.
@@ -1690,8 +1662,7 @@ class UploadMixin(rx.State, mixin=True):
                     f' <span title="{_html.escape(quality_tt)}" '
                     f'style="cursor:help">{quality_icon}</span>'
                     f" {j}. {title_html}{snippet_html}"
-                    f"</div>"
-                    + cause_subline
+                    f"</div>" + cause_subline
                 )
                 if r.url:
                     url_parts.append(r.url)
@@ -1740,12 +1711,8 @@ class UploadMixin(rx.State, mixin=True):
                     # produce: ticket-eligibility check, response
                     # composer, etc.). Distinct from `bot_reply_text`
                     # (the final composed reply emitted to the user).
-                    "model_text": "\n\n".join(
-                        model_text_by_turn.get(ks.triggering_user_message or "", [])
-                    ),
-                    "model_thought_steps": "\n\n".join(
-                        thought_steps_by_turn.get(ks.triggering_user_message or "", [])
-                    ),
+                    "model_text": "\n\n".join(model_text_by_turn.get(ks.triggering_user_message or "", [])),
+                    "model_thought_steps": "\n\n".join(thought_steps_by_turn.get(ks.triggering_user_message or "", [])),
                     # Phase 1d: tone keyword + pre-rendered CSS string for
                     # the card's coloured left border. Pre-rendering here
                     # keeps the Reflex render function free of Var-keyed
@@ -1886,6 +1853,7 @@ class UploadMixin(rx.State, mixin=True):
             if lang_label and lang_label.startswith("{"):
                 # Best-effort: pull the `"value":"..."` substring.
                 import re as _lang_re
+
                 match = _lang_re.search(r'"value"\s*:\s*"([^"]+)"', lang_label)
                 if match:
                     lang_label = match.group(1)
@@ -1905,9 +1873,7 @@ class UploadMixin(rx.State, mixin=True):
         self.mcs_knowledge_turn_contexts = turn_context_rows  # type: ignore[attr-defined]
 
         if attributions:
-            citation_suffix = (
-                f" · {len(citations)} citation{'s' if len(citations) != 1 else ''}" if citations else ""
-            )
+            citation_suffix = f" · {len(citations)} citation{'s' if len(citations) != 1 else ''}" if citations else ""
             self.mcs_knowledge_attribution_summary = (  # type: ignore[attr-defined]
                 f"{len(attributions)} turns used knowledge · {answered_turns} answered · "
                 f"{len(searches)} orchestrator search{'es' if len(searches) != 1 else ''}"
@@ -1946,19 +1912,24 @@ class UploadMixin(rx.State, mixin=True):
         # turns ("What parking rules apply at ING?" × 7) collapse into a
         # cluster card. Normalization: strip whitespace + punctuation + lowercase.
         import re as _re2
+
         def _norm(s: str) -> str:
             return _re2.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
         cluster_map: dict[str, dict] = {}
         for ks in searches:
             key = _norm(ks.triggering_user_message or "")
             if not key:
                 continue
-            slot = cluster_map.setdefault(key, {
-                "representative_turn": ks.triggering_user_message or "",
-                "turn_messages": [],
-                "search_count": 0,
-                "with_citation_count": 0,
-            })
+            slot = cluster_map.setdefault(
+                key,
+                {
+                    "representative_turn": ks.triggering_user_message or "",
+                    "turn_messages": [],
+                    "search_count": 0,
+                    "with_citation_count": 0,
+                },
+            )
             if ks.triggering_user_message and ks.triggering_user_message not in slot["turn_messages"]:
                 slot["turn_messages"].append(ks.triggering_user_message)
             slot["search_count"] += 1
@@ -1968,12 +1939,14 @@ class UploadMixin(rx.State, mixin=True):
         for key, slot in cluster_map.items():
             if slot["search_count"] < 2:
                 continue  # not a cluster — single-search turns are uninteresting.
-            cluster_rows.append({
-                "representative_turn": slot["representative_turn"],
-                "occurrences": str(slot["search_count"]),
-                "with_citation": str(slot["with_citation_count"]),
-                "turn_list_text": "; ".join(slot["turn_messages"]),
-            })
+            cluster_rows.append(
+                {
+                    "representative_turn": slot["representative_turn"],
+                    "occurrences": str(slot["search_count"]),
+                    "with_citation": str(slot["with_citation_count"]),
+                    "turn_list_text": "; ".join(slot["turn_messages"]),
+                }
+            )
         # Sort by frequency descending so the most-repeated question is first.
         cluster_rows.sort(key=lambda r: int(r["occurrences"]), reverse=True)
         self.mcs_knowledge_clusters = cluster_rows  # type: ignore[attr-defined]
@@ -1995,8 +1968,7 @@ class UploadMixin(rx.State, mixin=True):
             searched_count = 0
             for ks in searches:
                 cited = any(
-                    (r.name or "").lower() == src_name.lower()
-                    or clean_src.lower() in (r.name or "").lower()
+                    (r.name or "").lower() == src_name.lower() or clean_src.lower() in (r.name or "").lower()
                     for r in ks.search_results
                     if r.result_type in ("kt_attribution", "citation")
                 )
@@ -2012,11 +1984,13 @@ class UploadMixin(rx.State, mixin=True):
                     searched_count += 1
                 else:
                     cells_chars.append("⬜")
-            heatmap_rows.append({
-                "source_name": src_name,
-                "cells_str": "".join(cells_chars),
-                "summary": f"cited {cited_count}x · searched only {searched_count}x",
-            })
+            heatmap_rows.append(
+                {
+                    "source_name": src_name,
+                    "cells_str": "".join(cells_chars),
+                    "summary": f"cited {cited_count}x · searched only {searched_count}x",
+                }
+            )
         self.mcs_knowledge_heatmap = heatmap_rows  # type: ignore[attr-defined]
 
         # Custom search steps
@@ -2594,6 +2568,7 @@ class UploadMixin(rx.State, mixin=True):
 
         # model_id -> aggregator
         from collections import Counter as _Counter
+
         runtime_by_model: dict[str, dict] = {}
         for m in metrics_list:
             site = var_to_site.get(m.variable_name)
@@ -2616,9 +2591,7 @@ class UploadMixin(rx.State, mixin=True):
             slot["calls"] += 1
             slot["prompt_tokens"] += m.prompt_tokens or 0
             slot["completion_tokens"] += m.completion_tokens or 0
-            slot["total_tokens"] += (
-                m.total_tokens or ((m.prompt_tokens or 0) + (m.completion_tokens or 0))
-            )
+            slot["total_tokens"] += m.total_tokens or ((m.prompt_tokens or 0) + (m.completion_tokens or 0))
             slot["credits"] += m.copilot_credits or 0.0
             slot["ai_builder_credits"] += m.ai_builder_credits or 0.0
             if m.model_name:
@@ -2641,9 +2614,7 @@ class UploadMixin(rx.State, mixin=True):
             ai_credits = float(slot.get("ai_builder_credits", 0.0))
             models_used = sorted(slot.get("models_used") or set())
             topic_counter: _Counter = slot.get("topics") or _Counter()
-            topics_str = ", ".join(
-                f"{topic} ×{count}" for topic, count in topic_counter.most_common()
-            )
+            topics_str = ", ".join(f"{topic} ×{count}" for topic, count in topic_counter.most_common())
             summary_rows.append(
                 {
                     "name": m.name or "(unnamed)",
