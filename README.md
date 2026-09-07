@@ -19,6 +19,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 - [What It Extracts](#what-it-extracts)
 - [Tool Call Analysis](#tool-call-analysis)
 - [Rules engine](#rules-engine)
+- [Instruction Audit (static)](#instruction-audit-static)
 - [Report Structure](#report-structure)
 - [Exports](#exports)
 - [Dataverse Connection](#dataverse-connection)
@@ -38,6 +39,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 - **Performance insights** — per-turn efficiency metrics, latency bottleneck identification, between-activity gap waterfall, knowledge source effectiveness, and multi-agent delegation tracing
 - **Conversation quality analysis** — response groundedness scoring, hallucination risk detection, instruction compliance checking, and dead code detection
 - **Works with exports and live Dataverse** — upload a `.zip` export, or connect directly to your environment and auto-analyse on login
+- **Catch contradictory instructions without an API key** — every report runs an offline logical audit of the agent's own system prompt and inline prompts ([Instruction Audit](#instruction-audit-static))
 - **Catch issues with AI-powered linting of agent instructions** — multi-mode audit runner (Static Config + opt-in Conversation Summary / Sentiment / PII / Answer Accuracy / Topic Routing / Custom prompts) powered by OpenAI or Anthropic
 - **AgentRX-style failure diagnosis** — root-cause attribution into 10 categories with critical-step localization, secondary findings, and a streaming chat panel to interrogate the verdict
 
@@ -59,6 +61,7 @@ Everything you need to build with confidence and debug without guessing. If you'
 | **Plan evolution diffs** | Structured diffs between consecutive orchestrator plans within a turn — detects thrashing, scope creep, and re-planning patterns |
 | **Batch analytics** | Aggregate multiple Dataverse transcripts — success/failure/escalation rates, topic usage, error patterns, credit estimates |
 | **Custom rules** | 18 default best-practice rules + user-defined YAML rules, evaluated during analysis |
+| **Instruction Audit (static)** | Offline logical audit of the agent's own instructions — contradictions, priority conflicts, self-referential rules, absolute rules with exceptions. No API key, no network |
 | **Tool call analysis** | Runtime tool call tracing — per-tool statistics, async chain detection, orchestrator reasoning, Mermaid flow diagrams. Supports MCP servers, connectors, child/connected agents, A2A, flows, CUA |
 | **Component Explorer** | Inline searchable picker over every topic and tool (User / System / Automation topics, MCP servers, connectors, flows, child / connected / A2A agents) with KB-sourced explanations per setting |
 | **LLM Audit Runner** | Multi-mode audit (default + opt-in: conversation summary / sentiment / PII / answer accuracy / topic routing / custom prompts) — runs in parallel via OpenAI or Anthropic |
@@ -434,25 +437,77 @@ CUSTOM_RULES_FILE=data/default_rules.yaml
 - **Analysis reports** — Quick Wins section with emoji severity indicators (🔴 fail, 🟡 warning, 🔵 info) and styled badges
 - **Rules page** (`/rules`) — view, edit, and manage rules in the web UI
 
+## Instruction Audit (static)
+
+Every report runs an offline logical audit of the **analysed agent's own instruction text** and renders it as the `## Instruction Audit (static)` section. It is powered by [rule-audit](https://github.com/hermes-labs-ai/rule-audit) — the same static analyzer this repo already runs as a pre-commit hook on its own judge prompts, here pointed at your bot instead.
+
+Unlike the [LLM Audit Runner](#llm-audit-runner), this needs no API key and makes no network call. It is pure Python, runs in milliseconds on real prompts (10 ms across all four test fixtures), and is deterministic: the same export produces the same section every time.
+
+**What it audits.** Instruction *prose* only — the fields a model actually reads as its rules:
+
+| Asset | Where it comes from |
+| --- | --- |
+| Agent system instructions | `gptComponentMetadata.instructions` |
+| Connected-agent instructions | `AgentDialog` components → `settings.instructions` |
+| Inline topic prompts | `SearchAndSummarizeContent.additionalInstructions` |
+
+Topic and tool `description` / `modelDescription` fields are agent *config* rather than instruction prose, so they are deliberately out of scope.
+
+**What it finds.**
+
+| Finding | What it means |
+| --- | --- |
+| **Contradictions** | Two rules give opposing directives on the same topic, or an unconditional rule collides with a conditional one. Reported with severity and the character span of both rules |
+| **Priority conflicts** | Both rules fire and nothing in the prompt says which wins |
+| **Meta-paradoxes** | Instructions that refer to themselves in a way that cannot be satisfied |
+| **Absolute rules with exceptions** | An "always" / "never" rule with an obvious legitimate exception |
+| **Coverage gaps** | Topics the prompt never addresses. Collapsed and marked advisory — these fire on any short prompt |
+
+**Statuses** follow rule-audit's published contract — `LOW → pass`, `MEDIUM → warn`, `HIGH`/`CRITICAL` → `fail` (the case where `rule-audit` exits `2`) — with one addition: when rule-audit parses **zero** rules from an asset, the status is `unknown`, not `pass` and not `fail`. With no rules, the risk score is just `gaps × 5` against an empty rule set, so it can read anywhere from LOW to HIGH; nothing was checked, so the result says nothing about the prompt either way.
+
+**Bounded by design.** Contradiction detection is O(rules²) and the report renders synchronously, so three limits apply and every one of them is stated in the output rather than applied silently:
+
+| Limit | Value | Effect |
+| --- | --- | --- |
+| Per-asset input | 8,000 chars | Larger assets are listed with status `unknown` and the reason |
+| Per-report budget | 32,000 chars | Assets past the budget are listed with status `unknown` and the reason |
+| Findings shown | 50 per kind, per asset | The rest are counted in an "…and N more" line |
+
+Worst case with maximally adversarial input is ~1.4 s and ~85 KB of Markdown; the four test fixtures together take 10 ms.
+
+Findings are lexical, not semantic. rule-audit reasons about modality (`must` / `must not` / `may`) and shared keywords, so it misses contradictions phrased indirectly and can flag pairs a human would reconcile from context. Read each row as a prompt to re-read those two rules, not as a defect.
+
+Identical prompt text used in several places is audited once and cross-referenced, so a shared conversational-boosting block is not re-scanned per topic.
+
+### Turning it off
+
+```bash
+MCS_DISABLE_INSTRUCTION_AUDIT=1     # in .env — the section is skipped entirely
+```
+
+To remove it completely, drop `rule-audit` from `[project] dependencies` in `pyproject.toml` and re-run `uv lock && uv sync`. The section then degrades to a one-line note pointing at the missing package instead of failing, and no other feature is affected — `tests/test_instruction_audit.py` skips itself, and the rest of the suite still runs.
+
 ## Report Structure
 
 Each generated report contains:
 
 1. **TL;DR** — one-line bot summary with key stats
 2. **AI Configuration** — GPT model, knowledge sources, web browsing, code interpreter, system instructions (collapsible)
-3. **Bot Profile** — Schema name, bot ID, channels, recognizer, AI settings
-4. **Quick Wins** — custom rules results with severity badges
-5. **Components** — smart categorization (User/Orchestrator/System/Automation Topics, Knowledge, Skills, Entities, Variables, Settings) with tailored columns per category
-6. **Trigger Overlaps** — topics with similar trigger queries that may compete
-7. **Topic Connection Graph** — Mermaid flowchart of topic-to-topic calls with conditions
-8. **Security Inventory** — auth mode, access control, content moderation, App Insights settings
-9. **Tool Inventory** — action/connector tools available in orchestrator bots
-10. **Knowledge Inventory** — knowledge sources with type and configuration
-11. **Integration Map** — Mermaid diagram of external connections
-12. **Credit Estimate** — MCS message credit estimation based on bot features
-13. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log, errors
-14. **Routing Analysis** — orchestrator decision timeline with routing scores, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution with per-step confidence and diff detection, trigger phrase similarity analysis, condition evaluations
-15. **Failure Diagnosis** — when the heuristic engine flags non-trivial violations: critical step, category, evidence table, canned recommendations (see [AgentRX](#failure-diagnosis-agentrx))
+3. **Prompts (static)** — inline `SearchAndSummarizeContent` prompts and AI Builder prompt stubs
+4. **Instruction Audit (static)** — offline contradiction / priority / meta-paradox / absoluteness findings on the agent's instruction text, with character spans
+5. **Bot Profile** — Schema name, bot ID, channels, recognizer, AI settings
+6. **Quick Wins** — custom rules results with severity badges
+7. **Components** — smart categorization (User/Orchestrator/System/Automation Topics, Knowledge, Skills, Entities, Variables, Settings) with tailored columns per category
+8. **Trigger Overlaps** — topics with similar trigger queries that may compete
+9. **Topic Connection Graph** — Mermaid flowchart of topic-to-topic calls with conditions
+10. **Security Inventory** — auth mode, access control, content moderation, App Insights settings
+11. **Tool Inventory** — action/connector tools available in orchestrator bots
+12. **Knowledge Inventory** — knowledge sources with type and configuration
+13. **Integration Map** — Mermaid diagram of external connections
+14. **Credit Estimate** — MCS message credit estimation based on bot features
+15. **Conversation Trace** — sequence diagram, Gantt chart, phase breakdown, event log, errors
+16. **Routing Analysis** — orchestrator decision timeline with routing scores, topic lifecycles (including redirects to Fallback/GenAI topics), plan evolution with per-step confidence and diff detection, trigger phrase similarity analysis, condition evaluations
+17. **Failure Diagnosis** — when the heuristic engine flags non-trivial violations: critical step, category, evidence table, canned recommendations (see [AgentRX](#failure-diagnosis-agentrx))
 
 The dynamic analysis view adds interactive versions of these sections across 6 tabs, plus conversation analysis features: turn efficiency, response quality scoring, dead code detection, knowledge source effectiveness, multi-agent delegation tracing, latency bottleneck analysis, and instruction-to-behavior alignment checking.
 
@@ -473,7 +528,7 @@ Every dynamic-page surface is reflected in the exports — what you see on scree
 | **PDF (Print)** | Download → Print to PDF | Browser print of the HTML view. |
 | **Audit bundle (`.md`)** | Download Audit (Quality tab) | Audit-runner output on its own — every selected mode's result, model attribution, error per mode. |
 
-The markdown report includes: TL;DR, Quick Wins, AI configuration, security, bot metadata, sequence + Gantt diagrams, conversation flow with AUTO/MANUAL annotations, **Performance Waterfall**, **Variable Tracker**, orchestrator reasoning, decision timeline, plan evolution, topic lifecycles, topic + tool inventory (split by `tool_type`), **Component Settings Explained** (per-component action tree), integration map, model comparison, knowledge inventory + coverage + source details + search results, **Citation Verification** table, trigger phrase analysis, MCS credit estimate, **Failure Diagnosis** when applicable.
+The markdown report includes: TL;DR, Quick Wins, AI configuration, **Instruction Audit (static)**, security, bot metadata, sequence + Gantt diagrams, conversation flow with AUTO/MANUAL annotations, **Performance Waterfall**, **Variable Tracker**, orchestrator reasoning, decision timeline, plan evolution, topic lifecycles, topic + tool inventory (split by `tool_type`), **Component Settings Explained** (per-component action tree), integration map, model comparison, knowledge inventory + coverage + source details + search results, **Citation Verification** table, trigger phrase analysis, MCS credit estimate, **Failure Diagnosis** when applicable.
 
 ## Dataverse Connection
 
@@ -859,6 +914,7 @@ dataverse_client.py      Dataverse Web API client (bot config, components, trans
 analytics.py             Multi-transcript aggregation used by the Dataverse batch analytics view
 custom_rules.py          YAML rule loader and evaluator
 instruction_store.py     Instruction storage utilities
+instruction_audit.py     Offline instruction audit — harvests instruction assets, delegates to rule-audit (no detection logic of its own)
 linter.py                Instruction lint logic (OpenAI + Anthropic, model resolution, audit prompt)
 utils.py                 Shared utilities
 rxconfig.py              Reflex app config

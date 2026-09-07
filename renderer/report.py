@@ -13,6 +13,7 @@ from ._helpers import (
     empty_section_stub,
 )
 from model_comparison import build_comparison_markdown
+from .instruction_audit import render_instruction_audit_section
 from .knowledge import render_knowledge_search_section
 from .prompts import render_prompts_section
 from .tools import render_tool_analysis
@@ -166,6 +167,12 @@ def render_report(
     prompts_section = render_prompts_section(profile)
     if prompts_section:
         sections.append(prompts_section)
+
+    # 3.6 Instruction Audit — offline rule-audit pass over the agent's own
+    # instruction text. Local and deterministic; no network, no API key.
+    instruction_audit = render_instruction_audit_section(profile)
+    if instruction_audit:
+        sections.append(instruction_audit)
 
     # 4. Security Inventory
     security = render_security_summary(profile)
