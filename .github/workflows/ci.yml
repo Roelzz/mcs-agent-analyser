@@ -15,6 +15,8 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - name: Audit system prompts
+        run: uvx pre-commit run rule-audit --all-files --verbose
 
   test:
     runs-on: ubuntu-latest
