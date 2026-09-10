@@ -11,6 +11,7 @@ from ._helpers import (
     _sanitize_table_cell,
     _topic_display,
 )
+from .instruction_audit import render_instruction_audit_section
 from .knowledge import (
     _grounding_score,
     _source_efficiency,
@@ -81,6 +82,7 @@ __all__ = [
     "render_errors",
     "render_event_log",
     "render_gantt_chart",
+    "render_instruction_audit_section",
     "render_instruction_drift",
     "render_integration_map",
     "render_knowledge_coverage",

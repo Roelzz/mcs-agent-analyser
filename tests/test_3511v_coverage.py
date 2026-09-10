@@ -250,6 +250,7 @@ def test_no_section_silently_omitted(report_3511v: str) -> None:
     expected = [
         "## TL;DR",
         "## AI Configuration",
+        "## Instruction Audit (static)",
         "## Bot Profile",
         "## Conversation Trace",
         "## Conversation Summary",

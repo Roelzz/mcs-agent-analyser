@@ -16,6 +16,8 @@ class Settings(BaseSettings):
 
     # Feature flags
     mcs_enable_model_comparison: bool = False
+    # Skip the offline rule-audit pass over the bot's instruction text.
+    mcs_disable_instruction_audit: bool = False
 
     # Custom rules
     custom_rules_file: str = ""

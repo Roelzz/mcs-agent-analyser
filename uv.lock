@@ -18,6 +18,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "reflex" },
+    { name = "rule-audit" },
     { name = "typer" },
 ]
 
@@ -40,6 +41,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "reflex", specifier = ">=0.9.1" },
+    { name = "rule-audit", specifier = ">=0.3.1,<0.4" },
     { name = "typer", specifier = ">=0.23.1" },
 ]
 
@@ -1156,6 +1158,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f6/58/ac864a75067dcbd3b95be5ab4eb2b601d7fbc3d3d736a27e391a4f92a5c1/ruff-0.15.1-py3-none-win32.whl", hash = "sha256:660975d9cb49b5d5278b12b03bb9951d554543a90b74ed5d366b20e2c57c2098", size = 10462555, upload-time = "2026-02-12T23:09:29.899Z" },
     { url = "https://files.pythonhosted.org/packages/e0/5e/d4ccc8a27ecdb78116feac4935dfc39d1304536f4296168f91ed3ec00cd2/ruff-0.15.1-py3-none-win_amd64.whl", hash = "sha256:c820fef9dd5d4172a6570e5721704a96c6679b80cf7be41659ed439653f62336", size = 11599956, upload-time = "2026-02-12T23:09:01.157Z" },
     { url = "https://files.pythonhosted.org/packages/2a/07/5bda6a85b220c64c65686bc85bd0bbb23b29c62b3a9f9433fa55f17cda93/ruff-0.15.1-py3-none-win_arm64.whl", hash = "sha256:5ff7d5f0f88567850f45081fac8f4ec212be8d0b963e385c3f7d0d2eb4899416", size = 10874604, upload-time = "2026-02-12T23:09:05.515Z" },
+]
+
+[[package]]
+name = "rule-audit"
+version = "0.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c2/03/b184e9cc70ee7bba00d64ddffad4119ae3650f6aeb0268ae9981ce810648/rule_audit-0.3.1.tar.gz", hash = "sha256:e51479fa80352d1afacd3a70ce5641b78009eeee5704313bb8a9f1cb3cc30c1e", size = 63271, upload-time = "2026-09-07T11:35:44.498Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/fd/ca5662f1c38990972eea3872ffbf359b8caa030b96b9b0d9ff5f78079ca2/rule_audit-0.3.1-py3-none-any.whl", hash = "sha256:18b07a9e7d240bacc4e59bb5652510e0c3f6fef0c95af5484fbf20d07ae9e278", size = 47168, upload-time = "2026-09-07T11:35:43.376Z" },
 ]
 
 [[package]]
