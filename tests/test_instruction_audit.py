@@ -431,6 +431,45 @@ def test_hostile_schema_name_cannot_inject_markup_into_the_html_export() -> None
     assert html.count("<code>x'&lt;img src=x onerror=alert(1)&gt;'") == 2
 
 
+def test_hostile_display_names_cannot_become_links_in_the_html_export() -> None:
+    """Display names are shown as plain text, but Markdown link syntax in one
+    would survive HTML escaping and render as a clickable `javascript:` link
+    in the standalone export. Includes a pre-escaped variant, since a naive
+    `[` -> `\\[` is undone by a leading backslash in the input."""
+    markdown_it = pytest.importorskip("markdown_it")
+    from web.mermaid import build_standalone_html
+
+    links = "[a](javascript:alert(1)) \\[b\\](javascript:alert(2)) ![c](javascript:alert(3)) [d][r]\n\n[r]: javascript:alert(4)"
+    profile = BotProfile(
+        display_name=links,
+        schema_name="t.b",
+        gpt_info=GptInfo(display_name="x", instructions=CONFLICTING),
+        components=[
+            ComponentSummary(
+                schema_name="t.c",
+                display_name=links,
+                kind="DialogComponent",
+                agent_instructions="You must always escalate. You must never escalate.",
+            )
+        ],
+        inline_prompts=[InlinePrompt(host_topic_schema="t.p", host_topic_display=links, text=CONFLICTING)],
+    )
+    section = render_instruction_audit_section(profile)
+
+    page = build_standalone_html(section, "report")
+    literal = page.split("const md = `", 1)[1].split("`;\n", 1)[0]
+    markdown = re.sub(r"\\(.)", r"\1", literal, flags=re.S)
+    assert markdown == section
+
+    md = markdown_it.MarkdownIt("commonmark")
+    md.validateLink = lambda url: True  # `marked` does not filter URL schemes
+    html = md.render(markdown)
+
+    # The only link left is the fixed one to rule-audit in the intro.
+    assert set(re.findall(r'(?:href|src)="([^"]*)"', html)) == {"https://github.com/hermes-labs-ai/rule-audit"}
+    assert "javascript:alert(1)" in html  # shown as inert text, not dropped
+
+
 def test_rule_text_with_pipes_never_breaks_a_table() -> None:
     profile = _profile_with(
         gpt_info=GptInfo(

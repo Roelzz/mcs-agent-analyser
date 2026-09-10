@@ -61,10 +61,14 @@ def _text(value: object) -> str:
     HTML and Markdown that would otherwise be interpreted. The exports run
     the report through `marked.parse` into `innerHTML` with no sanitizer
     (`web/mermaid.py`), so a prompt containing `<img onerror=...>` or a
-    stray `</details>` must not survive as live markup.
+    stray `</details>` must not survive as live markup. Square brackets are
+    escaped too, so `[x](javascript:...)` cannot become a clickable link —
+    and backslashes first, so an input `\\[` cannot cancel that escape.
+    Never place the result inside a code span, where escapes do not apply.
     """
-    text = _sanitize_table_cell(str(value))
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("`", "\\`")
+    text = _sanitize_table_cell(str(value)).replace("\\", "\\\\")
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return text.replace("`", "\\`").replace("[", "\\[").replace("]", "\\]")
 
 
 def _code(value: object) -> str:
