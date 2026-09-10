@@ -6,6 +6,7 @@ was checked" into "clean", it scans each unique prompt exactly once, it
 refuses to hang on a pathological asset, and it renders deterministically.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,39 @@ def test_status_uses_rule_audits_severity_map() -> None:
     assert asset.rule_count > 0
     assert asset.status == RISK_SEVERITY[asset.risk_label]
     assert asset.status == "fail"  # this prompt is HIGH/CRITICAL
+
+
+def test_inline_prompts_are_scored_on_rule_level_findings_only() -> None:
+    """A narrow `additionalInstructions` block is not meant to cover every
+    system-prompt safety domain, so the coverage gaps that dominate
+    rule-audit's composite must not turn it red on their own."""
+    narrow = "You must cite the policy name in every answer."
+    profile = _profile_with(
+        inline_prompts=[InlinePrompt(host_topic_schema="t.a", host_topic_display="Narrow", text=narrow)]
+    )
+    report = audit_instructions(profile)
+    asset = report.assets[0]
+
+    # Precondition: the system-prompt composite alone would have failed it.
+    assert asset.rule_count > 0 and asset.evidence_count == 0
+    assert RISK_SEVERITY[asset.risk_label] == "fail"
+    assert asset.status == "pass"
+    assert report.exit_code == 0
+
+    section = render_instruction_audit_section(profile)
+    row = next(line for line in section.splitlines() if line.startswith("| Narrow"))
+    assert "\U0001f7e2 pass" in row
+    assert "rule-audit risk:" not in section
+    assert "Coverage gaps" not in section
+
+    # A real high-severity contradiction in an inline prompt still fails.
+    conflicting = _profile_with(
+        inline_prompts=[InlinePrompt(host_topic_schema="t.b", host_topic_display="B", text=CONFLICTING)]
+    )
+    conflicting_report = audit_instructions(conflicting)
+    assert conflicting_report.high_severity_contradictions > 0
+    assert conflicting_report.assets[0].status == "fail"
+    assert conflicting_report.exit_code == 2
 
 
 def test_exit_code_restates_the_cli_contract() -> None:
@@ -360,6 +394,41 @@ def test_untrusted_prompt_text_is_never_emitted_as_live_markup() -> None:
     # `</details>` from the prompt only ever appears inside a fenced block,
     # where Markdown renders it as text rather than closing the element.
     assert outside.count("<details>") == outside.count("</details>") > 0
+
+
+def test_hostile_schema_name_cannot_inject_markup_into_the_html_export() -> None:
+    """Schema names come straight from the uploaded YAML and are shown as the
+    asset's source. Drive one through the standalone HTML export and a
+    CommonMark renderer with raw HTML enabled — as `marked` has — and check
+    it cannot break out of its code span into live markup or a link."""
+    markdown_it = pytest.importorskip("markdown_it")
+    from web.mermaid import build_standalone_html
+
+    evil = "x`<img src=x onerror=alert(1)>`\n\n[click](javascript:alert(2))`"
+    profile = _profile_with(
+        components=[
+            ComponentSummary(
+                schema_name=evil,
+                display_name="Child",
+                kind="DialogComponent",
+                agent_instructions="You must always escalate. You must never escalate.",
+            )
+        ],
+        inline_prompts=[InlinePrompt(host_topic_schema=evil, host_topic_display="T", text=CONFLICTING)],
+    )
+    section = render_instruction_audit_section(profile)
+
+    page = build_standalone_html(section, "report")
+    literal = page.split("const md = `", 1)[1].split("`;\n", 1)[0]
+    # Undo the exporter's JS template-literal escaping; the round trip must be exact.
+    markdown = re.sub(r"\\(.)", r"\1", literal, flags=re.S)
+    assert markdown == section
+
+    html = markdown_it.MarkdownIt("commonmark").render(markdown)
+    assert "<img" not in html
+    assert 'href="javascript' not in html
+    # Both hostile sources render as inert text inside their code spans.
+    assert html.count("<code>x'&lt;img src=x onerror=alert(1)&gt;'") == 2
 
 
 def test_rule_text_with_pipes_never_breaks_a_table() -> None:

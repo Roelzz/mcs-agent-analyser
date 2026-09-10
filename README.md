@@ -465,6 +465,8 @@ Topic and tool `description` / `modelDescription` fields are agent *config* rath
 
 **Statuses** follow rule-audit's published contract — `LOW → pass`, `MEDIUM → warn`, `HIGH`/`CRITICAL` → `fail` (the case where `rule-audit` exits `2`) — with one addition: when rule-audit parses **zero** rules from an asset, the status is `unknown`, not `pass` and not `fail`. With no rules, the risk score is just `gaps × 5` against an empty rule set, so it can read anywhere from LOW to HIGH; nothing was checked, so the result says nothing about the prompt either way.
 
+**Inline topic prompts are scored on their own terms.** rule-audit's risk score is a system-prompt composite driven mostly by coverage gaps, and a narrow `additionalInstructions` block is not meant to cover every system-level safety domain. So inline prompts skip the composite and the gap list, and take their status from rule-level findings alone, at the severity rule-audit's evidence envelope assigns: a high-severity contradiction is `fail`, any other rule-level finding is `warn`, none is `pass`.
+
 **Bounded by design.** Contradiction detection is O(rules²) and the report renders synchronously, so three limits apply and every one of them is stated in the output rather than applied silently:
 
 | Limit | Value | Effect |

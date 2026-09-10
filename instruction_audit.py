@@ -9,7 +9,8 @@ pass/warn/fail mapping all come from rule-audit's published contract:
 
     LOW -> pass, MEDIUM -> warn, HIGH/CRITICAL -> fail (the CLI's exit-2 case)
 
-which is `rule_audit.evidence.RISK_SEVERITY` verbatim.
+which is `rule_audit.evidence.RISK_SEVERITY` verbatim. Inline topic prompts
+are the exception: see `_inline_status`.
 
 Scope is deliberately *instruction text* — the main agent system prompt,
 connected-agent instructions, and inline `SearchAndSummarizeContent`
@@ -35,7 +36,7 @@ from models import BotProfile
 
 try:  # pragma: no cover - exercised by test_missing_dependency_degrades
     from rule_audit import __version__ as RULE_AUDIT_VERSION, audit
-    from rule_audit.evidence import RISK_SEVERITY
+    from rule_audit.evidence import CONTRADICTION_SEVERITY, RISK_SEVERITY
 
     RULE_AUDIT_AVAILABLE = True
 except ImportError:  # pragma: no cover - only when the optional dep is removed
@@ -65,7 +66,9 @@ class InstructionAsset(BaseModel):
 
     kind: str  # "agent" | "connected_agent" | "inline_prompt"
     label: str
-    source: str  # where in the export it came from, for the report
+    #: Where in the export it came from. Embeds schema names read from the
+    #: upload, so it is untrusted and must be escaped when rendered.
+    source: str
     text: str
 
 
@@ -104,6 +107,12 @@ class AssetAudit(BaseModel):
             + len(self.meta_paradoxes)
             + len(self.absoluteness_issues)
         )
+
+    @property
+    def uses_composite_risk(self) -> bool:
+        """Whether rule-audit's system-prompt risk score and coverage gaps
+        apply. They do not for inline topic prompts — see `_inline_status`."""
+        return self.kind != "inline_prompt"
 
 
 class InstructionAuditReport(BaseModel):
@@ -148,7 +157,7 @@ def collect_instruction_assets(profile: BotProfile) -> list[InstructionAsset]:
             InstructionAsset(
                 kind="agent",
                 label=f"{profile.display_name} — system instructions",
-                source="`gptComponentMetadata.instructions`",
+                source="gptComponentMetadata.instructions",
                 text=gpt.instructions,
             )
         )
@@ -159,7 +168,7 @@ def collect_instruction_assets(profile: BotProfile) -> list[InstructionAsset]:
                 InstructionAsset(
                     kind="connected_agent",
                     label=f"{component.display_name} — agent instructions",
-                    source=f"`{component.schema_name}` → `settings.instructions`",
+                    source=f"{component.schema_name} → settings.instructions",
                     text=component.agent_instructions,
                 )
             )
@@ -171,7 +180,7 @@ def collect_instruction_assets(profile: BotProfile) -> list[InstructionAsset]:
             InstructionAsset(
                 kind="inline_prompt",
                 label=f"{prompt.host_topic_display} — {prompt.kind}",
-                source=f"`{prompt.host_topic_schema}` → `additionalInstructions`",
+                source=f"{prompt.host_topic_schema} → additionalInstructions",
                 text=prompt.text,
             )
         )
@@ -194,6 +203,26 @@ def _status_for(risk_label: str, rule_count: int) -> str:
     if rule_count == 0:
         return UNKNOWN
     return RISK_SEVERITY.get(risk_label, "warn")
+
+
+def _inline_status(data: dict) -> str:
+    """Status for a `SearchAndSummarizeContent.additionalInstructions` block.
+
+    rule-audit's risk score is a *system-prompt* composite, and most of it is
+    coverage gaps — safety domains the text never mentions. A two-line topic
+    prompt is not meant to cover those, so the composite would paint ordinary
+    topic instructions red. These are judged only on the rule-level findings
+    that apply to them, each at the severity rule-audit's own evidence
+    envelope gives it: a high contradiction fails, anything else warns.
+    """
+    if data.get("rule_count", 0) == 0:
+        return UNKNOWN
+    severities = [CONTRADICTION_SEVERITY.get(c.get("severity"), "warn") for c in data.get("contradictions", [])]
+    if "fail" in severities:
+        return "fail"
+    if severities or any(data.get(key) for key in ("priority_ambiguities", "meta_paradoxes", "absoluteness_issues")):
+        return "warn"
+    return "pass"
 
 
 _NOT_CHECKED = "Nothing was checked, so this says nothing about the prompt's content."
@@ -235,13 +264,14 @@ def _audit_text(asset: InstructionAsset) -> AssetAudit:
     data = report.to_dict()
     rule_count = data.get("rule_count", 0)
     risk_label = data.get("risk_label", "")
+    inline = asset.kind == "inline_prompt"
 
     return AssetAudit(
         label=asset.label,
         source=asset.source,
         kind=asset.kind,
         chars=len(asset.text),
-        status=_status_for(risk_label, rule_count),
+        status=_inline_status(data) if inline else _status_for(risk_label, rule_count),
         risk_label=risk_label,
         risk_score=data.get("risk_score", 0.0),
         rule_count=rule_count,
@@ -251,8 +281,8 @@ def _audit_text(asset: InstructionAsset) -> AssetAudit:
         absoluteness_issues=data.get("absoluteness_issues", []),
         gaps=data.get("gaps", []),
         note=(
-            "rule-audit parsed no rules from this text, so nothing was checked. "
-            "The coverage gaps below are reported against an empty rule set."
+            "rule-audit parsed no rules from this text, so nothing was checked."
+            + ("" if inline else " The coverage gaps below are reported against an empty rule set.")
             if rule_count == 0
             else ""
         ),

@@ -67,6 +67,17 @@ def _text(value: object) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("`", "\\`")
 
 
+def _code(value: object) -> str:
+    """Render untrusted text as an inline code span.
+
+    Code-span content is literal in CommonMark and `marked` — no Markdown,
+    and HTML is escaped — so the only ways out are a backtick closing the
+    span early or a blank line ending the paragraph. Both are removed rather
+    than escaped, because backslash escapes do not apply inside a code span.
+    """
+    return "`" + _sanitize_table_cell(str(value)).replace("`", "'") + "`"
+
+
 def _fence(body: str) -> list[str]:
     """Wrap untrusted multi-line text in a code fence long enough to hold it.
 
@@ -125,10 +136,13 @@ def _headline(asset: AssetAudit) -> str:
 def _render_asset(asset: AssetAudit) -> list[str]:
     lines: list[str] = [f"### {_text(asset.label)}\n"]
 
-    meta = [f"Source: {asset.source}", f"{asset.chars:,} chars"]  # source is repo-generated, not prompt text
+    # `source` embeds schema names from the uploaded export — never raw.
+    meta = [f"Source: {_code(asset.source)}", f"{asset.chars:,} chars"]
     if asset.rule_count:
         meta.append(f"{asset.rule_count} rules parsed")
-    if asset.risk_label:
+    if not asset.uses_composite_risk:
+        meta.append("scored on rule-level findings only — system-prompt risk score and coverage gaps do not apply")
+    elif asset.risk_label:
         meta.append(f"rule-audit risk: **{asset.risk_label}** ({asset.risk_score:.0f}/100)")
     lines.append(" · ".join(meta) + "\n")
 
@@ -196,19 +210,20 @@ def _render_asset(asset: AssetAudit) -> list[str]:
         lines.append("")
         lines.extend(_more(len(shown), len(asset.absoluteness_issues), "absoluteness challenges"))
 
-    if asset.gaps:
+    gaps = asset.gaps if asset.uses_composite_risk else []
+    if gaps:
         lines.append(
-            f"<details><summary>Coverage gaps — {len(asset.gaps)} topic"
-            f"{'s' if len(asset.gaps) != 1 else ''} the prompt never addresses (advisory)</summary>\n"
+            f"<details><summary>Coverage gaps — {len(gaps)} topic"
+            f"{'s' if len(gaps) != 1 else ''} the prompt never addresses (advisory)</summary>\n"
         )
-        for g in asset.gaps[:MAX_ROWS_PER_FAMILY]:
+        for g in gaps[:MAX_ROWS_PER_FAMILY]:
             lines.append(f"- **{_text(g.get('gap_type', '—'))}** — {_text(g.get('description', ''))}")
             example = g.get("example_scenario")
             if example:
                 lines.append(f"  - _{_text(example)}_")
         lines.append("\n</details>\n")
 
-    if asset.status != "unknown" and not asset.evidence_count and not asset.gaps:
+    if asset.status != "unknown" and not asset.evidence_count and not gaps:
         lines.append("_No findings._\n")
 
     return lines
